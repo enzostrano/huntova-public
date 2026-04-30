@@ -1,0 +1,1005 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#07080c">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<title>Huntova · Find clients while you sleep</title>
+<meta name="robots" content="noindex, nofollow">
+<link rel="icon" type="image/png" sizes="32x32" href="/static/favicon-32x32.png">
+<link rel="manifest" href="/manifest.json">
+<link rel="apple-touch-icon" sizes="180x180" href="/static/apple-touch-icon.png">
+<link rel="preconnect" href="https://api.fontshare.com" crossorigin>
+<link href="https://api.fontshare.com/v2/css?f[]=satoshi@400,500,600,700&display=swap" rel="stylesheet">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Geist+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/static/style.css?v=23">
+</head>
+<body>
+<div class="app">
+  <!-- Email verification — SaaS-only (local CLI users have no email).
+       hv-saas-only + hv-auth-only both gate this; either flag false hides it. -->
+  <div class="verify-banner hv-saas-only hv-auth-only" id="verifyBanner" style="display:none">
+    <span>Please verify your email address to unlock all features.</span>
+    <button onclick="resendVerification(this)">Resend email</button>
+    <button class="vb-dismiss" onclick="this.parentElement.style.display='none'" aria-label="Dismiss">&#10005;</button>
+  </div>
+  <div class="slv-banner" id="slvBanner" style="display:none" aria-hidden="true">
+    <span class="slv-icon">🎯</span>
+    <span><b class="slv-count"></b> new leads found since your last visit</span>
+    <button onclick="this.parentElement.style.display='none'" class="slv-dismiss" aria-label="Dismiss">&#10005;</button>
+  </div>
+  <!-- First-run empty state — fires when /api/account reports no provider configured.
+       Two paths: 🪄 Auto Wizard (newbie) opens /setup. "Configure in Settings" (pro) opens the modal.
+       Hidden once any provider is saved (hvLoadAccount sets display:none then). -->
+  <div class="hv-onboard-banner" id="hvOnboardBanner" style="display:none;background:linear-gradient(180deg,rgba(124,92,255,.10),rgba(124,92,255,.03));border-bottom:1px solid rgba(124,92,255,.3);padding:14px 20px;align-items:center;gap:14px;font-size:14px;color:var(--t1);flex-wrap:wrap">
+    <span style="font-size:18px">🪄</span>
+    <div style="flex:1;min-width:240px">
+      <b>Welcome to Huntova.</b> No AI provider configured yet — pick how to set up:
+    </div>
+    <button onclick="window.location.href='/setup'" style="padding:8px 16px;font-size:13px;background:var(--acc,#7c5cff);color:#fff;border:none;border-radius:8px;cursor:pointer;font-weight:600;font-family:inherit">🪄 Auto Wizard</button>
+    <button onclick="openSettings()" style="padding:8px 16px;font-size:13px;background:transparent;color:var(--t1,#eef0f4);border:1px solid var(--bd2,#272b35);border-radius:8px;cursor:pointer;font-family:inherit">Configure in Settings</button>
+    <button onclick="this.parentElement.style.display='none'" aria-label="Dismiss" style="background:transparent;border:none;color:var(--t3,#5d6679);cursor:pointer;padding:4px 8px;font-size:14px">&#10005;</button>
+  </div>
+  <nav class="topnav">
+    <div class="topnav-inner">
+      <div class="topnav-left">
+        <div class="dot dot-off" id="dot"></div>
+        <span class="topnav-logo">Hunt<span>ova</span></span>
+      </div>
+      <div class="topnav-centre">
+        <nav class="nav" aria-label="Main navigation">
+          <button class="nav-btn on" data-page="dash" type="button">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
+            <span class="nb-label">Dashboard</span>
+          </button>
+          <div class="nav-sep"></div>
+          <button class="nav-btn" data-page="crm" type="button">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+            <span class="nb-label">Leads</span>
+          </button>
+          <div class="nav-sep"></div>
+          <button class="nav-btn" data-page="hunts" type="button">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4.5 16.5c-1.5 1.26-2 5-2 5s3.74-.5 5-2c.71-.84.7-2.13-.09-2.91a2.18 2.18 0 0 0-2.91-.09Z"/><path d="m12 15-3-3a22 22 0 0 1 2-3.95A12.88 12.88 0 0 1 22 2c0 2.72-.78 7.5-6 11a22.35 22.35 0 0 1-4 2Z"/><path d="M9 12H4s.55-3.03 2-4c1.62-1.08 5 0 5 0"/><path d="M12 15v5s3.03-.55 4-2c1.08-1.62 0-5 0-5"/></svg>
+            <span class="nb-label">Hunts</span>
+          </button>
+        </nav>
+      </div>
+      <div class="topnav-right">
+        <div class="top-prog" id="topProg" style="display:none">
+          <span class="tp-pct" id="tpPct">0%</span>
+          <div class="tp-bar"><div class="tp-fill" id="tpF"></div></div>
+          <span class="tp-detail" id="tpDetail"></span>
+        </div>
+        <div class="tb-agent-controls">
+          <button class="btn btn-primary btn-sm tbtn tbtn-go" id="btnGo" onclick="openStartPopup()">▶ Start</button>
+          <button class="btn btn-secondary btn-sm tbtn tbtn-pause" id="btnPa" onclick="togglePause()" style="display:none" aria-label="Pause hunt">⏸</button>
+          <button class="btn btn-danger btn-sm tbtn tbtn-stop" id="btnSt" onclick="confirmStop()" style="display:none" aria-label="Stop hunt">■</button>
+        </div>
+        <!-- Credits pill — SaaS-billing-only. JS hides this in local mode
+             too, but the explicit class prevents a first-paint flash. -->
+        <button class="topnav-credits hv-billing-only" id="hvCreditsBtn" onclick="hvOpenPricing()" style="visibility:hidden">
+          💳 <span id="hvCredits">—</span> credits
+        </button>
+        <div class="um" id="userMenu">
+          <button class="topnav-avatar" id="userAvatar" onclick="toggleUserMenu()" aria-label="Open menu" aria-expanded="false">
+            <!-- Default: gear icon (sensible for a local CLI tool). SaaS mode replaces this with the user's avatar/initial via hvLoadAccount(). -->
+            <svg class="hv-local-gear" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+          </button>
+          <div class="um-drop" id="userMenuDrop">
+            <!-- Profile / email / plan only render in SaaS mode (hv-saas-only) -->
+            <div class="um-profile hv-saas-only">
+              <div class="um-avatar-lg" id="umAvatarLg">U</div>
+              <div class="um-profile-info">
+                <div class="um-name" id="umdName" style="visibility:hidden">User</div>
+                <div class="um-email" id="umdEmail" style="visibility:hidden">user@email.com</div>
+              </div>
+            </div>
+            <div class="um-plan-card hv-billing-only" onclick="hvOpenPricing();toggleUserMenu()">
+              <div class="um-plan-row">
+                <span class="um-plan-badge" id="umdTier" style="visibility:hidden">FREE</span>
+                <span class="um-plan-leads" style="visibility:hidden"><span id="umdCredits2">—</span> leads left</span>
+              </div>
+              <div class="um-plan-bar"><div class="um-plan-fill" id="umdFill" style="width:0%"></div></div>
+            </div>
+            <div class="um-section">
+              <a class="um-row hv-billing-only" href="/account">Account</a>
+              <button class="um-row" onclick="openSettings();toggleUserMenu()">Settings</button>
+            </div>
+            <div class="um-section">
+              <button class="um-row" onclick="wizReopen();toggleUserMenu()">Retrain AI</button>
+              <a class="um-row" href="/api/export/csv">Export CSV</a>
+            </div>
+            <div class="um-section um-section-last">
+              <button class="um-row um-logout hv-auth-only" onclick="hvLogout()">Log out</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </nav>
+
+  <!-- CRM -->
+  <div class="page crm" id="pg-crm">
+    <div class="crm-stats" id="crmStats"></div>
+    <!-- Action Queue removed — hot leads surfaced via sort + inline badges -->
+    <!-- Results panel removed — hunt completion handled by Hunts done screen -->
+    <div class="crm-tb"><div class="crm-tbr">
+      <label for="fQ" class="sr-only">Search leads</label>
+      <input type="text" id="fQ" data-tip="Search across names, events, locations — press / to focus" placeholder="Search leads... ( / )" aria-label="Search leads, press slash to focus"/>
+      <label for="fCo" class="sr-only">Filter by country</label>
+      <select id="fCo" data-tip="Filter by country" aria-label="Filter by country"><option value="">All Countries</option></select>
+      <label for="fCi" class="sr-only">Filter by city</label>
+      <select id="fCi" data-tip="Filter by city" aria-label="Filter by city"><option value="">All Cities</option></select>
+      <label for="fSt" class="sr-only">Filter by status</label>
+      <select id="fSt" data-tip="Filter by status" aria-label="Filter by status"><option value="">All Statuses</option>
+        <option value="new">New</option><option value="email_sent">Email Sent</option>
+        <option value="followed_up">Followed Up</option><option value="replied">Replied</option>
+        <option value="meeting_booked">Meeting Booked</option><option value="won">Won</option>
+        <option value="lost">Lost</option><option value="ignored">Ignored</option></select>
+      <label for="fSo" class="sr-only">Sort leads</label>
+      <select id="fSo" data-tip="Sort leads" aria-label="Sort leads"><option value="hot">Hottest First</option><option value="nd">Newest First</option><option value="sd">Score ↓</option><option value="sa">Score ↑</option><option value="od">Oldest First</option>
+        <option value="co">Country A→Z</option><option value="oa">Organisation A→Z</option>
+        <option value="oz">Organisation Z→A</option><option value="ea">Has Email First</option>
+        <option value="ra">Ongoing Need First</option><option value="pr">Priority ↓</option></select>
+      <button class="fb" id="fLi" data-tip="LinkedIn filter" aria-label="Filter by LinkedIn status">LinkedIn: All</button>
+      <button class="fb" id="fEm" data-tip="Email filter" aria-label="Filter by email availability">Email: All</button>
+      <button class="fb" onclick="exportCSV()" data-tip="Export CSV" style="margin-left:auto" aria-label="Export leads to CSV">Export</button>
+      <button class="btn btn-ghost btn-sm fb fb-r" id="fRs" data-tip="Clear all filters" aria-label="Reset all filters">Reset</button>
+      <span class="cnt" aria-live="polite"><b id="cCnt">0</b> shown</span>
+    </div></div>
+    <div class="bulk-bar" id="bulkBar" style="display:none">
+      <label class="bulk-sel-all"><input type="checkbox" id="bulkAll" onchange="toggleBulkAll(this.checked)" aria-label="Select all visible leads"> All</label>
+      <span class="bulk-cnt" id="bulkCnt">0 selected</span>
+      <select id="bulkSt" aria-label="Bulk status change">
+        <option value="">Set status...</option>
+        <option value="email_sent">Email Sent</option><option value="followed_up">Followed Up</option>
+        <option value="replied">Replied</option><option value="meeting_booked">Meeting</option>
+        <option value="won">Won</option><option value="lost">Lost</option><option value="ignored">Ignored</option>
+      </select>
+      <button class="fb" onclick="applyBulkStatus()" aria-label="Apply status to selected">Apply</button>
+      <button class="btn btn-ghost btn-sm fb fb-r" onclick="clearBulkSelection()" aria-label="Cancel selection">Cancel</button>
+    </div>
+    <div class="crm-list">
+      <div class="crm-list-hdr">
+        <h3>Leads</h3>
+        <span id="allCnt"></span>
+        <span class="crm-session-badge" id="sessionBadge" style="display:none"><span class="live-dot"></span> <span id="sessionCnt">0</span> new this session</span>
+      </div>
+      <div class="crm-body" role="grid" aria-label="All leads"><div class="crm-thead" role="row"><div class="crm-th" role="columnheader">Score</div><div class="crm-th" role="columnheader">Organisation</div><div class="crm-th" role="columnheader">Context</div><div class="crm-th" role="columnheader">Location</div><div class="crm-th" role="columnheader">Type</div><div class="crm-th" role="columnheader">Status</div><div class="crm-th" role="columnheader"></div></div><div class="rows" id="crmRows"></div>
+        <div class="crm-empty" id="crmEmpty">
+          <div class="crm-empty-icon">🎯</div>
+          <div class="crm-empty-title">Your pipeline is empty</div>
+          <div class="crm-empty-desc">Start a hunt and Huntova will search the web, score prospects, find contacts and draft personalised emails. Typical hunt takes 3–8 minutes and delivers 5–15 qualified leads.</div>
+          <ul class="crm-empty-steps">
+            <li>Pick your target countries — select fewer for a focused hunt, more for a wider net.</li>
+            <li class="hv-billing-only">One credit is used per qualified lead found (not per page checked).</li>
+            <li>Each qualified lead costs ~$0.04 of API spend on your AI provider (Claude default — see <code>huntova benchmark</code> to compare).</li>
+            <li>Keep this tab open while the hunt runs — closing it pauses progress updates.</li>
+          </ul>
+          <button class="crm-empty-btn" onclick="openStartPopup()">Start Finding Leads</button>
+          <div class="crm-empty-footnote">First time? <a href="#" onclick="event.preventDefault();wizReopen()">Run the wizard first</a> so the agent knows what a good lead looks like for you.</div>
+        </div></div>
+    </div>
+  </div>
+
+  <!-- DASHBOARD -->
+  <div class="page dash on" id="pg-dash">
+    <div class="dash">
+      <!-- Hero — Clean command center -->
+      <div class="dash-hero">
+        <div class="dash-hero-bg"></div>
+        <div class="dash-hero-content">
+          <div>
+            <h1 class="dash-greeting-hi" id="dashHi">Good morning! 👋</h1>
+            <p class="dash-greeting-sub">Ready to find your next clients</p>
+          </div>
+          <button class="btn-primary btn-lg" onclick="openStartPopup()">Start a Hunt</button>
+        </div>
+      </div>
+
+      <!-- Quick Actions — The main thing you do first -->
+      <div class="quick-actions">
+        <div class="qa-card qa-primary" role="button" tabindex="0" aria-label="Find leads — start a new hunt" onclick="openStartPopup()" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();openStartPopup()}">
+          <div class="qa-ic stat-ic-teal">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4.5 16.5c-1.5 1.26-2 5-2 5s3.74-.5 5-2c.71-.84.7-2.13-.09-2.91a2.18 2.18 0 0 0-2.91-.09Z"/><path d="m12 15-3-3a22 22 0 0 1 2-3.95A12.88 12.88 0 0 1 22 2c0 2.72-.78 7.5-6 11a22.35 22.35 0 0 1-4 2Z"/><path d="M9 12H4s.55-3.03 2-4c1.62-1.08 5 0 5 0"/><path d="M12 15v5s3.03-.55 4-2c1.08-1.62 0-5 0-5"/></svg>
+          </div>
+          <div class="qa-text">
+            <div class="qa-title">Find Leads</div>
+            <div class="qa-desc">Start a new hunt</div>
+          </div>
+        </div>
+        <div class="qa-card" role="button" tabindex="0" aria-label="Your leads — CRM and outreach" onclick="document.querySelector('[data-page=crm]').click()" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();document.querySelector('[data-page=crm]').click()}">
+          <div class="qa-ic stat-ic-blu">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+          </div>
+          <div class="qa-text">
+            <div class="qa-title">Your Leads</div>
+            <div class="qa-desc">CRM &amp; outreach</div>
+          </div>
+        </div>
+        <div class="qa-card" role="button" tabindex="0" aria-label="Train the AI — refine your profile" onclick="wizReopen()" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();wizReopen()}">
+          <div class="qa-ic stat-ic-pur">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5a3 3 0 1 0-5.997.125 4 4 0 0 0-2.526 5.77 4 4 0 0 0 .556 6.588A4 4 0 1 0 12 18Z"/><path d="M12 5a3 3 0 1 1 5.997.125 4 4 0 0 1 2.526 5.77 4 4 0 0 1-.556 6.588A4 4 0 1 1 12 18Z"/><path d="M15 13a4.5 4.5 0 0 1-3-4 4.5 4.5 0 0 1-3 4"/><path d="M17.599 6.5a3 3 0 0 0 .399-1.375"/><path d="M6.003 5.125A3 3 0 0 0 6.401 6.5"/><path d="M3.477 10.896a4 4 0 0 1 .585-.396"/><path d="M19.938 10.5a4 4 0 0 1 .585.396"/><path d="M6 18a4 4 0 0 1-1.967-.516"/><path d="M19.967 17.484A4 4 0 0 1 18 18"/></svg>
+          </div>
+          <div class="qa-text">
+            <div class="qa-title">Train AI</div>
+            <div class="qa-desc">Refine your profile</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Key Metrics — Just the 4 most important numbers -->
+      <div class="dash-stats">
+        <div class="stat-card">
+          <div class="stat-ic stat-ic-teal">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/></svg>
+          </div>
+          <div class="stat-label">Total Leads</div>
+          <div class="dash-big" id="dTotal">0</div>
+          <div class="stat-sub"><span id="dEmail">0</span> with email</div>
+        </div>
+        <div class="stat-card hv-billing-only">
+          <div class="stat-ic stat-ic-org">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="20" height="14" x="2" y="5" rx="2"/><line x1="2" x2="22" y1="10" y2="10"/></svg>
+          </div>
+          <div class="stat-label">Credits Left</div>
+          <div class="dash-big" id="dCredits">—</div>
+          <div class="stat-bar-wrap"><div class="stat-bar" id="dCreditsBar" style="width:50%"></div></div>
+        </div>
+        <div class="stat-card hv-local-only">
+          <div class="stat-ic stat-ic-org">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2 2 7l10 5 10-5-10-5Z"/><path d="m2 17 10 5 10-5"/><path d="m2 12 10 5 10-5"/></svg>
+          </div>
+          <div class="stat-label">Providers</div>
+          <div class="dash-big" id="dProvidersCount">—</div>
+          <div class="stat-sub" id="dProvidersSub">Configure in Settings</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-ic stat-ic-blu">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m22 2-7 20-4-9-9-4Z"/><path d="M22 2 11 13"/></svg>
+          </div>
+          <div class="stat-label">Emailed</div>
+          <div class="dash-big" id="dEmailed">0</div>
+          <div class="stat-sub"><span id="dEmailRate">0%</span> of total</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-ic stat-ic-pur">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7.9 20A9 9 0 1 0 4 16.1L2 22Z"/></svg>
+          </div>
+          <div class="stat-label">Replies</div>
+          <div class="dash-big" id="dReplied">0</div>
+          <div class="stat-sub"><span id="dReplyRate">0%</span> reply rate</div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- HUNTS -->
+  <div class="page hunts" id="pg-hunts">
+    <!-- Idle state: shown when no hunt is running. Zero-state activation
+         wedge (Perplexity round 60): make first-session intent obvious by
+         showing example output BEFORE the user spends a credit. -->
+    <div class="hunt-idle" id="huntIdle">
+      <div class="hunt-idle-icon">
+        <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="var(--acc)" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4.5 16.5c-1.5 1.26-2 5-2 5s3.74-.5 5-2c.71-.84.7-2.13-.09-2.91a2.18 2.18 0 0 0-2.91-.09Z"/><path d="m12 15-3-3a22 22 0 0 1 2-3.95A12.88 12.88 0 0 1 22 2c0 2.72-.78 7.5-6 11a22.35 22.35 0 0 1-4 2Z"/><path d="M9 12H4s.55-3.03 2-4c1.62-1.08 5 0 5 0"/><path d="M12 15v5s3.03-.55 4-2c1.08-1.62 0-5 0-5"/></svg>
+      </div>
+      <h2 class="hunt-idle-title">Ready to find clients</h2>
+      <p class="hunt-idle-desc">Press start. Huntova searches the web, scores prospects across 5 dimensions, drafts outreach, and streams qualified leads here in 3–8 minutes.</p>
+
+      <div class="hunt-idle-actions">
+        <button class="btn btn-primary btn-lg" onclick="launchHuntQuickStart()">▶ Start your first hunt</button>
+        <button class="btn btn-ghost" onclick="openStartPopup()">Customise countries first</button>
+      </div>
+
+      <!-- Example output preview — labelled clearly so testers don't
+           confuse this with real data. -->
+      <div class="hunt-idle-preview" aria-label="Example output">
+        <div class="hunt-idle-preview-hdr">
+          <span class="hunt-idle-preview-label">Example output</span>
+          <span class="hunt-idle-preview-sub">A typical hunt returns 5–15 leads like these</span>
+        </div>
+        <div class="hunt-idle-cards">
+          <div class="hunt-idle-card">
+            <div class="hunt-idle-card-top">
+              <div class="hunt-idle-card-org">Aurora Studios</div>
+              <div class="hunt-idle-card-fit">Fit 9/10</div>
+            </div>
+            <div class="hunt-idle-card-meta">aurora-studios.co · United Kingdom</div>
+            <div class="hunt-idle-card-why">Mid-size production house, recently launched a brand campaign, no in-house video team.</div>
+          </div>
+          <div class="hunt-idle-card">
+            <div class="hunt-idle-card-top">
+              <div class="hunt-idle-card-org">Tessera Marketing</div>
+              <div class="hunt-idle-card-fit">Fit 8/10</div>
+            </div>
+            <div class="hunt-idle-card-meta">tessera-mkt.com · France</div>
+            <div class="hunt-idle-card-why">Boutique agency hiring for content roles — strong signal for outsourced creative help.</div>
+          </div>
+          <div class="hunt-idle-card">
+            <div class="hunt-idle-card-top">
+              <div class="hunt-idle-card-org">Helio Production</div>
+              <div class="hunt-idle-card-fit">Fit 9/10</div>
+            </div>
+            <div class="hunt-idle-card-meta">helio-prod.de · Germany</div>
+            <div class="hunt-idle-card-why">Recurring event series, gap in their post-production pipeline, decision-maker contactable.</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="hunt-idle-steps" aria-label="How a hunt works">
+        <div class="hunt-idle-step"><span class="hunt-idle-step-n">1</span><span class="hunt-idle-step-t">Search</span><span class="hunt-idle-step-d">SearXNG sweeps Google, Bing, DuckDuckGo for matching prospects.</span></div>
+        <div class="hunt-idle-step"><span class="hunt-idle-step-n">2</span><span class="hunt-idle-step-t">Score</span><span class="hunt-idle-step-d">Your AI provider grades each candidate on fit, buyability, timing, reach.</span></div>
+        <div class="hunt-idle-step"><span class="hunt-idle-step-n">3</span><span class="hunt-idle-step-t">Draft</span><span class="hunt-idle-step-d">Personalised cold-email + LinkedIn note ready to send.</span></div>
+      </div>
+    </div>
+
+    <!-- Active state: shown while a hunt is running -->
+    <div class="hunt-active" id="huntActive" style="display:none">
+      <!-- Header with elapsed timer -->
+      <div class="hunt-active-hdr">
+        <div class="hunt-active-hdr-left">
+          <div class="hunt-active-dot"></div>
+          <span class="hunt-active-title">Hunt in progress</span>
+        </div>
+        <span class="hunt-elapsed" id="huntElapsed">0:00</span>
+      </div>
+
+      <!-- Keep-open warning: live while agent runs -->
+      <div class="hunt-keepopen" role="note">
+        <span class="hunt-keepopen-icon">⚠️</span>
+        <span class="hunt-keepopen-text"><strong>Keep this tab open.</strong> Closing Huntova while a hunt is running will stop progress updates.</span>
+      </div>
+
+      <!-- 6-stage progress rail -->
+      <div class="hunt-timeline" id="huntTimeline">
+        <div class="hunt-stage" data-stage="initializing">
+          <div class="hunt-stage-dot"></div>
+          <div class="hunt-stage-label">Creating</div>
+        </div>
+        <div class="hunt-stage-line"></div>
+        <div class="hunt-stage" data-stage="briefing">
+          <div class="hunt-stage-dot"></div>
+          <div class="hunt-stage-label">Briefing</div>
+        </div>
+        <div class="hunt-stage-line"></div>
+        <div class="hunt-stage" data-stage="planning">
+          <div class="hunt-stage-dot"></div>
+          <div class="hunt-stage-label">Planning</div>
+        </div>
+        <div class="hunt-stage-line"></div>
+        <div class="hunt-stage" data-stage="sourcing">
+          <div class="hunt-stage-dot"></div>
+          <div class="hunt-stage-label">Sourcing</div>
+        </div>
+        <div class="hunt-stage-line"></div>
+        <div class="hunt-stage" data-stage="scoring">
+          <div class="hunt-stage-dot"></div>
+          <div class="hunt-stage-label">Scoring</div>
+        </div>
+        <div class="hunt-stage-line"></div>
+        <div class="hunt-stage" data-stage="live_results">
+          <div class="hunt-stage-dot"></div>
+          <div class="hunt-stage-label">Results</div>
+        </div>
+      </div>
+
+      <!-- Current activity with microcopy. aria-live=polite so screen readers
+           announce state changes (e.g. "Scanning example.com") without
+           interrupting what the user is doing. -->
+      <div class="hunt-current" id="huntCurrent" aria-live="polite" aria-atomic="true">
+        <div class="hunt-current-dot" aria-hidden="true"></div>
+        <div class="hunt-current-content">
+          <span class="hunt-current-text" id="huntCurrentText">Creating hunt workspace</span>
+          <span class="hunt-current-sub" id="huntCurrentSub">This usually takes 5-15 seconds</span>
+        </div>
+      </div>
+
+      <!-- Skeleton artifact card — replaced by real data as it arrives -->
+      <div class="hunt-artifact" id="huntArtifact">
+        <div class="hunt-artifact-skeleton">
+          <div class="hunt-skel-line hunt-skel-w60"></div>
+          <div class="hunt-skel-line hunt-skel-w80"></div>
+          <div class="hunt-skel-line hunt-skel-w40"></div>
+        </div>
+      </div>
+
+      <!-- Hot lead hero card — appears when first strong lead arrives -->
+      <div class="hunt-hero" id="huntHero" style="display:none">
+        <div class="hunt-hero-hdr">
+          <span class="hunt-hero-badge">Best lead so far</span>
+          <button class="btn btn-ghost btn-sm" onclick="var l=_huntBestLead;if(l)openLeadPage(l.lead_id)">Open in CRM</button>
+        </div>
+        <div class="hunt-hero-body">
+          <div class="hunt-hero-score" id="huntHeroScore">0</div>
+          <div class="hunt-hero-info">
+            <div class="hunt-hero-name" id="huntHeroName"></div>
+            <div class="hunt-hero-why" id="huntHeroWhy"></div>
+            <div class="hunt-hero-evidence" id="huntHeroEvidence"></div>
+            <div class="hunt-hero-meta" id="huntHeroMeta"></div>
+          </div>
+        </div>
+        <div class="hunt-hero-actions">
+          <button class="btn btn-primary btn-sm" id="huntHeroCopy" onclick="huntCopyDraft()">Copy Email Draft</button>
+          <button class="btn btn-secondary btn-sm" onclick="huntGenerateFollowups()">Generate Follow-ups</button>
+          <button class="btn btn-ghost btn-sm hunt-fb-good" onclick="huntHeroFeedback('good',this)">Good Fit</button>
+          <button class="btn btn-ghost btn-sm hunt-fb-bad" onclick="huntHeroFeedback('bad',this)">Bad Fit</button>
+        </div>
+      </div>
+
+      <!-- Live summary cards -->
+      <div class="hunt-summary">
+        <div class="hunt-stat">
+          <div class="hunt-stat-val" id="huntLeadsFound">0</div>
+          <div class="hunt-stat-label">Leads Found</div>
+        </div>
+        <div class="hunt-stat hunt-stat-hot">
+          <div class="hunt-stat-val" id="huntHotLeads">0</div>
+          <div class="hunt-stat-label">Hot Leads</div>
+        </div>
+        <div class="hunt-stat">
+          <div class="hunt-stat-val" id="huntPagesChecked">0</div>
+          <div class="hunt-stat-label">Pages Checked</div>
+        </div>
+        <div class="hunt-stat">
+          <div class="hunt-stat-val" id="huntCreditsUsed">0</div>
+          <div class="hunt-stat-label">Credits Used</div>
+        </div>
+        <div class="hunt-stat">
+          <div class="hunt-stat-val" id="huntQueriesDone">0/0</div>
+          <div class="hunt-stat-label">Queries</div>
+        </div>
+      </div>
+
+      <!-- Lead discovery feed -->
+      <div class="hunt-feed" id="huntFeed">
+        <div class="hunt-feed-hdr">
+          <span class="hunt-feed-title">Discovered Leads</span>
+          <span class="hunt-feed-count"><span id="huntFeedCount">0</span> this session</span>
+        </div>
+        <div class="hunt-feed-body" id="huntFeedBody"></div>
+      </div>
+
+      <!-- Action bar -->
+      <div class="hunt-actions">
+        <button class="btn btn-primary" onclick="document.querySelector('[data-page=crm]').click()">Review Leads</button>
+        <button class="btn btn-secondary" onclick="exportCSV()">Export CSV</button>
+        <button class="btn btn-ghost hunt-pause-btn" id="huntPauseBtn" onclick="togglePause()" style="display:none">Pause</button>
+        <button class="btn btn-danger hunt-stop-btn" id="huntStopBtn" onclick="confirmStop()">Stop Hunt</button>
+      </div>
+    </div>
+
+    <!-- Completed state: shown after hunt finishes -->
+    <div class="hunt-done" id="huntDone" style="display:none">
+      <div class="hunt-done-icon">
+        <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="var(--grn)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
+      </div>
+      <h2 class="hunt-done-title">Hunt Complete</h2>
+      <p class="hunt-done-summary" id="huntDoneSummary"></p>
+      <div class="hunt-done-stats" id="huntDoneStats"></div>
+      <div class="hunt-done-actions">
+        <button class="btn btn-primary btn-lg" onclick="openBestLeadForEmail()">Send your first email</button>
+        <button class="btn btn-secondary" onclick="document.querySelector('[data-page=crm]').click()">Review all leads</button>
+        <button class="btn btn-secondary" onclick="openShareHuntModal()">Share results</button>
+        <button class="btn btn-secondary" onclick="openStartPopup()">Start another</button>
+      </div>
+    </div>
+  </div>
+  <!-- Lead Detail Full Page -->
+  <div class="page" id="pg-lead-detail" style="display:none">
+    <div class="lead-detail-page" id="leadDetailPage"></div>
+  </div>
+  </div>
+
+<!-- Lead Modal -->
+<div class="lead-modal-bg" id="leadModalBg" onclick="if(event.target===this)closeLeadModal()" role="dialog" aria-modal="true" aria-label="Lead details"><div class="lead-modal" id="leadModal"></div></div>
+
+<!-- Settings -->
+<div class="settings-modal" id="settingsModal" role="dialog" aria-modal="true" aria-label="Settings">
+  <div class="settings-box settings-box-wide">
+    <h3><span>⚙</span> Settings</h3>
+    <div class="settings-tabs-wrap">
+      <nav class="settings-vtabs" id="settingsVTabs" role="tablist" aria-orientation="vertical">
+        <button class="vtab on" data-tab="profile" role="tab" aria-selected="true" onclick="settingsTab('profile')">Profile</button>
+        <button class="vtab hv-local-only" data-tab="providers" role="tab" aria-selected="false" onclick="settingsTab('providers')">Providers</button>
+        <button class="vtab" data-tab="plugins" role="tab" aria-selected="false" onclick="settingsTab('plugins')">Plugins</button>
+        <button class="vtab" data-tab="webhooks" role="tab" aria-selected="false" onclick="settingsTab('webhooks')">Webhooks</button>
+        <button class="vtab" data-tab="outreach" role="tab" aria-selected="false" onclick="settingsTab('outreach')">Outreach</button>
+        <button class="vtab" data-tab="prefs" role="tab" aria-selected="false" onclick="settingsTab('prefs')">Preferences</button>
+        <button class="vtab" data-tab="account" role="tab" aria-selected="false" onclick="settingsTab('account')"><span class="hv-saas-only">Account / </span>Data</button>
+      </nav>
+      <div class="settings-tabpanels">
+        <!-- Profile (the original 5 fields + AI training + learned prefs) -->
+        <section class="vtab-panel on" data-panel="profile" role="tabpanel">
+          <div class="sf"><label for="sBooking">Booking Link</label>
+            <input id="sBooking" type="url" placeholder="https://calendly.com/your-company/30min" value="" maxlength="300" pattern="https?://.+" inputmode="url" autocomplete="url">
+            <div class="hint">Adds a booking link to every email CTA.</div></div>
+          <div class="sf"><label for="sName">Your Name</label><input id="sName" type="text" placeholder="Your name" maxlength="120" autocomplete="name"></div>
+          <div class="sf"><label for="sEmail">Your Email</label><input id="sEmail" type="email" placeholder="you@yourcompany.com" maxlength="200" inputmode="email" autocomplete="email"></div>
+          <div class="sf"><label for="sPhone">Phone</label><input id="sPhone" type="tel" placeholder="+1 555 123 4567" maxlength="40" inputmode="tel" autocomplete="tel" pattern="[0-9+()\-.\s]*"></div>
+          <div class="sf"><label for="sWebsite">Website</label><input id="sWebsite" type="text" placeholder="huntova.com" maxlength="200" inputmode="url" autocomplete="url"></div>
+          <div class="sf">
+            <label>AI Training</label>
+            <div class="hint" style="margin-bottom:10px">Update what Huntova knows about your business.</div>
+            <button class="btn btn-secondary cb retrain-btn" onclick="wizReopen()">Retrain</button>
+          </div>
+          <div class="sf">
+            <label>Learned Preferences</label>
+            <div class="hint" style="margin-bottom:10px">What Huntova has learned from your Good Fit / Bad Fit ratings.</div>
+            <div id="learnedPrefsPanel"></div>
+          </div>
+        </section>
+        <!-- Providers tab — local mode BYOK key management. Mirrors /setup wizard
+             for users who'd rather edit keys without ejecting from the dashboard. -->
+        <section class="vtab-panel hv-local-only" data-panel="providers" role="tabpanel" hidden>
+          <div class="hint" style="margin-bottom:14px">Configure the AI providers Huntova uses. Keys are stored in your OS keychain (or <code>~/.config/huntova/secrets.json</code> as a fallback) — never sent anywhere except the provider you target. Run <code>huntova benchmark</code> to compare cost / latency.</div>
+          <div id="hvProvidersList" style="display:flex;flex-direction:column;gap:10px"></div>
+          <div class="sf" style="margin-top:18px;padding-top:14px;border-top:1px solid var(--bd)">
+            <label>Need help picking?</label>
+            <div class="hint" style="margin-bottom:10px">The 🪄 Auto Wizard walks you through provider selection, key entry, and a 1-shot test ping.</div>
+            <button class="btn btn-secondary cb retrain-btn" onclick="window.open('/setup','_blank')">Open Auto Wizard ↗</button>
+          </div>
+        </section>
+        <!-- Plugins tab -->
+        <section class="vtab-panel" data-panel="plugins" role="tabpanel" hidden>
+          <div class="hint" style="margin-bottom:14px">Toggle bundled plugins. Inline config (CSV path, Slack webhook) saves with the same Save button. Secrets are stored in your OS keychain, never in plain settings.</div>
+          <div id="pluginsList"></div>
+        </section>
+        <!-- Webhooks tab -->
+        <section class="vtab-panel" data-panel="webhooks" role="tabpanel" hidden>
+          <div class="hint" style="margin-bottom:14px">Generic outbound webhook. Fires <code>post_save</code> when a new lead is written. Payload is HMAC-SHA256-signed with your secret in the <code>X-Huntova-Signature</code> header.</div>
+          <div class="sf"><label for="sWebhookUrl">Webhook URL</label>
+            <input id="sWebhookUrl" type="url" placeholder="https://hooks.example.com/huntova" maxlength="500" inputmode="url" autocomplete="off">
+            <div class="hint" id="sWebhookUrlErr" style="color:var(--red);display:none"></div></div>
+          <div class="sf"><label for="sWebhookSecret">Webhook secret (HMAC)</label>
+            <input id="sWebhookSecret" type="password" placeholder="leave blank to keep existing" maxlength="200" autocomplete="off">
+            <div class="hint" id="sWebhookSecretHint">Stored in OS keychain.</div></div>
+          <div class="sf">
+            <button class="btn btn-secondary cb retrain-btn" onclick="testWebhook(this)">Test webhook</button>
+            <span id="sWebhookResult" class="settings-test-result"></span>
+          </div>
+        </section>
+        <!-- Outreach (SMTP) tab -->
+        <section class="vtab-panel" data-panel="outreach" role="tabpanel" hidden>
+          <div class="hint" style="margin-bottom:14px">SMTP credentials Huntova uses to send outreach drafts. Password lives in your OS keychain.</div>
+          <div class="sf"><label for="sSmtpHost">SMTP Host</label>
+            <input id="sSmtpHost" type="text" placeholder="smtp.gmail.com" maxlength="200" autocomplete="off"></div>
+          <div class="sf"><label for="sSmtpPort">SMTP Port</label>
+            <input id="sSmtpPort" type="number" min="1" max="65535" step="1" inputmode="numeric" placeholder="587" autocomplete="off">
+            <div class="hint" id="sSmtpPortErr" style="color:var(--red);display:none"></div></div>
+          <div class="sf"><label for="sSmtpUser">SMTP User</label>
+            <input id="sSmtpUser" type="text" placeholder="you@gmail.com" maxlength="200" autocomplete="off"></div>
+          <div class="sf"><label for="sSmtpPassword">SMTP Password</label>
+            <input id="sSmtpPassword" type="password" placeholder="leave blank to keep existing" maxlength="200" autocomplete="off">
+            <div class="hint" id="sSmtpPasswordHint">Stored in OS keychain.</div></div>
+          <div class="sf">
+            <button class="btn btn-secondary cb retrain-btn" onclick="testSmtp(this)">Test SMTP</button>
+            <span id="sSmtpResult" class="settings-test-result"></span>
+          </div>
+        </section>
+        <!-- Preferences tab -->
+        <section class="vtab-panel" data-panel="prefs" role="tabpanel" hidden>
+          <div class="sf"><label for="sTheme">Theme</label>
+            <select id="sTheme">
+              <option value="system">Match system</option>
+              <option value="dark">Dark</option>
+              <option value="light">Light</option>
+            </select>
+            <div class="hint">Light mode is best-effort on a dark-first UI; some accents may look slightly off.</div></div>
+          <div class="sf">
+            <label class="vtab-check"><input id="sReducedMotion" type="checkbox"> Reduce motion (suppress slide / fade animations)</label>
+          </div>
+          <div class="sf">
+            <label class="vtab-check"><input id="sTelemetry" type="checkbox" checked> Send anonymous usage metrics (default on)</label>
+            <div class="hint">Counts of agent runs and feature usage. Never lead content, never PII.</div>
+          </div>
+        </section>
+        <!-- Account / Data tab -->
+        <section class="vtab-panel" data-panel="account" role="tabpanel" hidden>
+          <div class="sf">
+            <label>Download my data</label>
+            <div class="hint" style="margin-bottom:10px">Bundle of settings, hunt profile (DNA), every lead, and your audit trail. Local mode only.</div>
+            <button class="btn btn-secondary cb retrain-btn" onclick="downloadAccountBundle(this)">Download bundle (.json)</button>
+          </div>
+          <div class="sf sf-separator">
+            <label style="color:var(--red)">Delete all my data</label>
+            <div class="hint" style="margin-bottom:10px">Permanently removes every lead in your local database. This cannot be undone.</div>
+            <button class="btn cb cb-s" style="border-color:rgba(239,68,68,.4);color:#f87171" onclick="deleteAllMyData(this)">Delete all my data</button>
+          </div>
+        </section>
+      </div>
+    </div>
+    <div class="settings-actions">
+      <button class="btn btn-primary cb cb-b" onclick="saveSettings()">Save</button>
+      <button class="btn btn-ghost cb cb-s" onclick="closeSettings()">Cancel</button>
+    </div>
+  </div>
+</div>
+
+<!-- Start Popup -->
+<div class="start-bg" id="startBg" onclick="if(event.target===this)closeStartPopup()" role="dialog" aria-modal="true" aria-label="Launch Huntova">
+  <div class="start-box">
+    <div class="start-hdr">
+      <div class="start-icon">H</div>
+      <div class="start-speech">
+        <div class="start-speech-title">Start Hunting</div>
+        Select your <b>target countries</b> and Huntova will keep finding qualified leads until you stop it<span class="hv-billing-only"> or credits run out</span>.
+      </div>
+    </div>
+    <div class="start-sec">
+      <div class="start-sec-t">Target Countries</div>
+      <div class="start-countries" id="startCountries"></div>
+    </div>
+    <div class="start-sec">
+      <div class="start-sec-t">Hunt Budget <span style="color:var(--t3);font-weight:500;letter-spacing:0;text-transform:none">(optional — leave empty for unlimited)</span></div>
+      <div class="start-opts">
+        <div class="start-opt">
+          <label for="startMaxLeads">Max leads this hunt</label>
+          <input id="startMaxLeads" type="number" min="1" max="500" step="1" inputmode="numeric" placeholder="unlimited" autocomplete="off" style="padding:9px 12px;background:var(--bg2);border:1px solid var(--bd);border-radius:var(--r);color:var(--t1);font-size:14px;font-family:var(--mono)">
+        </div>
+        <div class="start-opt">
+          <label for="startTimeoutMin">Stop after N minutes</label>
+          <input id="startTimeoutMin" type="number" min="1" max="120" step="1" inputmode="numeric" placeholder="unlimited" autocomplete="off" style="padding:9px 12px;background:var(--bg2);border:1px solid var(--bd);border-radius:var(--r);color:var(--t1);font-size:14px;font-family:var(--mono)">
+        </div>
+      </div>
+    </div>
+    <div class="start-summary" id="startSummary"></div>
+    <div class="start-actions">
+      <button class="btn btn-ghost start-cancel" onclick="closeStartPopup()">Cancel</button>
+      <button class="btn btn-primary btn-lg start-go" onclick="launchAgent()">▶ Start Hunting</button>
+    </div>
+  </div>
+</div>
+
+<!-- Toast -->
+<div class="toast" id="toast" role="alert" aria-live="assertive" aria-atomic="true"></div>
+
+<!-- Confirm Modal -->
+<div class="modal-bg" id="mBg" onclick="if(event.target===this)closeMod()" role="alertdialog" aria-modal="true" aria-labelledby="mT" aria-describedby="mM">
+  <div class="modal">
+    <button class="modal-close" onclick="closeMod()" aria-label="Close">×</button>
+    <h3 id="mT">Confirm</h3>
+    <div id="mM" class="modal-body"></div>
+    <div class="modal-btns"><button class="btn btn-ghost cb cb-s" onclick="closeMod()">Cancel</button><button class="btn btn-primary cb cb-b" id="mC">OK</button></div>
+  </div>
+</div>
+
+<!-- Share Hunt Modal -->
+<div class="modal-bg" id="shareHuntBg" onclick="if(event.target===this)closeShareHuntModal()" role="dialog" aria-modal="true" aria-labelledby="shareHuntTitle">
+  <div class="modal" style="max-width:520px">
+    <button class="modal-close" onclick="closeShareHuntModal()" aria-label="Close">×</button>
+    <h3 id="shareHuntTitle">Share these results</h3>
+    <div class="modal-body">
+      <div id="shareHuntForm">
+        <p style="color:var(--t2);margin:0 0 12px;font-size:13px">Creates a snapshot page with the top 10 leads. Local mode keeps the file on your machine; cloud mode publishes a shareable URL.</p>
+        <label for="shareHuntTitleInput" style="display:block;font-size:12px;color:var(--t2);margin-bottom:6px">Title (optional)</label>
+        <input id="shareHuntTitleInput" type="text" placeholder="e.g. Q2 prospects for Acme" maxlength="120" style="width:100%;padding:9px 12px;background:var(--bg2);border:1px solid var(--bd);border-radius:8px;color:var(--t1);font-size:14px" />
+        <p style="color:var(--t3);margin:10px 0 0;font-size:12px">Notes, drafts, and statuses stay private. You can delete the snapshot anytime.</p>
+      </div>
+      <div id="shareHuntResult" style="display:none">
+        <p style="color:var(--t2);margin:0 0 10px;font-size:13px">Your share is live. Copy the link or open it to preview.</p>
+        <div style="display:flex;gap:8px;align-items:center">
+          <input id="shareHuntUrl" type="text" readonly style="flex:1;padding:9px 12px;background:var(--bg2);border:1px solid var(--bd);border-radius:8px;color:var(--t1);font-size:13px;font-family:ui-monospace,SFMono-Regular,monospace" />
+          <button class="btn btn-secondary" onclick="copyShareHuntUrl()" id="shareHuntCopyBtn">Copy</button>
+        </div>
+        <a id="shareHuntOpen" href="#" target="_blank" rel="noopener" style="display:inline-block;margin-top:12px;color:var(--ac);font-size:13px">Open preview ↗</a>
+      </div>
+    </div>
+    <div class="modal-btns" id="shareHuntBtns">
+      <button class="btn btn-ghost cb cb-s" onclick="closeShareHuntModal()">Cancel</button>
+      <button class="btn btn-primary cb cb-b" id="shareHuntSubmit" onclick="submitShareHunt()">Create share link</button>
+    </div>
+  </div>
+</div>
+
+<!-- Neo Chat Widget -->
+<div class="neo-widget" id="neoWidget">
+  <div class="nw-hdr" id="nwHdr"><span class="nch-dot"></span> Huntova AI <span class="nw-lead" id="nwLead"></span><button class="nw-close" onclick="closeNeoWidget()" aria-label="Close chat">✕</button></div>
+  <div class="nw-msgs" id="nwMsgs" aria-live="polite"><div class="neo-chat-hint">Ask Huntova to edit the email, change tone, ask about the lead...</div></div>
+  <div class="nw-input"><label for="nwIn" class="sr-only">Chat message</label><input id="nwIn" placeholder="Ask anything..." onkeydown="if(event.key==='Enter')sendNeoWidget()"><button onclick="sendNeoWidget()" aria-label="Send message">Send</button></div>
+</div>
+
+<!-- Stub targets for app.js backward compatibility -->
+<div style="display:none"><span id="tcL"></span><span id="ntsProg"></span><span id="ntsPct"></span><span id="neoStatus"></span><span id="neoBotStatus"></span><span id="neoBotMsg"></span><span id="neoOrb"></span><span id="leadLogBody"></span><span id="xU"></span><span id="xQ"></span><span id="cDist"></span><span id="xE"></span><span id="xR"></span><span id="sDist"></span><span id="legPop"></span><span id="pPct"></span><span id="tcU"></span><span id="tcE"></span><div id="pF"></div><span id="pP"></span><span id="xL"></span><span id="xS"></span><span id="neoMsg"></span><span id="topSt"></span><span id="dotLabel"></span><span id="aLC"></span><span id="lvUrl"></span><span id="lvDot"></span><span id="lvCounter"></span><span id="lvImg"></span><span id="lvEmpty"></span><span id="lvPreview"></span><span id="lvFavicon"></span><span id="lvDomain"></span><span id="lvTitle"></span><span id="lvStatus"></span><span id="lvTs"></span><div id="logW"></div><span id="neoThoughts"></span><tbody id="aLTb"></tbody><div id="resPanel"><span id="resTitle"></span><span id="resStats"></span><span id="resLeads"></span></div><div id="actionQueue"></div></div>
+
+<!-- Wizard v6 — Card System -->
+<div class="iwiz" id="iwiz">
+  <div class="iwiz-progress" id="iwizProg" style="width:0"></div>
+  <button class="iwiz-close" onclick="iwClose()" aria-label="Close">&times;</button>
+  <!-- Briefing (shown first) -->
+  <div class="iwiz-inner" id="iwizBrief" style="display:none"></div>
+  <!-- Main workspace: cards + chat -->
+  <div class="iwiz-workspace" id="iwizWorkspace" style="display:none">
+    <!-- Section tabs -->
+    <div class="iwiz-tabs" id="iwizTabs"></div>
+    <!-- Two-panel layout -->
+    <div class="iwiz-panels">
+      <!-- Left: card form -->
+      <div class="iwiz-card-panel" id="iwizCards"></div>
+      <!-- Right: AI chat -->
+      <div class="iwiz-chat-panel">
+        <div class="iwiz-chat-head">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--acc)" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+          <span>AI Assistant</span>
+        </div>
+        <div class="iwiz-chat-msgs" id="iwizChatMsgs">
+          <div class="iwiz-chat-msg bot">I can help you write better answers. Ask me anything or say "improve my answer" and I'll make it more specific.</div>
+        </div>
+        <div class="iwiz-chat-input">
+          <input type="text" id="iwizChatIn" placeholder="Ask for help with any field..." onkeydown="if(event.key==='Enter')iwSendAssist()">
+          <button onclick="iwSendAssist()">Send</button>
+        </div>
+      </div>
+    </div>
+    <!-- Bottom nav -->
+    <div class="iwiz-bottom" id="iwizBottom"></div>
+  </div>
+</div>
+
+<!-- ═══ Left sidebar — OpenClaw-style grouped nav (v0.1.0a17) ═══ -->
+<aside class="hv-sidebar" id="hvSidebar" aria-label="Huntova navigation">
+  <div class="hv-sb-brand">
+    <div class="hv-sb-brand-row">
+      <div class="hv-sb-icon">🪤</div>
+      <div class="hv-sb-brand-text">
+        <div class="hv-sb-brand-kicker">CONTROL</div>
+        <div class="hv-sb-brand-name">Huntova</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="hv-sb-section">
+    <div class="hv-sb-section-h">CHAT</div>
+    <button class="hv-sb-row hv-sb-chat-row" onclick="hvChatToggle()">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+      <span>Chat</span>
+    </button>
+  </div>
+
+  <div class="hv-sb-section">
+    <div class="hv-sb-section-h">DASHBOARD</div>
+    <button class="hv-sb-row on" data-page="dash" onclick="hvSbGo('dash')">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
+      <span>Overview</span>
+    </button>
+    <button class="hv-sb-row" data-page="crm" onclick="hvSbGo('crm')">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/></svg>
+      <span>Leads</span>
+    </button>
+    <button class="hv-sb-row" data-page="hunts" onclick="hvSbGo('hunts')">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4.5 16.5c-1.5 1.26-2 5-2 5s3.74-.5 5-2c.71-.84.7-2.13-.09-2.91a2.18 2.18 0 0 0-2.91-.09Z"/><path d="m12 15-3-3a22 22 0 0 1 2-3.95A12.88 12.88 0 0 1 22 2c0 2.72-.78 7.5-6 11a22.35 22.35 0 0 1-4 2Z"/></svg>
+      <span>Hunts</span>
+    </button>
+  </div>
+
+  <div class="hv-sb-section">
+    <div class="hv-sb-section-h">AGENT</div>
+    <!-- Standalone pages — open in new tab so the dashboard shell stays put.
+         The ↗ icon hints "this leaves the dashboard." -->
+    <a class="hv-sb-row hv-sb-external" href="/plugins" target="_blank" rel="noopener">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
+      <span>Plugins</span>
+      <span class="hv-sb-ext-arrow">↗</span>
+    </a>
+    <a class="hv-sb-row hv-sb-external" href="/demo" target="_blank" rel="noopener">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+      <span>Recipes</span>
+      <span class="hv-sb-ext-arrow">↗</span>
+    </a>
+  </div>
+
+  <div class="hv-sb-section">
+    <div class="hv-sb-section-h">SETTINGS</div>
+    <button class="hv-sb-row" onclick="openSettings()">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/></svg>
+      <span>Config</span>
+    </button>
+    <a class="hv-sb-row hv-sb-external" href="/setup" target="_blank" rel="noopener">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2L2 7l10 5 10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg>
+      <span>Auto Wizard</span>
+      <span class="hv-sb-ext-arrow">↗</span>
+    </a>
+    <a class="hv-sb-row hv-sb-external" href="https://github.com/enzostrano/huntova-public" target="_blank" rel="noopener">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg>
+      <span>Docs</span>
+      <span class="hv-sb-ext-arrow">↗</span>
+    </a>
+  </div>
+
+  <div class="hv-sb-spacer"></div>
+
+  <div class="hv-sb-footer">
+    <span class="hv-sb-version">VERSION <b id="hvSbVer">0.1.0a17</b></span>
+    <span class="hv-sb-dot" title="Online"></span>
+  </div>
+</aside>
+
+<!-- ═══ Chat slideover (Ask Huntova) ═══ -->
+<aside class="hv-chat-panel" id="hvChatPanel" aria-hidden="true">
+  <div class="hv-chat-head">
+    <span>💬 Ask Huntova</span>
+    <button class="hv-chat-close" onclick="hvChatToggle()" aria-label="Close chat">&times;</button>
+  </div>
+  <div class="hv-chat-body" id="hvChatBody">
+    <div class="hv-chat-msg bot" id="hvChatHello">
+      <div>Hey. I'm your Huntova agent. Try:</div>
+      <div style="margin-top:8px"><span class="hv-chat-eg">find me 10 video studios in Berlin</span></div>
+      <div><span class="hv-chat-eg">show leads from Germany with fit &gt; 8</span></div>
+      <div><span class="hv-chat-eg">what does the score breakdown mean?</span></div>
+    </div>
+  </div>
+  <form class="hv-chat-input" onsubmit="event.preventDefault();hvChatSend()">
+    <input type="text" id="hvChatIn" placeholder="Ask me anything..." autocomplete="off">
+    <button type="submit" aria-label="Send">↵</button>
+  </form>
+</aside>
+
+<style id="hv-shell-overlay">
+.hv-sidebar{display:none}
+@media(min-width:900px){
+  .hv-sidebar{display:flex;flex-direction:column;
+    position:fixed;left:0;top:0;bottom:0;width:240px;
+    background:#0a0b0f;border-right:1px solid #1a1d24;z-index:50;
+    padding:18px 0 16px;font-family:inherit;color:#a8b0c0;
+    overflow-y:auto}
+  .hv-sb-brand{padding:0 18px 16px;border-bottom:1px solid #1a1d24;margin-bottom:8px}
+  .hv-sb-brand-row{display:flex;align-items:center;gap:12px}
+  .hv-sb-icon{font-size:24px;line-height:1}
+  .hv-sb-brand-text{display:flex;flex-direction:column;gap:1px}
+  .hv-sb-brand-kicker{font:600 9.5px/1 'Geist Mono',monospace;
+    letter-spacing:.14em;color:#5d6679;text-transform:uppercase}
+  .hv-sb-brand-name{font:700 17px/1.1 var(--font, 'Satoshi'),sans-serif;
+    color:#eef0f4;letter-spacing:-.01em}
+  .hv-sb-section{padding:10px 0;display:flex;flex-direction:column;gap:1px}
+  .hv-sb-section-h{font:600 10.5px/1 'Geist Mono',monospace;
+    letter-spacing:.14em;color:#5d6679;text-transform:uppercase;
+    padding:8px 22px 10px}
+  .hv-sb-row{display:flex;align-items:center;gap:11px;
+    padding:9px 22px;color:#8a93a4;font:500 13.5px/1 inherit;
+    background:transparent;border:none;cursor:pointer;text-align:left;
+    text-decoration:none;border-radius:0;width:100%;
+    transition:background .12s,color .12s;
+    font-family:inherit}
+  .hv-sb-row svg{width:16px;height:16px;flex-shrink:0;opacity:.85}
+  .hv-sb-row:hover{background:rgba(124,92,255,.06);color:#dfe3eb}
+  .hv-sb-row.on{background:rgba(124,92,255,.10);color:#a48bff;
+    border-left:2px solid #7c5cff;padding-left:20px}
+  .hv-sb-row.on svg{opacity:1}
+  .hv-sb-spacer{flex:1;min-height:20px}
+  .hv-sb-footer{display:flex;align-items:center;justify-content:space-between;
+    padding:14px 22px;border-top:1px solid #1a1d24;margin-top:8px;
+    font:500 10px/1 'Geist Mono',monospace;color:#5d6679;letter-spacing:.06em}
+  .hv-sb-version b{color:#dfe3eb;font-weight:600}
+  .hv-sb-dot{width:8px;height:8px;border-radius:50%;background:#3ddc97;
+    box-shadow:0 0 8px rgba(61,220,151,.5)}
+  /* Push the existing app shell right by sidebar width. */
+  .app{margin-left:240px}
+  /* Hide topnav nav-buttons (sidebar replaces them) AND the redundant
+     left logo/brand (sidebar already says "Huntova" up top). */
+  .topnav-centre{display:none}
+  .topnav-left .topnav-logo,
+  .topnav-left .dot{display:none}
+  .topnav-inner{justify-content:flex-end}
+}
+/* External-link arrow inside sidebar rows. */
+.hv-sb-ext-arrow{margin-left:auto;color:#5d6679;font-size:11px;
+  opacity:.6;transition:opacity .12s,transform .12s}
+.hv-sb-row:hover .hv-sb-ext-arrow{opacity:1;transform:translate(2px,-2px)}
+.hv-chat-panel{position:fixed;top:0;right:0;bottom:0;width:380px;
+  max-width:90vw;background:#0d0f14;border-left:1px solid #272b35;
+  transform:translateX(100%);transition:transform .25s ease-out;
+  z-index:60;display:flex;flex-direction:column;
+  box-shadow:-8px 0 24px rgba(0,0,0,.4)}
+.hv-chat-panel.on{transform:translateX(0)}
+.hv-chat-head{display:flex;align-items:center;justify-content:space-between;
+  padding:16px 18px;border-bottom:1px solid #1c2029;color:#dfe3eb;
+  font-weight:600;font-size:14px}
+.hv-chat-close{background:transparent;border:none;color:#8a93a4;
+  font-size:20px;cursor:pointer;padding:0 6px;line-height:1}
+.hv-chat-close:hover{color:#dfe3eb}
+.hv-chat-body{flex:1;overflow-y:auto;padding:16px 18px;
+  display:flex;flex-direction:column;gap:12px}
+.hv-chat-msg{padding:10px 14px;border-radius:10px;font-size:13px;
+  line-height:1.55;max-width:85%}
+.hv-chat-msg.bot{background:rgba(124,92,255,.08);color:#dfe3eb;
+  border:1px solid rgba(124,92,255,.2);align-self:flex-start}
+.hv-chat-msg.user{background:rgba(255,255,255,.04);color:#dfe3eb;
+  align-self:flex-end}
+.hv-chat-eg{display:inline-block;padding:2px 8px;background:rgba(124,92,255,.12);
+  border-radius:6px;font-family:'Geist Mono',monospace;font-size:11.5px;
+  color:#a48bff;margin:2px 0}
+.hv-chat-input{display:flex;border-top:1px solid #1c2029;padding:12px}
+.hv-chat-input input{flex:1;background:#08090c;border:1px solid #272b35;
+  color:#dfe3eb;padding:10px 14px;border-radius:8px 0 0 8px;font-size:13px;
+  font-family:inherit;outline:none}
+.hv-chat-input input:focus{border-color:#7c5cff}
+.hv-chat-input button{background:#7c5cff;color:#fff;border:none;
+  padding:0 18px;border-radius:0 8px 8px 0;cursor:pointer;font-size:16px;
+  font-family:inherit}
+.hv-chat-input button:hover{background:#a48bff}
+</style>
+
+<script>
+// Live-update the sidebar version label from /api/runtime so we don't
+// ship a stale hardcoded number.
+(function(){
+  fetch('/api/runtime').then(function(r){return r.json()}).then(function(d){
+    var el=document.getElementById('hvSbVer');
+    var v=(d&&d.runtime&&d.runtime.version)||(d&&d.version);
+    if(el&&v)el.textContent=v;
+  }).catch(function(){});
+})();
+
+// Sidebar nav forwards clicks to the existing topnav nav-btns so app.js
+// page-switching logic stays the unmodified source of truth.
+function hvSbGo(page){
+  document.querySelectorAll('.hv-sb-btn').forEach(function(b){
+    b.classList.toggle('on', b.dataset.page===page);
+  });
+  var orig=document.querySelector('.topnav-centre .nav-btn[data-page="'+page+'"]');
+  if(orig)orig.click();
+}
+function hvChatToggle(){
+  var p=document.getElementById('hvChatPanel');
+  if(!p)return;
+  var on=p.classList.toggle('on');
+  p.setAttribute('aria-hidden', on?'false':'true');
+  if(on)setTimeout(function(){var i=document.getElementById('hvChatIn');if(i)i.focus()},250);
+}
+// Safe message append — uses textContent for any dynamic string. Static
+// template structure (line breaks) is built via DOM nodes, never innerHTML
+// with concatenated user/AI input.
+function hvChatAppend(role, text){
+  var b=document.getElementById('hvChatBody');
+  if(!b)return;
+  var m=document.createElement('div');
+  m.className='hv-chat-msg '+(role==='user'?'user':'bot');
+  // Split on newlines and emit safe <br> separators between text nodes.
+  var parts=String(text||'').split('\n');
+  parts.forEach(function(part, i){
+    if(i>0)m.appendChild(document.createElement('br'));
+    m.appendChild(document.createTextNode(part));
+  });
+  b.appendChild(m);
+  b.scrollTop=b.scrollHeight;
+  return m;
+}
+async function hvChatSend(){
+  var input=document.getElementById('hvChatIn');
+  if(!input||!input.value.trim())return;
+  var msg=input.value.trim();
+  input.value='';
+  hvChatAppend('user', msg);
+  var thinking=hvChatAppend('bot', 'thinking...');
+  try{
+    var r=await fetch('/api/chat',{
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({message:msg})
+    });
+    var d=await r.json();
+    if(thinking)thinking.remove();
+    if(d && d.action==='start_hunt'){
+      hvChatAppend('bot', 'Starting hunt: '+(d.icp||'')+'\ncountries: '+((d.countries||[]).join(', ')||'default')+'\nmax leads: '+(d.max_leads||10));
+      try{if(typeof openStartPopup==='function')openStartPopup();}catch(_){}
+    } else if(d && d.action==='answer'){
+      hvChatAppend('bot', d.text||'(no reply)');
+    } else if(d && d.error){
+      hvChatAppend('bot', 'error: '+d.error);
+    } else {
+      hvChatAppend('bot', JSON.stringify(d));
+    }
+  } catch(e){
+    if(thinking)thinking.remove();
+    hvChatAppend('bot', 'network error: '+(e&&e.message||'unknown'));
+  }
+}
+</script>
+
+<script src="/static/app.js?v=25"></script>
+</body>
+</html>
