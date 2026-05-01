@@ -1,0 +1,465 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="description" content="Huntova — the lead-gen agent that actually finds clients. Local-first. BYOK. Replaces Apollo / Clay / Hunter / Instantly.">
+<meta name="color-scheme" content="dark">
+<title>Huntova — Local-first Lead-Gen Agent</title>
+
+<meta property="og:title" content="Huntova — Local-first Lead-Gen Agent">
+<meta property="og:description" content="The lead-gen agent that actually finds clients. Hunts the live web, scores prospects, sends personalised cold email — locally, on your machine.">
+<meta property="og:type" content="website">
+<meta property="og:url" content="https://huntova.com/">
+
+<link rel="preconnect" href="https://api.fontshare.com">
+<link rel="preconnect" href="https://cdn.fontshare.com" crossorigin>
+<link href="https://api.fontshare.com/v2/css?f[]=clash-display@700,600,500&f[]=satoshi@400,500,700&display=swap" rel="stylesheet">
+
+<style>
+:root {
+  --bg-deep: #050810;
+  --bg-card: #0c1220;
+  --bg-card-hover: #111a2e;
+  --bd: #1a2238;
+  --bd-strong: #2a3553;
+  --t1: #e6e8ed;
+  --t2: #9aa0ad;
+  --t3: #6b7388;
+  --accent: #00e5cc;
+  --accent-2: #ff4d4d;
+  --logo-grad-start: #ff4d4d;
+  --logo-grad-end: #00e5cc;
+}
+*,*::before,*::after{box-sizing:border-box}
+html,body{margin:0;padding:0;background:var(--bg-deep);color:var(--t1)}
+body{
+  font-family:'Satoshi', -apple-system, BlinkMacSystemFont, sans-serif;
+  font-size:16px;
+  line-height:1.6;
+  -webkit-font-smoothing:antialiased;
+  text-rendering:optimizeLegibility;
+  min-height:100vh;
+  position:relative;
+  overflow-x:hidden;
+}
+a{color:var(--accent);text-decoration:none}
+a:hover{text-decoration:underline}
+::selection{background:var(--accent);color:var(--bg-deep)}
+
+/* ────────── starfield + nebula bg ────────── */
+.stars,.nebula{position:fixed;inset:0;pointer-events:none;z-index:0}
+.stars{
+  background-image:
+    radial-gradient(1px 1px at 20% 30%, #fff, transparent),
+    radial-gradient(1px 1px at 60% 70%, #fff, transparent),
+    radial-gradient(2px 2px at 50% 50%, rgba(255,255,255,.6), transparent),
+    radial-gradient(1px 1px at 80% 10%, #fff, transparent),
+    radial-gradient(1px 1px at 90% 60%, rgba(255,255,255,.7), transparent),
+    radial-gradient(1px 1px at 10% 80%, rgba(255,255,255,.8), transparent),
+    radial-gradient(1px 1px at 30% 90%, #fff, transparent),
+    radial-gradient(1px 1px at 70% 25%, rgba(255,255,255,.5), transparent),
+    radial-gradient(2px 2px at 15% 55%, rgba(255,255,255,.4), transparent),
+    radial-gradient(1px 1px at 45% 15%, #fff, transparent);
+  background-size:600px 600px,400px 400px,500px 500px,500px 500px,300px 300px,400px 400px,300px 300px,500px 500px,700px 700px,400px 400px;
+  opacity:.55;
+}
+.nebula{
+  background:
+    radial-gradient(ellipse 700px 400px at 18% 18%, rgba(255,77,77,.18), transparent 60%),
+    radial-gradient(ellipse 800px 500px at 82% 82%, rgba(0,229,204,.12), transparent 65%),
+    radial-gradient(ellipse 500px 350px at 50% 100%, rgba(124,92,255,.08), transparent 70%);
+}
+
+.container{position:relative;z-index:1;max-width:1080px;margin:0 auto;padding:32px 24px 96px}
+
+/* ────────── header / nav ────────── */
+.topnav{
+  display:flex;align-items:center;justify-content:space-between;
+  padding-bottom:48px;
+}
+.brand{display:flex;align-items:center;gap:10px;font-family:'Clash Display',sans-serif;font-weight:700;font-size:20px;color:#fff}
+.brand-mark{
+  width:32px;height:32px;border-radius:8px;
+  background:linear-gradient(135deg,var(--logo-grad-start),var(--logo-grad-end));
+  display:flex;align-items:center;justify-content:center;
+  color:var(--bg-deep);font-weight:900;font-family:'Clash Display',sans-serif;
+}
+.nav-links{display:flex;gap:24px;font-size:14px}
+.nav-links a{color:var(--t2);text-decoration:none}
+.nav-links a:hover{color:#fff;text-decoration:none}
+
+/* ────────── hero ────────── */
+.hero{
+  text-align:center;
+  padding:64px 0 56px;
+}
+.hero-mark{
+  width:96px;height:96px;
+  margin:0 auto 28px;
+  border-radius:24px;
+  background:linear-gradient(135deg,var(--logo-grad-start) 0%,var(--logo-grad-end) 100%);
+  display:flex;align-items:center;justify-content:center;
+  font-family:'Clash Display',sans-serif;font-weight:900;font-size:48px;
+  color:var(--bg-deep);
+  box-shadow:0 16px 48px -8px rgba(255,77,77,.4),0 8px 24px -4px rgba(0,229,204,.3);
+}
+.title{
+  font-family:'Clash Display',sans-serif;
+  font-size:clamp(48px,9vw,88px);
+  font-weight:700;
+  line-height:1;
+  letter-spacing:-0.03em;
+  margin:0 0 16px;
+  color:#fff;
+  background:linear-gradient(180deg,#fff 0%,#9aa0ad 100%);
+  -webkit-background-clip:text;background-clip:text;
+  -webkit-text-fill-color:transparent;
+}
+.tagline{
+  font-family:'Clash Display',sans-serif;
+  font-weight:600;
+  font-size:clamp(20px,2.6vw,28px);
+  letter-spacing:-0.01em;
+  margin:0 0 20px;
+  color:var(--accent);
+}
+.description{
+  font-size:17px;
+  line-height:1.6;
+  color:var(--t2);
+  max-width:560px;
+  margin:0 auto 36px;
+}
+.description b{color:var(--t1);font-weight:500}
+
+/* ────────── install card ────────── */
+.install{
+  max-width:600px;margin:0 auto 24px;
+  background:var(--bg-card);
+  border:1px solid var(--bd);
+  border-radius:14px;
+  padding:18px 20px;
+  display:flex;align-items:center;gap:14px;flex-wrap:wrap;
+  font-family:'Geist Mono','JetBrains Mono','SF Mono',Menlo,Consolas,monospace;
+  font-size:14.5px;
+  text-align:left;
+}
+.install .prompt{color:var(--t3);flex-shrink:0}
+.install code{flex:1;min-width:240px;color:#fff;font-family:inherit}
+.install .copy-btn{
+  padding:8px 16px;
+  font-size:12px;
+  background:transparent;
+  color:var(--accent);
+  border:1px solid var(--accent);
+  border-radius:8px;
+  cursor:pointer;
+  font-family:'Satoshi',sans-serif;
+  font-weight:600;
+  letter-spacing:0.04em;
+  text-transform:uppercase;
+  transition:all .15s ease;
+}
+.install .copy-btn:hover{background:var(--accent);color:var(--bg-deep)}
+.install .copy-btn.copied{background:var(--accent);color:var(--bg-deep)}
+
+.install-alt{
+  text-align:center;color:var(--t3);font-size:13px;margin:0 0 56px;
+}
+.install-alt code{
+  background:var(--bg-card);border:1px solid var(--bd);
+  padding:2px 8px;border-radius:6px;font-size:12.5px;color:var(--t1);
+  font-family:'Geist Mono',monospace;
+}
+
+/* ────────── section ────────── */
+.section{padding:48px 0;border-top:1px solid var(--bd)}
+.section-head{
+  font-family:'Clash Display',sans-serif;
+  font-weight:600;
+  font-size:13px;
+  letter-spacing:0.18em;
+  text-transform:uppercase;
+  color:var(--t3);
+  margin:0 0 24px;
+}
+.section h2{
+  font-family:'Clash Display',sans-serif;
+  font-weight:700;
+  font-size:clamp(28px,4vw,40px);
+  letter-spacing:-0.02em;
+  margin:0 0 16px;
+  color:#fff;
+}
+.section .lead{color:var(--t2);font-size:16px;max-width:620px;margin:0 0 32px}
+
+/* ────────── feature grid ────────── */
+.features{
+  display:grid;
+  grid-template-columns:repeat(auto-fit,minmax(260px,1fr));
+  gap:16px;
+}
+.feat{
+  background:var(--bg-card);
+  border:1px solid var(--bd);
+  border-radius:14px;
+  padding:24px;
+  transition:border-color .2s ease, transform .2s ease;
+}
+.feat:hover{border-color:var(--bd-strong);transform:translateY(-2px)}
+.feat-icon{
+  width:36px;height:36px;border-radius:10px;
+  display:flex;align-items:center;justify-content:center;
+  margin-bottom:14px;font-size:18px;
+  background:linear-gradient(135deg,rgba(255,77,77,.15),rgba(0,229,204,.15));
+  border:1px solid rgba(0,229,204,.25);
+}
+.feat-t{
+  font-family:'Clash Display',sans-serif;
+  font-weight:600;font-size:18px;color:#fff;margin:0 0 6px;
+}
+.feat-d{color:var(--t2);font-size:14.5px;line-height:1.55}
+.feat-cmd{
+  margin-top:12px;font-family:'Geist Mono',monospace;
+  font-size:12.5px;color:var(--accent);
+  background:rgba(0,229,204,.07);
+  border:1px solid rgba(0,229,204,.2);
+  padding:5px 10px;border-radius:6px;
+  display:inline-block;
+}
+
+/* ────────── compare table ────────── */
+.compare{
+  background:var(--bg-card);
+  border:1px solid var(--bd);
+  border-radius:14px;
+  overflow:hidden;
+}
+.compare table{width:100%;border-collapse:collapse}
+.compare th,.compare td{padding:14px 18px;text-align:left;font-size:14.5px}
+.compare th{
+  background:rgba(0,0,0,.25);
+  color:var(--t3);font-size:11.5px;text-transform:uppercase;letter-spacing:0.14em;font-weight:600;
+}
+.compare tr{border-bottom:1px solid var(--bd)}
+.compare tr:last-child{border-bottom:none}
+.compare td.feat-cell{color:#fff;font-weight:500}
+.compare td.saas{color:var(--t3)}
+.compare td.hv{font-family:'Geist Mono',monospace;color:var(--accent);font-size:13px}
+
+/* ────────── code block ────────── */
+pre{
+  background:var(--bg-card);
+  border:1px solid var(--bd);
+  border-radius:14px;
+  padding:20px 24px;
+  margin:0 0 20px;
+  overflow-x:auto;
+  font-family:'Geist Mono','JetBrains Mono',monospace;
+  font-size:14px;
+  line-height:1.7;
+  color:var(--t1);
+}
+pre .c{color:var(--t3)}
+pre .p{color:var(--accent)}
+pre .k{color:#fff;font-weight:500}
+pre .acc{color:var(--accent-2)}
+
+/* ────────── footer ────────── */
+.footer{
+  margin-top:80px;padding-top:32px;
+  border-top:1px solid var(--bd);
+  display:flex;justify-content:space-between;flex-wrap:wrap;gap:16px;
+  font-size:13px;color:var(--t3);
+}
+.footer a{color:var(--t2)}
+.footer a:hover{color:#fff;text-decoration:none}
+
+/* ────────── small phone ────────── */
+@media (max-width:600px){
+  .container{padding:20px 16px 56px}
+  .topnav{padding-bottom:32px;flex-wrap:wrap;gap:12px}
+  .nav-links{gap:14px;font-size:13px}
+  .hero{padding:32px 0 36px}
+  .hero-mark{width:72px;height:72px;font-size:36px;border-radius:18px}
+  .install{padding:14px 16px}
+  .install code{font-size:13px}
+}
+</style>
+</head>
+<body>
+
+<div class="stars"></div>
+<div class="nebula"></div>
+
+<div class="container">
+  <nav class="topnav">
+    <div class="brand">
+      <div class="brand-mark">H</div>
+      <span>Huntova</span>
+    </div>
+    <div class="nav-links">
+      <a href="https://github.com/enzostrano/huntova-public">GitHub</a>
+      <a href="https://github.com/enzostrano/huntova-public/blob/main/CHANGELOG.md">Changelog</a>
+      <a href="https://github.com/enzostrano/huntova-public/issues">Issues</a>
+    </div>
+  </nav>
+
+  <header class="hero">
+    <div class="hero-mark">H</div>
+    <h1 class="title">Huntova</h1>
+    <p class="tagline">The lead-gen agent that actually finds clients.</p>
+    <p class="description">
+      Hunts the live web, scores prospects with your AI key, deep-researches the top tier, and sends personalised cold email <b>locally, on your machine</b>. No subscription. No credits. No middleware ever sees your data.
+    </p>
+
+    <div class="install">
+      <span class="prompt">$</span>
+      <code id="installCmd">curl -fsSL https://huntova.com/install.sh | sh</code>
+      <button class="copy-btn" id="copyBtn" onclick="(function(b){navigator.clipboard.writeText(document.getElementById('installCmd').textContent).then(function(){b.textContent='Copied';b.classList.add('copied');setTimeout(function(){b.textContent='Copy';b.classList.remove('copied')},1800)})})(this)">Copy</button>
+    </div>
+    <p class="install-alt">or via pipx — <code>pipx install huntova</code> — then <code>huntova</code></p>
+  </header>
+
+  <section class="section">
+    <p class="section-head">What it does</p>
+    <h2>Find prospects. Write the email. Send it. Watch for replies.</h2>
+    <p class="lead">All on your machine, against your AI key, your SMTP, your IMAP. The same loop every B2B SaaS sells you in pieces — collapsed into nine composable terminal commands.</p>
+
+    <div class="features">
+      <div class="feat">
+        <div class="feat-icon">🔍</div>
+        <div class="feat-t">Live web hunt</div>
+        <div class="feat-d">SearXNG-driven across Google, Bing, DuckDuckGo. 50–80 AI-generated queries per hunt, scored on five dimensions with verbatim evidence.</div>
+        <span class="feat-cmd">huntova hunt</span>
+      </div>
+      <div class="feat">
+        <div class="feat-icon">🎯</div>
+        <div class="feat-t">Deep research</div>
+        <div class="feat-d">Crawls 14 pages of the prospect's site. Drafts an opener that references something specific they'd recognise.</div>
+        <span class="feat-cmd">huntova research</span>
+      </div>
+      <div class="feat">
+        <div class="feat-icon">📤</div>
+        <div class="feat-t">Send + cadence</div>
+        <div class="feat-d">Step 1 opener, Day +4 bump, Day +9 final. Threads on the original subject. Auto-paused on reply.</div>
+        <span class="feat-cmd">huntova outreach send</span>
+      </div>
+      <div class="feat">
+        <div class="feat-icon">📥</div>
+        <div class="feat-t">Reply detection</div>
+        <div class="feat-d">IMAP poll matches incoming replies to outbound message-IDs. AI classifies each one (interested / OOO / not now / wrong-person).</div>
+        <span class="feat-cmd">huntova inbox watch</span>
+      </div>
+      <div class="feat">
+        <div class="feat-icon">📨</div>
+        <div class="feat-t">Deliverability</div>
+        <div class="feat-d">SPF / DKIM / DMARC / MX pre-flight before you mass-send. Catches the 90% of "why am I in spam" causes.</div>
+        <span class="feat-cmd">huntova doctor --email</span>
+      </div>
+      <div class="feat">
+        <div class="feat-icon">📊</div>
+        <div class="feat-t">Pulse + autopilot</div>
+        <div class="feat-d">Weekly self-coaching summary. launchd / systemd / cron snippet runs the whole stack daily. Walk away.</div>
+        <span class="feat-cmd">huntova schedule print</span>
+      </div>
+    </div>
+  </section>
+
+  <section class="section">
+    <p class="section-head">Replaces</p>
+    <h2>What you'd otherwise pay $400+/seat/month for.</h2>
+    <p class="lead">Every cell on the right is a single subcommand. Your keys, your machine, no per-seat pricing.</p>
+
+    <div class="compare">
+      <table>
+        <thead>
+          <tr><th>Feature</th><th>SaaS competitor</th><th>Huntova</th></tr>
+        </thead>
+        <tbody>
+          <tr><td class="feat-cell">Lead discovery + scoring</td><td class="saas">Apollo $59–149/seat/mo</td><td class="hv">huntova hunt</td></tr>
+          <tr><td class="feat-cell">Hyper-personalised opener</td><td class="saas">Clay $349+/mo</td><td class="hv">huntova research</td></tr>
+          <tr><td class="feat-cell">Email finder + verifier</td><td class="saas">Hunter.io $49+/mo</td><td class="hv">built-in</td></tr>
+          <tr><td class="feat-cell">Multi-step cadence</td><td class="saas">Lemlist $99+/seat/mo</td><td class="hv">huntova sequence run</td></tr>
+          <tr><td class="feat-cell">Reply detection + triage</td><td class="saas">Instantly $97+/seat/mo</td><td class="hv">huntova inbox watch</td></tr>
+          <tr><td class="feat-cell">Mail-merge / send</td><td class="saas">Mailmeteor $49+/mo</td><td class="hv">huntova outreach send</td></tr>
+          <tr><td class="feat-cell">Deliverability check</td><td class="saas">GlockApps $30+/mo</td><td class="hv">huntova doctor --email</td></tr>
+          <tr><td class="feat-cell">Daily KPIs + coaching</td><td class="saas">Mailshake $99+/mo</td><td class="hv">huntova pulse</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="section">
+    <p class="section-head">First 3 minutes</p>
+    <h2>Install. Pick a playbook. See real leads.</h2>
+    <p class="lead">Ten bundled playbooks — solo coach, fractional CMO, video studio, design agency, devtools SaaS, podcast producer, and more. Each one auto-seeds the wizard ICP + tone so the first hunt has real context.</p>
+
+    <pre><span class="p">$</span> <span class="k">curl -fsSL https://huntova.com/install.sh | sh</span>
+<span class="p">$</span> <span class="k">huntova onboard</span>             <span class="c"># 60-second wizard, picks AI provider, OS keychain</span>
+<span class="p">$</span> <span class="k">huntova quickstart</span>          <span class="c"># interactive playbook picker → first hunt → preview</span>
+
+<span class="c"># … 3 minutes later …</span>
+
+  <span class="acc">Top 5 leads:</span>
+    [<span class="acc">9</span>/10]  Aurora Studios            DE
+    [<span class="acc">9</span>/10]  Helio Production          DE
+    [<span class="acc">8</span>/10]  Tessera Marketing         FR
+    [<span class="acc">8</span>/10]  Studio Lumen              NL
+    [<span class="acc">8</span>/10]  Vertex Creative           UK</pre>
+  </section>
+
+  <section class="section">
+    <p class="section-head">Autonomous daily</p>
+    <h2>Set it once. Walk away.</h2>
+    <p class="lead">The whole stack runs itself once you wire the daily cron. Sequences fire. Replies land. Your morning pulse hits the log.</p>
+
+    <pre><span class="c"># wire the daily worker (macOS)</span>
+<span class="p">$</span> <span class="k">huntova schedule print</span> --target launchd --at 09:00 \
+    &gt; ~/Library/LaunchAgents/com.huntova.daily.plist
+<span class="p">$</span> launchctl load ~/Library/LaunchAgents/com.huntova.daily.plist
+
+<span class="c"># every morning at 09:00:</span>
+<span class="c">#   huntova update --check     ← banner if a new release is out</span>
+<span class="c">#   huntova sequence run       ← fires Day +4 / +9 follow-ups</span>
+<span class="c">#   huntova inbox check        ← polls IMAP, classifies replies</span>
+<span class="c">#   huntova pulse --since 1d   ← yesterday's KPIs into the daily log</span>
+</pre>
+  </section>
+
+  <section class="section">
+    <p class="section-head">What stays on your machine</p>
+    <h2>All of it.</h2>
+    <div class="features">
+      <div class="feat">
+        <div class="feat-icon">🔑</div>
+        <div class="feat-t">Your AI key</div>
+        <div class="feat-d">OS keychain (macOS / Windows Cred Manager / libsecret), encrypted-file fallback. Never transits a Huntova server.</div>
+      </div>
+      <div class="feat">
+        <div class="feat-icon">💾</div>
+        <div class="feat-t">Your leads</div>
+        <div class="feat-d"><code style="font-size:12.5px;color:var(--accent)">~/.local/share/huntova/db.sqlite</code> — never uploaded, never synced.</div>
+      </div>
+      <div class="feat">
+        <div class="feat-icon">📧</div>
+        <div class="feat-t">Your SMTP / IMAP</div>
+        <div class="feat-d">Your relay, your From address, your reputation. Huntova never sends through a shared sender pool.</div>
+      </div>
+      <div class="feat">
+        <div class="feat-icon">📡</div>
+        <div class="feat-t">Telemetry</div>
+        <div class="feat-d">Off by default. <code style="font-size:12.5px;color:var(--accent)">huntova telemetry enable</code> opts in if you want to help.</div>
+      </div>
+    </div>
+  </section>
+
+  <footer class="footer">
+    <span>AGPL-3.0-or-later · built by <a href="https://github.com/enzostrano">@enzostrano</a></span>
+    <span><a href="https://github.com/enzostrano/huntova-public/blob/main/PRIVACY.md">Privacy</a> · <a href="https://github.com/enzostrano/huntova-public/blob/main/TERMS.md">Terms</a></span>
+  </footer>
+</div>
+
+</body>
+</html>
