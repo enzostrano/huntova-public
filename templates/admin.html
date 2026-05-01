@@ -1,0 +1,985 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Ops — Huntova</title>
+<meta name="robots" content="noindex, nofollow">
+<link rel="icon" type="image/png" sizes="32x32" href="/static/favicon-32x32.png">
+<link rel="apple-touch-icon" sizes="180x180" href="/static/apple-touch-icon.png">
+<link rel="preconnect" href="https://api.fontshare.com" crossorigin>
+<link href="https://api.fontshare.com/v2/css?f[]=satoshi@400,500,600,700&display=swap" rel="stylesheet">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Geist+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{--bg:#08090c;--s1:#0d0f14;--s2:#11141a;--s3:#1c2029;--s4:#272b35;--t1:#eef0f4;--t2:#8a93a4;--t3:#5d6679;--bd:#1c2029;--bd2:#272b35;--acc:#7c5cff;--acc-subtle:rgba(124,92,255,.06);--acc-border:rgba(124,92,255,.18);--cyn:#7c5cff;--org:#f6b352;--red:#ff6464;--grn:#3ddc97;--pur:#a48bff;--r:8px;--r-sm:6px;--r-lg:12px;--font:'Satoshi',-apple-system,system-ui,sans-serif;--mono:'Geist Mono','JetBrains Mono',monospace}
+body{background:var(--bg);color:var(--t2);font:400 13.5px/1.6 var(--font);-webkit-font-smoothing:antialiased;min-height:100vh}
+a{color:var(--acc);text-decoration:none}a:hover{color:var(--cyn)}
+h1,h2,h3{color:var(--t1);font-weight:700;letter-spacing:-.03em}
+.topnav{display:flex;align-items:center;padding:16px 32px;border-bottom:1px solid var(--bd);gap:16px}
+.topnav-logo{font:700 17px/1 var(--mono);letter-spacing:-.03em}
+.topnav-logo b{color:var(--acc)}
+.topnav .admin-badge{font:700 10px/1 var(--mono);padding:3px 8px;border-radius:999px;background:rgba(164,139,255,.08);color:var(--pur);border:1px solid rgba(164,139,255,.15);text-transform:uppercase;letter-spacing:.06em}
+.topnav .back{font:600 13px/1 var(--font);color:var(--t3);transition:color .2s;margin-left:auto}
+.topnav .back:hover{color:var(--t1)}
+
+/* Layout */
+.shell{display:flex;min-height:calc(100vh - 56px)}
+.sidebar{width:220px;border-right:1px solid var(--bd);padding:20px 0;flex-shrink:0}
+.sidebar-btn{display:block;width:100%;padding:10px 24px;font:500 13px/1.4 var(--font);color:var(--t3);background:none;border:none;text-align:left;cursor:pointer;transition:all .15s;border-left:2px solid transparent}
+.sidebar-btn:hover{color:var(--t2);background:var(--s1)}
+.sidebar-btn.on{color:var(--acc);background:var(--acc-subtle);border-left-color:var(--acc);font-weight:600}
+.sidebar-sep{height:1px;background:var(--bd);margin:12px 0}
+.content{flex:1;padding:32px 40px 80px;max-width:1100px;overflow-x:auto}
+
+/* Cards */
+.stat-row{display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:12px;margin-bottom:28px}
+.stat-card{background:var(--s1);border:1px solid var(--bd);border-radius:var(--r);padding:18px 20px}
+.stat-val{font:800 26px/1 var(--mono);color:var(--t1);margin-bottom:4px}
+.stat-label{font-size:11px;color:var(--t3);text-transform:uppercase;letter-spacing:.04em}
+
+/* Section */
+.section{background:var(--s1);border:1px solid var(--bd);border-radius:var(--r-lg);padding:24px;margin-bottom:20px}
+.section-title{font-size:12px;font-weight:700;color:var(--t3);text-transform:uppercase;letter-spacing:.08em;margin-bottom:16px;font-family:var(--mono)}
+
+/* Table */
+.tbl{width:100%;border-collapse:collapse;font-size:13px}
+.tbl th{text-align:left;font:700 10px/1 var(--mono);color:var(--t3);text-transform:uppercase;letter-spacing:.06em;padding:8px 12px;border-bottom:1px solid var(--bd2)}
+.tbl td{padding:10px 12px;border-bottom:1px solid var(--bd);color:var(--t2);vertical-align:top}
+.tbl tr:hover td{background:var(--s2)}
+.tbl .clickable{cursor:pointer}
+.tbl .clickable:hover td{color:var(--t1)}
+
+/* Badges */
+.badge{font:700 10px/1 var(--mono);padding:3px 8px;border-radius:999px;display:inline-block;text-transform:uppercase;letter-spacing:.06em}
+.badge-free{background:rgba(138,147,180,.08);color:var(--t3);border:1px solid var(--bd)}
+.badge-growth{background:rgba(124,92,255,.06);color:var(--acc);border:1px solid var(--acc-border)}
+.badge-agency{background:rgba(164,139,255,.08);color:var(--pur);border:1px solid rgba(164,139,255,.15)}
+.badge-verified{background:rgba(61,220,151,.08);color:var(--grn);border:1px solid rgba(61,220,151,.12)}
+.badge-unverified{background:rgba(246,179,82,.08);color:var(--org);border:1px solid rgba(246,179,82,.12)}
+.badge-suspended{background:rgba(255,100,100,.08);color:var(--red);border:1px solid rgba(255,100,100,.12)}
+.badge-active{background:rgba(61,220,151,.08);color:var(--grn);border:1px solid rgba(61,220,151,.12)}
+
+/* Buttons */
+.btn{padding:8px 16px;border-radius:var(--r-sm);font:600 12px/1 var(--font);border:none;cursor:pointer;transition:all .15s;display:inline-flex;align-items:center;gap:6px}
+.btn:disabled{opacity:.4;cursor:not-allowed}
+.btn-sm{padding:5px 10px;font-size:11px}
+.btn-primary{background:var(--acc);color:#fff}
+.btn-primary:hover{box-shadow:0 4px 12px rgba(124,92,255,.2)}
+.btn-secondary{background:var(--s3);color:var(--t2);border:1px solid var(--bd)}
+.btn-secondary:hover{background:var(--s4);color:var(--t1)}
+.btn-danger{background:rgba(255,100,100,.08);color:var(--red);border:1px solid rgba(255,100,100,.12)}
+.btn-danger:hover{background:rgba(255,100,100,.14)}
+.btn-warn{background:rgba(246,179,82,.08);color:var(--org);border:1px solid rgba(246,179,82,.12)}
+.btn-warn:hover{background:rgba(246,179,82,.14)}
+
+/* Form elements */
+.field{margin-bottom:14px}
+.field label{display:block;font-size:10px;font-weight:700;color:var(--t3);text-transform:uppercase;letter-spacing:.06em;margin-bottom:5px}
+.field input,.field select,.field textarea{width:100%;padding:8px 12px;border-radius:var(--r-sm);background:var(--s2);border:1px solid var(--bd);color:var(--t1);font:400 13px/1.4 var(--font);outline:none;transition:.2s}
+.field input:focus,.field select:focus,.field textarea:focus{border-color:var(--acc);box-shadow:0 0 0 3px rgba(124,92,255,.06)}
+.field textarea{resize:vertical;min-height:60px}
+.field-row{display:flex;gap:10px;align-items:flex-end}
+.field-row .field{flex:1}
+.field-inline{display:flex;gap:8px;align-items:center}
+
+/* Search bar */
+.search-bar{display:flex;gap:10px;margin-bottom:20px;flex-wrap:wrap}
+.search-bar input{flex:1;min-width:200px;padding:8px 14px;border-radius:var(--r-sm);background:var(--s2);border:1px solid var(--bd);color:var(--t1);font:400 13px/1 var(--font);outline:none}
+.search-bar input:focus{border-color:var(--acc)}
+.search-bar select{padding:8px 12px;border-radius:var(--r-sm);background:var(--s2);border:1px solid var(--bd);color:var(--t2);font:400 12px/1 var(--font);outline:none;cursor:pointer}
+
+/* Pagination */
+.pager{display:flex;align-items:center;gap:8px;margin-top:16px;font-size:12px}
+.pager button{padding:6px 12px;border-radius:var(--r-sm);background:var(--s3);border:1px solid var(--bd);color:var(--t2);font:600 12px/1 var(--font);cursor:pointer}
+.pager button:hover{background:var(--s4);color:var(--t1)}
+.pager button:disabled{opacity:.3;cursor:not-allowed}
+.pager .pager-info{color:var(--t3)}
+
+/* Toast */
+.toast{position:fixed;bottom:24px;right:24px;padding:12px 20px;border-radius:var(--r);font:600 13px/1.4 var(--font);z-index:9999;animation:toastIn .3s;max-width:400px}
+.toast-ok{background:#0d2818;color:var(--grn);border:1px solid rgba(61,220,151,.2)}
+.toast-err{background:#1c0d0d;color:var(--red);border:1px solid rgba(255,100,100,.2)}
+@keyframes toastIn{from{transform:translateY(20px);opacity:0}to{transform:translateY(0);opacity:1}}
+
+/* Modal overlay */
+.modal-bg{position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:1000;display:flex;align-items:center;justify-content:center;backdrop-filter:blur(4px)}
+.modal{background:var(--s1);border:1px solid var(--bd2);border-radius:var(--r-lg);padding:28px;width:480px;max-width:92vw;max-height:85vh;overflow-y:auto}
+.modal h3{font-size:18px;margin-bottom:20px}
+.modal-actions{display:flex;gap:8px;justify-content:flex-end;margin-top:20px}
+
+/* Detail panel */
+.detail-header{display:flex;align-items:center;gap:16px;margin-bottom:24px}
+.detail-avatar{width:48px;height:48px;border-radius:50%;background:var(--s3);display:flex;align-items:center;justify-content:center;font:700 18px/1 var(--mono);color:var(--acc)}
+.detail-meta{flex:1}
+.detail-name{font:700 18px/1.2 var(--font);color:var(--t1)}
+.detail-email{font-size:13px;color:var(--t3);margin-top:2px}
+.detail-badges{display:flex;gap:6px;margin-top:8px;flex-wrap:wrap}
+.detail-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:20px}
+@media(max-width:800px){.detail-grid{grid-template-columns:1fr}}
+.detail-section{background:var(--s2);border:1px solid var(--bd);border-radius:var(--r);padding:16px}
+.detail-section h4{font:700 11px/1 var(--mono);color:var(--t3);text-transform:uppercase;letter-spacing:.06em;margin-bottom:12px}
+.detail-row{display:flex;justify-content:space-between;padding:4px 0;font-size:12px;border-bottom:1px solid var(--bd)}
+.detail-row:last-child{border-bottom:none}
+.detail-row .dr-label{color:var(--t3)}
+.detail-row .dr-value{color:var(--t1);font-weight:600;text-align:right;max-width:60%}
+
+/* Tags */
+.tag-list{display:flex;flex-wrap:wrap;gap:4px}
+.tag{font:500 10px/1 var(--font);padding:3px 8px;border-radius:999px;background:var(--s3);color:var(--t2);border:1px solid var(--bd)}
+
+/* Empty state */
+.empty{text-align:center;padding:40px 20px;color:var(--t3);font-size:13px}
+
+/* Scrollable mini-table */
+.mini-tbl{width:100%;font-size:11px;border-collapse:collapse}
+.mini-tbl th{text-align:left;font:700 9px/1 var(--mono);color:var(--t3);text-transform:uppercase;padding:4px 8px;border-bottom:1px solid var(--bd)}
+.mini-tbl td{padding:5px 8px;border-bottom:1px solid var(--bd);color:var(--t2)}
+
+/* Loading */
+.loading{display:flex;align-items:center;justify-content:center;padding:40px;color:var(--t3)}
+.loading::after{content:'';width:20px;height:20px;border:2px solid var(--bd2);border-top-color:var(--acc);border-radius:50%;margin-left:10px;animation:spin .6s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+
+/* Responsive */
+@media(max-width:768px){
+  .shell{flex-direction:column}
+  .sidebar{width:100%;border-right:none;border-bottom:1px solid var(--bd);padding:12px 0;display:flex;overflow-x:auto;gap:0}
+  .sidebar-btn{white-space:nowrap;padding:8px 16px;border-left:none;border-bottom:2px solid transparent}
+  .sidebar-btn.on{border-left:none;border-bottom-color:var(--acc)}
+  .sidebar-sep{display:none}
+  .content{padding:20px 16px 60px}
+  .search-bar{flex-direction:column}
+  .stat-row{grid-template-columns:1fr 1fr}
+}
+</style>
+</head>
+<body>
+<div class="topnav">
+  <div class="topnav-logo">Hunt<b>ova</b></div>
+  <span class="admin-badge">Ops</span>
+  <a href="/" class="back">&larr; App</a>
+</div>
+<div class="shell">
+  <nav class="sidebar" id="sidebar" aria-label="Admin navigation">
+    <button class="sidebar-btn on" data-tab="overview" onclick="switchTab('overview')">Overview</button>
+    <button class="sidebar-btn" data-tab="users" onclick="switchTab('users')">Users</button>
+    <button class="sidebar-btn" data-tab="runs" onclick="switchTab('runs')">Runs</button>
+    <button class="sidebar-btn" data-tab="logs" onclick="switchTab('logs')">Live Logs</button>
+    <div class="sidebar-sep"></div>
+    <button class="sidebar-btn" data-tab="growth" onclick="switchTab('growth')">Growth</button>
+    <button class="sidebar-btn" data-tab="billing" onclick="switchTab('billing')">Billing</button>
+    <button class="sidebar-btn" data-tab="incidents" onclick="switchTab('incidents')">Incidents</button>
+    <div class="sidebar-sep"></div>
+    <button class="sidebar-btn" data-tab="audit" onclick="switchTab('audit')">Audit Log</button>
+    <button class="sidebar-btn" data-tab="health" onclick="switchTab('health')">Health</button>
+  </nav>
+  <main class="content" id="content">
+    <div class="loading" id="globalLoad">Loading</div>
+  </main>
+</div>
+
+<script>
+// ── 401 interceptor + CSRF ──
+(function(){
+  function _getCsrf(){var m=document.cookie.match(/(?:^|;\s*)hv_csrf=([^;]+)/);return m?m[1]:'';}
+  var _of=window.fetch;
+  window.fetch=function(url,opts){
+    if(opts&&opts.method&&opts.method!=='GET'&&opts.method!=='HEAD'){
+      var csrf=_getCsrf();
+      if(csrf){if(!opts.headers)opts.headers={};opts.headers['X-CSRF-Token']=csrf;}
+    }
+    return _of.apply(this,arguments).then(function(r){
+      if(r.status===401&&!r.url.includes('/auth/'))window.location.href='/landing';
+      if(r.status===403&&!r.url.includes('/api/ops/'))window.location.href='/';
+      return r;
+    });
+  };
+})();
+
+var _tab='overview', _usersPage=1, _usersQ='', _usersTier='', _usersVerified='', _usersSuspended='', _auditPage=1, _runsPage=1, _runsUser='', _runsStatus='', _logsEvtSrc=null;
+
+// ── Helpers ──
+function $(id){return document.getElementById(id)}
+function esc(s){var d=document.createElement('div');d.textContent=s||'';return d.innerHTML}
+function fmtDate(s){if(!s)return '-';try{var d=new Date(s);return d.toLocaleDateString('en-GB',{day:'2-digit',month:'short',year:'numeric'})+' '+d.toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit'})}catch(e){return s}}
+function tierBadge(t){return '<span class="badge badge-'+(t||'free')+'">'+(t||'free').toUpperCase()+'</span>'}
+function verifiedBadge(v){return v?'<span class="badge badge-verified">Verified</span>':'<span class="badge badge-unverified">Unverified</span>'}
+function suspendedBadge(s){return s?'<span class="badge badge-suspended">Suspended</span>':''}
+
+function toast(msg,ok){
+  var el=document.createElement('div');el.className='toast '+(ok?'toast-ok':'toast-err');el.textContent=msg;
+  document.body.appendChild(el);setTimeout(function(){el.remove()},3500);
+}
+
+async function api(url,opts){
+  try{
+    var ctrl=new AbortController();
+    var timer=setTimeout(function(){ctrl.abort()},15000);
+    var r=await fetch(url,Object.assign({signal:ctrl.signal},opts||{}));
+    clearTimeout(timer);
+    var d=await r.json();
+    if(!d.ok&&d.error)toast(d.error,false);
+    return d;
+  }catch(e){
+    if(e.name==='AbortError')toast('Request timed out',false);
+    else toast('Network error',false);
+    return{ok:false}
+  }
+}
+
+// ── Tab switching ──
+function switchTab(t){
+  _tab=t;
+  document.querySelectorAll('.sidebar-btn').forEach(function(b){b.classList.toggle('on',b.dataset.tab===t)});
+  var c=$('content');c.innerHTML='<div class="loading">Loading</div>';
+  // Close live log stream when leaving logs tab
+  if(t!=='logs'&&_logsEvtSrc){try{_logsEvtSrc.close()}catch(_){}_logsEvtSrc=null}
+  if(t==='overview')loadOverview();
+  else if(t==='users')loadUsers();
+  else if(t==='runs')loadRuns();
+  else if(t==='logs')loadLiveLogs();
+  else if(t==='billing')loadBilling();
+  else if(t==='incidents')loadIncidents();
+  else if(t==='agents')loadAgents();
+  else if(t==='audit')loadAudit();
+  else if(t==='health')loadHealth();
+}
+
+// ═══════════════════════════════════════════════
+// OVERVIEW
+// ═══════════════════════════════════════════════
+async function loadOverview(){
+  var d=await api('/api/ops/summary');
+  if(!d.ok){$('content').innerHTML='<div class="empty">Failed to load</div>';return}
+  var u=d.users||{},bt=u.by_tier||{},cr=d.credits||{};
+  var h='<h2 style="margin-bottom:24px">Overview</h2>';
+  h+='<div class="stat-row">';
+  h+='<div class="stat-card"><div class="stat-val">'+u.total+'</div><div class="stat-label">Total Users</div></div>';
+  h+='<div class="stat-card"><div class="stat-val">'+u.verified+'</div><div class="stat-label">Verified</div></div>';
+  h+='<div class="stat-card"><div class="stat-val">'+u.suspended+'</div><div class="stat-label">Suspended</div></div>';
+  h+='<div class="stat-card"><div class="stat-val">'+(d.recent_signups_7d||0)+'</div><div class="stat-label">Signups (7d)</div></div>';
+  h+='<div class="stat-card"><div class="stat-val">'+(d.running_agents||0)+'</div><div class="stat-label">Active Agents</div></div>';
+  h+='<div class="stat-card"><div class="stat-val">'+(cr.total_outstanding||0)+'</div><div class="stat-label">Credits Outstanding</div></div>';
+  h+='</div>';
+
+  // Tier breakdown
+  h+='<div class="section"><div class="section-title">Tier Breakdown</div><div class="stat-row" style="margin-bottom:0">';
+  ['free','growth','agency'].forEach(function(t){
+    h+='<div class="stat-card"><div class="stat-val">'+(bt[t]||0)+'</div><div class="stat-label">'+t.toUpperCase()+'</div></div>';
+  });
+  h+='</div></div>';
+
+  // Recent audit
+  h+='<div class="section"><div class="section-title">Recent Admin Actions</div>';
+  if(d.recent_audit&&d.recent_audit.length){
+    h+='<table class="mini-tbl"><thead><tr><th>Action</th><th>Target</th><th>Admin</th><th>When</th></tr></thead><tbody>';
+    d.recent_audit.forEach(function(a){
+      h+='<tr><td>'+esc(a.action)+'</td><td>'+esc(''+(a.target_user_id||'-'))+'</td><td>'+esc(''+(a.admin_user_id||'-'))+'</td><td>'+fmtDate(a.created_at)+'</td></tr>';
+    });
+    h+='</tbody></table>';
+  } else h+='<div class="empty">No recent actions</div>';
+  h+='</div>';
+
+  $('content').innerHTML=h;
+}
+
+// ═══════════════════════════════════════════════
+// USERS
+// ═══════════════════════════════════════════════
+async function loadUsers(){
+  var qs='page='+_usersPage+'&page_size=25';
+  if(_usersQ)qs+='&q='+encodeURIComponent(_usersQ);
+  if(_usersTier)qs+='&tier='+_usersTier;
+  if(_usersVerified)qs+='&verified='+_usersVerified;
+  if(_usersSuspended)qs+='&suspended='+_usersSuspended;
+  var d=await api('/api/ops/users?'+qs);
+  if(!d.ok){$('content').innerHTML='<div class="empty">Failed to load</div>';return}
+
+  var h='<h2 style="margin-bottom:24px">Users</h2>';
+  h+='<div class="search-bar">';
+  h+='<input type="text" id="userSearch" placeholder="Search email or name..." value="'+esc(_usersQ)+'" onkeydown="if(event.key===\'Enter\'){_usersQ=this.value;_usersPage=1;loadUsers()}">';
+  h+='<select id="filterTier" onchange="_usersTier=this.value;_usersPage=1;loadUsers()"><option value="">All tiers</option><option value="free"'+ (_usersTier==='free'?' selected':'')+'>Free</option><option value="growth"'+(_usersTier==='growth'?' selected':'')+'>Growth</option><option value="agency"'+(_usersTier==='agency'?' selected':'')+'>Agency</option></select>';
+  h+='<select id="filterVerified" onchange="_usersVerified=this.value;_usersPage=1;loadUsers()"><option value="">All status</option><option value="true"'+(_usersVerified==='true'?' selected':'')+'>Verified</option><option value="false"'+(_usersVerified==='false'?' selected':'')+'>Unverified</option></select>';
+  h+='<select id="filterSuspended" onchange="_usersSuspended=this.value;_usersPage=1;loadUsers()"><option value="">Not suspended</option><option value="true"'+(_usersSuspended==='true'?' selected':'')+'>Suspended only</option></select>';
+  h+='<button class="btn btn-secondary btn-sm" onclick="_usersQ=\'\';_usersTier=\'\';_usersVerified=\'\';_usersSuspended=\'\';_usersPage=1;loadUsers()">Reset</button>';
+  h+='</div>';
+
+  if(!d.items||!d.items.length){
+    h+='<div class="empty">No users found</div>';
+  } else {
+    h+='<table class="tbl"><thead><tr><th>ID</th><th>Email</th><th>Name</th><th>Tier</th><th>Credits</th><th>Status</th><th>Joined</th></tr></thead><tbody>';
+    d.items.forEach(function(u){
+      h+='<tr class="clickable" onclick="openUserDetail('+u.id+')">';
+      h+='<td style="font-family:var(--mono);font-size:12px;color:var(--t3)">'+u.id+'</td>';
+      h+='<td style="color:var(--t1);font-weight:500">'+esc(u.email)+'</td>';
+      h+='<td>'+esc(u.display_name||'-')+'</td>';
+      h+='<td>'+tierBadge(u.tier)+'</td>';
+      h+='<td style="font-family:var(--mono)">'+(u.credits_remaining||0)+'</td>';
+      h+='<td>'+verifiedBadge(u.email_verified)+(u.is_suspended?'  '+suspendedBadge(true):'')+'</td>';
+      h+='<td style="font-size:12px;color:var(--t3)">'+fmtDate(u.created_at)+'</td>';
+      h+='</tr>';
+    });
+    h+='</tbody></table>';
+  }
+
+  // Pagination
+  var totalPages=d.pages||1;
+  h+='<div class="pager">';
+  h+='<button onclick="_usersPage--;loadUsers()"'+(_usersPage<=1?' disabled':'')+'>Prev</button>';
+  h+='<span class="pager-info">Page '+_usersPage+' of '+totalPages+' ('+d.total+' users)</span>';
+  h+='<button onclick="_usersPage++;loadUsers()"'+(_usersPage>=totalPages?' disabled':'')+'>Next</button>';
+  h+='</div>';
+
+  $('content').innerHTML=h;
+}
+
+// ═══════════════════════════════════════════════
+// USER DETAIL
+// ═══════════════════════════════════════════════
+async function openUserDetail(uid){
+  $('content').innerHTML='<div class="loading">Loading user</div>';
+  try{
+  var d=await api('/api/ops/users/'+uid);
+  if(!d.ok){$('content').innerHTML='<div class="empty">User not found</div>';return}
+  var p=d.profile||{}, b=d.billing||{}, w=d.wizard||{}, ls=d.lead_stats||{}, ag=d.agent||{}, se=d.sessions||{}, pay=d.payments||{};
+  var initial=(p.display_name||p.email||'?')[0].toUpperCase();
+
+  var h='<button class="btn btn-secondary btn-sm" onclick="loadUsers()" style="margin-bottom:20px">&larr; Back to users</button>';
+
+  // Header
+  h+='<div class="detail-header">';
+  h+='<div class="detail-avatar">'+esc(initial)+'</div>';
+  h+='<div class="detail-meta">';
+  h+='<div class="detail-name">'+esc(p.display_name||'No name')+' <span style="font-size:13px;color:var(--t3);font-weight:400">#'+p.id+'</span></div>';
+  h+='<div class="detail-email">'+esc(p.email)+'</div>';
+  h+='<div class="detail-badges">'+tierBadge(p.tier)+' '+verifiedBadge(p.email_verified)+' '+(p.is_suspended?suspendedBadge(true):' <span class="badge badge-active">Active</span>')+' '+(p.is_admin?'<span class="badge" style="background:rgba(164,139,255,.08);color:var(--pur);border:1px solid rgba(164,139,255,.15)">Admin</span>':'')+'</div>';
+  h+='</div></div>';
+
+  // Action buttons
+  h+='<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:24px">';
+  h+='<button class="btn btn-primary btn-sm" onclick="openCreditsModal('+p.id+','+p.credits_remaining+')">Credits</button>';
+  h+='<button class="btn btn-secondary btn-sm" onclick="openPlanModal('+p.id+',\''+esc(p.tier)+'\')">Change Plan</button>';
+  if(!p.email_verified) h+='<button class="btn btn-secondary btn-sm" onclick="adminVerify('+p.id+',true)">Verify Email</button>';
+  else h+='<button class="btn btn-warn btn-sm" onclick="adminVerify('+p.id+',false)">Unverify</button>';
+  if(!p.is_suspended) h+='<button class="btn btn-danger btn-sm" onclick="adminSuspend('+p.id+',true)">Suspend</button>';
+  else h+='<button class="btn btn-sm" style="background:rgba(61,220,151,.08);color:var(--grn);border:1px solid rgba(61,220,151,.12)" onclick="adminSuspend('+p.id+',false)">Reactivate</button>';
+  h+='<button class="btn btn-warn btn-sm" onclick="adminClearSessions('+p.id+')">Clear Sessions ('+se.active_count+')</button>';
+  h+='<button class="btn btn-danger btn-sm" onclick="adminWizardReset('+p.id+')">Reset Wizard</button>';
+  h+='<button class="btn btn-danger btn-sm" onclick="adminAgentStop('+p.id+')">Force Stop Agent</button>';
+  h+='</div>';
+
+  // Info grid
+  h+='<div class="detail-grid">';
+
+  // Profile
+  h+='<div class="detail-section"><h4>Profile</h4>';
+  h+=detailRow('Email',p.email);
+  h+=detailRow('Auth',p.auth_provider||'email');
+  h+=detailRow('Joined',fmtDate(p.created_at));
+  h+=detailRow('Last Login',fmtDate(p.last_login));
+  h+='</div>';
+
+  // Billing
+  h+='<div class="detail-section"><h4>Billing</h4>';
+  h+=detailRow('Tier',(b.tier_name||'Free')+' ('+b.tier+')');
+  h+=detailRow('Credits',b.credits_remaining+' / '+b.monthly_credits+' monthly');
+  h+=detailRow('Reset Date',fmtDate(b.credits_reset_date));
+  h+='</div>';
+
+  // Wizard / Brain
+  h+='<div class="detail-section"><h4>Hunt Brain</h4>';
+  h+=detailRow('Configured',w.configured?'Yes':'No');
+  h+=detailRow('Archetype',w.archetype||'-');
+  h+=detailRow('Confidence',(w.archetype_confidence||0)+'%');
+  h+=detailRow('Brain',w.has_brain?'v'+w.brain_version:'None');
+  h+=detailRow('Dossier',w.has_dossier?'v'+w.dossier_version:'None');
+  h+=detailRow('Company',w.company_name||'-');
+  var _svcs=Array.isArray(w.services)?w.services:typeof w.services==='string'&&w.services?w.services.split(',').map(function(s){return s.trim()}).filter(Boolean):[];
+  if(_svcs.length){
+    h+='<div style="margin-top:8px"><span class="dr-label" style="font-size:11px;color:var(--t3)">Services</span><div class="tag-list" style="margin-top:4px">';
+    _svcs.slice(0,8).forEach(function(s){h+='<span class="tag">'+esc(s)+'</span>'});
+    h+='</div></div>';
+  }
+  h+='</div>';
+
+  // Leads / Agent
+  h+='<div class="detail-section"><h4>Leads & Agent</h4>';
+  h+=detailRow('Total Leads',ls.total||0);
+  h+=detailRow('Archived',ls.archived||0);
+  h+=detailRow('Sessions',se.active_count||0);
+  if(ag.recent_runs&&ag.recent_runs.length){
+    h+='<div style="margin-top:8px;font-size:11px;color:var(--t3)">Recent runs:</div>';
+    h+='<table class="mini-tbl" style="margin-top:4px"><thead><tr><th>Status</th><th>Leads</th><th>Started</th></tr></thead><tbody>';
+    ag.recent_runs.slice(0,5).forEach(function(r){
+      h+='<tr><td>'+esc(r.status)+'</td><td>'+(r.leads_found||0)+'</td><td>'+fmtDate(r.started_at)+'</td></tr>';
+    });
+    h+='</tbody></table>';
+  }
+  h+='</div>';
+
+  h+='</div>'; // end detail-grid
+
+  // Recent credit ledger
+  if(b.recent_ledger&&b.recent_ledger.length){
+    h+='<div class="section"><div class="section-title">Credit History</div>';
+    h+='<table class="mini-tbl"><thead><tr><th>Amount</th><th>Balance</th><th>Reason</th><th>When</th></tr></thead><tbody>';
+    b.recent_ledger.forEach(function(e){
+      var cl=e.amount>0?'color:var(--grn)':e.amount<0?'color:var(--red)':'';
+      h+='<tr><td style="font-family:var(--mono);'+cl+'">'+(e.amount>0?'+':'')+e.amount+'</td>';
+      h+='<td style="font-family:var(--mono)">'+e.balance_after+'</td>';
+      h+='<td>'+esc(e.reason||e.source||'-')+'</td>';
+      h+='<td>'+fmtDate(e.created_at)+'</td></tr>';
+    });
+    h+='</tbody></table></div>';
+  }
+
+  // Recent payments
+  if(pay.recent_events&&pay.recent_events.length){
+    h+='<div class="section"><div class="section-title">Stripe Events</div>';
+    h+='<table class="mini-tbl"><thead><tr><th>Type</th><th>Event ID</th><th>When</th></tr></thead><tbody>';
+    pay.recent_events.forEach(function(e){
+      h+='<tr><td>'+esc(e.event_type)+'</td><td style="font-family:var(--mono);font-size:10px">'+esc((e.event_id||'').slice(0,24))+'</td><td>'+fmtDate(e.processed_at)+'</td></tr>';
+    });
+    h+='</tbody></table></div>';
+  }
+
+  $('content').innerHTML=h;
+  }catch(e){console.error('User detail error:',e);$('content').innerHTML='<div class="empty">Error loading user: '+esc(e.message||'Unknown error')+'<br><br><button class="btn btn-secondary btn-sm" onclick="loadUsers()">&larr; Back to users</button></div>'}
+}
+
+function detailRow(label,val){
+  return '<div class="detail-row"><span class="dr-label">'+label+'</span><span class="dr-value">'+esc(String(val))+'</span></div>';
+}
+
+// ═══════════════════════════════════════════════
+// ADMIN ACTIONS
+// ═══════════════════════════════════════════════
+
+// Credits modal
+function openCreditsModal(uid,balance){
+  var bg=document.createElement('div');bg.className='modal-bg';bg.id='modalBg';
+  bg.onclick=function(e){if(e.target===bg)bg.remove()};
+  var m='<div class="modal"><h3>Manage Credits</h3>';
+  m+='<p style="font-size:12px;color:var(--t3);margin-bottom:16px">Current balance: <b style="color:var(--t1)">'+balance+'</b></p>';
+  m+='<div class="field"><label>Mode</label><select id="credMode"><option value="grant">Grant</option><option value="revoke">Revoke</option><option value="set_exact">Set Exact</option></select></div>';
+  m+='<div class="field"><label>Amount</label><input type="number" id="credAmount" min="0" value="5"></div>';
+  m+='<div class="field"><label>Reason</label><textarea id="credReason" placeholder="Required reason for audit trail"></textarea></div>';
+  m+='<div class="modal-actions"><button class="btn btn-secondary" onclick="$(&quot;modalBg&quot;).remove()">Cancel</button>';
+  m+='<button class="btn btn-primary" onclick="submitCredits('+uid+')">Apply</button></div></div>';
+  bg.innerHTML=m;document.body.appendChild(bg);
+}
+
+async function submitCredits(uid){
+  var mode=$('credMode').value,amount=parseInt($('credAmount').value)||0,reason=$('credReason').value.trim();
+  if(!reason){toast('Reason required',false);return}
+  var d=await api('/api/ops/users/'+uid+'/credits',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({mode:mode,amount:amount,reason:reason})});
+  if(d.ok){toast('Credits updated: '+d.old_balance+' -> '+d.new_balance,true);$('modalBg').remove();openUserDetail(uid)}
+}
+
+// Plan modal
+function openPlanModal(uid,current){
+  var bg=document.createElement('div');bg.className='modal-bg';bg.id='modalBg';
+  bg.onclick=function(e){if(e.target===bg)bg.remove()};
+  var m='<div class="modal"><h3>Change Plan</h3>';
+  m+='<p style="font-size:12px;color:var(--t3);margin-bottom:16px">Current: <b style="color:var(--t1)">'+current.toUpperCase()+'</b></p>';
+  m+='<div class="field"><label>New Tier</label><select id="planTier"><option value="free"'+(current==='free'?' selected':'')+'>Free</option><option value="growth"'+(current==='growth'?' selected':'')+'>Growth</option><option value="agency"'+(current==='agency'?' selected':'')+'>Agency</option></select></div>';
+  m+='<div class="field"><label>Reset Schedule</label><select id="planReset"><option value="preserve">Preserve existing</option><option value="restart_now">Restart now (30 days)</option></select></div>';
+  m+='<div class="field-inline" style="margin-bottom:14px"><input type="checkbox" id="planGrant"> <label for="planGrant" style="font-size:12px;color:var(--t2);margin:0;text-transform:none;letter-spacing:0">Grant tier credits now</label></div>';
+  m+='<div class="field"><label>Reason</label><textarea id="planReason" placeholder="Required reason for audit trail"></textarea></div>';
+  m+='<div class="modal-actions"><button class="btn btn-secondary" onclick="$(&quot;modalBg&quot;).remove()">Cancel</button>';
+  m+='<button class="btn btn-primary" onclick="submitPlan('+uid+')">Apply</button></div></div>';
+  bg.innerHTML=m;document.body.appendChild(bg);
+}
+
+async function submitPlan(uid){
+  var tier=$('planTier').value,reset=$('planReset').value,grant=$('planGrant').checked,reason=$('planReason').value.trim();
+  if(!reason){toast('Reason required',false);return}
+  var d=await api('/api/ops/users/'+uid+'/plan',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({tier:tier,reset_schedule:reset,grant_credits_now:grant,reason:reason})});
+  if(d.ok){toast('Plan changed: '+d.old_tier+' -> '+d.new_tier,true);$('modalBg').remove();openUserDetail(uid)}
+}
+
+// Quick actions
+async function adminVerify(uid,v){
+  if(!confirm((v?'Mark':'Unmark')+' user as verified?'))return;
+  var d=await api('/api/ops/users/'+uid+'/verify',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({verified:v})});
+  if(d.ok){toast('Email '+(v?'verified':'unverified'),true);openUserDetail(uid)}
+}
+
+async function adminSuspend(uid,s){
+  var reason='';
+  if(s){reason=prompt('Reason for suspension:');if(!reason)return}
+  var d=await api('/api/ops/users/'+uid+'/suspend',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({suspended:s,reason:reason||'admin action'})});
+  if(d.ok){toast(s?'User suspended ('+d.sessions_cleared+' sessions cleared)':'User reactivated',true);openUserDetail(uid)}
+}
+
+async function adminClearSessions(uid){
+  if(!confirm('Clear all sessions for this user? They will be logged out.'))return;
+  var d=await api('/api/ops/users/'+uid+'/sessions/clear',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({})});
+  if(d.ok){toast(d.cleared+' sessions cleared',true);openUserDetail(uid)}
+}
+
+async function adminWizardReset(uid){
+  var reason=prompt('Reason for wizard reset:');
+  if(!reason)return;
+  var d=await api('/api/ops/users/'+uid+'/wizard/reset',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({reason:reason})});
+  if(d.ok){toast('Wizard reset',true);openUserDetail(uid)}
+}
+
+async function adminAgentStop(uid){
+  if(!confirm('Force stop this user\'s running agent?'))return;
+  var d=await api('/api/ops/users/'+uid+'/agent/stop',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({})});
+  if(d.ok){toast(d.was_running?'Agent stopped':'No agent was running',true);openUserDetail(uid)}
+}
+
+// ═══════════════════════════════════════════════
+// BILLING
+// ═══════════════════════════════════════════════
+async function loadBilling(){
+  var d=await api('/api/ops/billing');
+  if(!d.ok){$('content').innerHTML='<div class="empty">Failed to load</div>';return}
+  var sm=d.summary||{};
+
+  var h='<h2 style="margin-bottom:24px">Billing</h2>';
+  h+='<div class="stat-row">';
+  h+='<div class="stat-card"><div class="stat-val">'+sm.stripe_events+'</div><div class="stat-label">Recent Stripe Events</div></div>';
+  h+='<div class="stat-card"><div class="stat-val">'+sm.credit_events+'</div><div class="stat-label">Recent Credit Events</div></div>';
+  h+='<div class="stat-card"><div class="stat-val'+(sm.possible_anomalies>0?'" style="color:var(--red)':'')+'">'+(sm.possible_anomalies||0)+'</div><div class="stat-label">Anomalies</div></div>';
+  h+='</div>';
+
+  // Anomalies
+  if(d.anomalies&&d.anomalies.length){
+    h+='<div class="section" style="border-color:rgba(255,100,100,.15)"><div class="section-title" style="color:var(--red)">Anomalies</div>';
+    h+='<table class="tbl"><thead><tr><th>User</th><th>Type</th><th>Details</th></tr></thead><tbody>';
+    d.anomalies.forEach(function(a){
+      h+='<tr><td>'+esc(''+(a.user_id||'-'))+'</td><td>'+esc(a.type||a.anomaly_type||'-')+'</td><td style="font-size:12px">'+esc(JSON.stringify(a.details||a).slice(0,120))+'</td></tr>';
+    });
+    h+='</tbody></table></div>';
+  }
+
+  // Recent Stripe events
+  h+='<div class="section"><div class="section-title">Stripe Events</div>';
+  if(d.recent_events&&d.recent_events.length){
+    h+='<table class="tbl"><thead><tr><th>Type</th><th>User</th><th>Product</th><th>Event ID</th><th>Processed</th></tr></thead><tbody>';
+    d.recent_events.forEach(function(e){
+      h+='<tr><td>'+esc(e.event_type)+'</td><td>'+esc(''+(e.user_id||'-'))+'</td><td>'+esc(e.product_id||'-')+'</td>';
+      h+='<td style="font-family:var(--mono);font-size:10px">'+esc((e.event_id||'').slice(0,20))+'</td>';
+      h+='<td style="font-size:12px">'+fmtDate(e.processed_at)+'</td></tr>';
+    });
+    h+='</tbody></table>';
+  } else h+='<div class="empty">No recent events</div>';
+  h+='</div>';
+
+  // Recent credit events
+  h+='<div class="section"><div class="section-title">Credit Events</div>';
+  if(d.recent_credit_events&&d.recent_credit_events.length){
+    h+='<table class="tbl"><thead><tr><th>User</th><th>Amount</th><th>Balance</th><th>Source</th><th>When</th></tr></thead><tbody>';
+    d.recent_credit_events.forEach(function(e){
+      var cl=e.amount>0?'color:var(--grn)':e.amount<0?'color:var(--red)':'';
+      h+='<tr><td>'+esc(''+(e.user_id||'-'))+'</td>';
+      h+='<td style="font-family:var(--mono);'+cl+'">'+(e.amount>0?'+':'')+e.amount+'</td>';
+      h+='<td style="font-family:var(--mono)">'+e.balance_after+'</td>';
+      h+='<td>'+esc(e.source||e.reason||'-')+'</td>';
+      h+='<td style="font-size:12px">'+fmtDate(e.created_at)+'</td></tr>';
+    });
+    h+='</tbody></table>';
+  } else h+='<div class="empty">No recent events</div>';
+  h+='</div>';
+
+  $('content').innerHTML=h;
+}
+
+// ═══════════════════════════════════════════════
+// AGENTS
+// ═══════════════════════════════════════════════
+async function loadAgents(){
+  var d=await api('/api/ops/agents');
+  if(!d.ok){$('content').innerHTML='<div class="empty">Failed to load</div>';return}
+
+  var h='<h2 style="margin-bottom:24px">Running Agents</h2>';
+  h+='<div class="stat-row"><div class="stat-card"><div class="stat-val">'+d.running+'</div><div class="stat-label">Currently Running</div></div></div>';
+
+  if(!d.agents||!d.agents.length){
+    h+='<div class="empty">No agents currently running</div>';
+  } else {
+    h+='<table class="tbl"><thead><tr><th>User</th><th>Email</th><th>Tier</th><th>Credits Used</th><th>Leads Found</th><th>Actions</th></tr></thead><tbody>';
+    d.agents.forEach(function(a){
+      h+='<tr><td style="font-family:var(--mono)">'+esc(''+a.user_id)+'</td>';
+      h+='<td>'+esc(a.email)+'</td>';
+      h+='<td>'+tierBadge(a.tier)+'</td>';
+      h+='<td style="font-family:var(--mono)">'+(a.credits_used||0)+'</td>';
+      h+='<td style="font-family:var(--mono)">'+(a.leads_found||0)+'</td>';
+      h+='<td><button class="btn btn-danger btn-sm" onclick="adminAgentStop('+parseInt(a.user_id)+');setTimeout(loadAgents,500)">Stop</button></td></tr>';
+    });
+    h+='</tbody></table>';
+  }
+
+  h+='<div style="margin-top:16px"><button class="btn btn-secondary btn-sm" onclick="loadAgents()">Refresh</button></div>';
+  $('content').innerHTML=h;
+}
+
+// ═══════════════════════════════════════════════
+// AUDIT LOG
+// ═══════════════════════════════════════════════
+async function loadAudit(){
+  var qs='page='+_auditPage+'&page_size=50';
+  var d=await api('/api/ops/audit?'+qs);
+  if(!d.ok){$('content').innerHTML='<div class="empty">Failed to load</div>';return}
+
+  var h='<h2 style="margin-bottom:24px">Audit Log</h2>';
+
+  if(!d.items||!d.items.length){
+    h+='<div class="empty">No audit entries</div>';
+  } else {
+    h+='<table class="tbl"><thead><tr><th>When</th><th>Admin</th><th>Action</th><th>Target</th><th>Details</th><th>IP</th></tr></thead><tbody>';
+    d.items.forEach(function(a){
+      var details='';
+      try{var det=typeof a.details==='string'?JSON.parse(a.details):a.details;details=JSON.stringify(det).slice(0,80)}catch(e){details=String(a.details||'').slice(0,80)}
+      h+='<tr><td style="font-size:12px;white-space:nowrap">'+fmtDate(a.created_at)+'</td>';
+      h+='<td>'+esc(''+(a.admin_user_id||'-'))+'</td>';
+      h+='<td style="color:var(--t1);font-weight:600">'+esc(a.action)+'</td>';
+      h+='<td>'+esc(''+(a.target_user_id||'-'))+'</td>';
+      h+='<td style="font-size:11px;font-family:var(--mono);color:var(--t3);max-width:200px;overflow:hidden;text-overflow:ellipsis">'+esc(details)+'</td>';
+      h+='<td style="font-size:11px;font-family:var(--mono);color:var(--t3)">'+esc(a.ip||'-')+'</td></tr>';
+    });
+    h+='</tbody></table>';
+  }
+
+  var totalPages=d.pages||1;
+  h+='<div class="pager">';
+  h+='<button onclick="_auditPage--;loadAudit()"'+(_auditPage<=1?' disabled':'')+'>Prev</button>';
+  h+='<span class="pager-info">Page '+_auditPage+' of '+totalPages+'</span>';
+  h+='<button onclick="_auditPage++;loadAudit()"'+(_auditPage>=totalPages?' disabled':'')+'>Next</button>';
+  h+='</div>';
+
+  $('content').innerHTML=h;
+}
+
+// ═══════════════════════════════════════════════
+// RUNS
+// ═══════════════════════════════════════════════
+async function loadRuns(){
+  var qs='page='+_runsPage+'&page_size=50';
+  if(_runsUser)qs+='&user_id='+encodeURIComponent(_runsUser);
+  if(_runsStatus)qs+='&status='+_runsStatus;
+  var d=await api('/api/ops/runs?'+qs);
+  if(!d.ok){$('content').textContent='Failed to load';return}
+
+  var c=$('content');c.textContent='';
+  var title=document.createElement('h2');title.style.marginBottom='24px';title.textContent='Agent Runs';c.appendChild(title);
+
+  // Search bar
+  var bar=document.createElement('div');bar.className='search-bar';
+  var inp=document.createElement('input');inp.type='text';inp.placeholder='Filter by user ID...';inp.value=_runsUser;
+  inp.onkeydown=function(e){if(e.key==='Enter'){_runsUser=inp.value;_runsPage=1;loadRuns()}};
+  bar.appendChild(inp);
+  var sel=document.createElement('select');
+  [{v:'',t:'All statuses'},{v:'running',t:'Running'},{v:'done',t:'Done'},{v:'stopped',t:'Stopped'},{v:'error',t:'Error'},{v:'crashed',t:'Crashed'}].forEach(function(o){
+    var opt=document.createElement('option');opt.value=o.v;opt.textContent=o.t;if(o.v===_runsStatus)opt.selected=true;sel.appendChild(opt);
+  });
+  sel.onchange=function(){_runsStatus=sel.value;_runsPage=1;loadRuns()};
+  bar.appendChild(sel);
+  var rst=document.createElement('button');rst.className='btn btn-secondary btn-sm';rst.textContent='Reset';
+  rst.onclick=function(){_runsUser='';_runsStatus='';_runsPage=1;loadRuns()};
+  bar.appendChild(rst);c.appendChild(bar);
+
+  if(!d.items||!d.items.length){
+    var emp=document.createElement('div');emp.className='empty';emp.textContent='No runs found';c.appendChild(emp);
+  } else {
+    // Build table with innerHTML (admin-only, all values escaped)
+    var tbl=document.createElement('div');
+    var h='<table class="tbl"><thead><tr><th>ID</th><th>User</th><th>Status</th><th>Leads</th><th>Queries</th><th>Started</th><th>Duration</th><th></th></tr></thead><tbody>';
+    d.items.forEach(function(r){
+      var dur='-';
+      if(r.started_at&&r.ended_at){try{var ms=new Date(r.ended_at)-new Date(r.started_at);dur=Math.round(ms/1000)+'s';if(ms>60000)dur=Math.round(ms/60000)+'m'}catch(_){}}
+      else if(r.status==='running')dur='running...';
+      var stCls=r.status==='running'?'badge-active':r.status==='done'?'badge-verified':r.status==='error'||r.status==='crashed'?'badge-suspended':'badge-free';
+      h+='<tr class="clickable" onclick="openRunDetail('+parseInt(r.id)+')">';
+      h+='<td style="font-family:var(--mono);font-size:12px;color:var(--t3)">'+parseInt(r.id)+'</td>';
+      h+='<td style="color:var(--t1)">'+esc(r.email||('User '+r.user_id))+'</td>';
+      h+='<td><span class="badge '+stCls+'">'+esc(r.status||'?')+'</span></td>';
+      h+='<td style="font-family:var(--mono)">'+(parseInt(r.leads_found)||0)+'</td>';
+      h+='<td style="font-family:var(--mono)">'+(parseInt(r.queries_done)||0)+'/'+(parseInt(r.queries_total)||0)+'</td>';
+      h+='<td style="font-size:12px;color:var(--t3)">'+fmtDate(r.started_at)+'</td>';
+      h+='<td style="font-size:12px;font-family:var(--mono);color:var(--t3)">'+esc(dur)+'</td>';
+      h+='<td><button class="btn btn-secondary btn-sm" onclick="event.stopPropagation();openRunDetail('+parseInt(r.id)+')">View</button></td>';
+      h+='</tr>';
+    });
+    h+='</tbody></table>';
+    tbl.innerHTML=h;c.appendChild(tbl);
+  }
+
+  // Pagination
+  var totalPages=d.pages||1;
+  var pg=document.createElement('div');pg.className='pager';
+  var prev=document.createElement('button');prev.textContent='Prev';prev.disabled=_runsPage<=1;prev.onclick=function(){_runsPage--;loadRuns()};pg.appendChild(prev);
+  var info=document.createElement('span');info.className='pager-info';info.textContent='Page '+_runsPage+' of '+totalPages+' ('+d.total+' runs)';pg.appendChild(info);
+  var next=document.createElement('button');next.textContent='Next';next.disabled=_runsPage>=totalPages;next.onclick=function(){_runsPage++;loadRuns()};pg.appendChild(next);
+  c.appendChild(pg);
+}
+
+async function openRunDetail(rid){
+  $('content').textContent='';
+  var ld=document.createElement('div');ld.className='loading';ld.textContent='Loading run';$('content').appendChild(ld);
+  var d=await api('/api/ops/runs/'+rid);
+  if(!d.ok||!d.run){$('content').textContent='';var em=document.createElement('div');em.className='empty';em.textContent='Run not found';$('content').appendChild(em);return}
+  var r=d.run, logs=d.logs||[];
+
+  var c=$('content');c.textContent='';
+
+  // Back button
+  var back=document.createElement('button');back.className='btn btn-secondary btn-sm';back.style.marginBottom='20px';back.textContent='\u2190 Back to runs';back.onclick=function(){loadRuns()};c.appendChild(back);
+
+  // Header
+  var dur='-';
+  if(r.started_at&&r.ended_at){try{var ms=new Date(r.ended_at)-new Date(r.started_at);dur=Math.round(ms/1000)+'s';if(ms>60000)dur=Math.round(ms/60000)+'m '+Math.round((ms%60000)/1000)+'s'}catch(_){}}
+  var stCls=r.status==='running'?'badge-active':r.status==='done'?'badge-verified':r.status==='error'||r.status==='crashed'?'badge-suspended':'badge-free';
+
+  var hdr=document.createElement('div');hdr.className='detail-header';
+  var av=document.createElement('div');av.className='detail-avatar';av.style.fontSize='14px';av.textContent='#'+r.id;hdr.appendChild(av);
+  var meta=document.createElement('div');meta.className='detail-meta';
+  var nm=document.createElement('div');nm.className='detail-name';nm.textContent='Run #'+r.id;meta.appendChild(nm);
+  var em=document.createElement('div');em.className='detail-email';em.textContent=r.email||('User '+r.user_id);meta.appendChild(em);
+  var badges=document.createElement('div');badges.className='detail-badges';
+  var badge=document.createElement('span');badge.className='badge '+stCls;badge.textContent=r.status||'?';badges.appendChild(badge);meta.appendChild(badges);
+  hdr.appendChild(meta);c.appendChild(hdr);
+
+  // Force stop
+  if(r.status==='running'){
+    var stopDiv=document.createElement('div');stopDiv.style.marginBottom='20px';
+    var stopBtn=document.createElement('button');stopBtn.className='btn btn-danger btn-sm';stopBtn.textContent='Force Stop';
+    stopBtn.onclick=function(){adminAgentStop(r.user_id);setTimeout(function(){openRunDetail(rid)},1000)};
+    stopDiv.appendChild(stopBtn);c.appendChild(stopDiv);
+  }
+
+  // Info grid (using innerHTML for compact table layout, admin-only page)
+  var grid=document.createElement('div');grid.className='detail-grid';
+  grid.innerHTML='<div class="detail-section"><h4>Run Info</h4>'
+    +detailRow('Status',r.status)+detailRow('User ID',r.user_id)+detailRow('Leads Found',r.leads_found||0)
+    +detailRow('AI Calls',r.ai_calls||0)+detailRow('Queries',(r.queries_done||0)+' / '+(r.queries_total||0))
+    +'</div><div class="detail-section"><h4>Timing</h4>'
+    +detailRow('Started',fmtDate(r.started_at))+detailRow('Ended',r.ended_at?fmtDate(r.ended_at):'still running')+detailRow('Duration',dur)
+    +'</div>';
+  c.appendChild(grid);
+
+  // Log entries
+  var logSec=document.createElement('div');logSec.className='section';
+  var logTitle=document.createElement('div');logTitle.className='section-title';logTitle.textContent='Run Logs ('+logs.length+' entries)';logSec.appendChild(logTitle);
+  if(logs.length){
+    logs.forEach(function(log){
+      var entry=document.createElement('div');entry.style.cssText='margin-bottom:12px;padding:12px;background:var(--s2);border:1px solid var(--bd);border-radius:var(--r-sm)';
+      var hd=document.createElement('div');hd.style.cssText='display:flex;justify-content:space-between;margin-bottom:6px';
+      var ts=document.createElement('span');ts.style.cssText='font-size:11px;color:var(--t3)';ts.textContent=fmtDate(log.created_at);hd.appendChild(ts);
+      var st=document.createElement('span');st.style.cssText='font:600 11px/1 var(--mono);color:var(--t3)';st.textContent='Leads: '+(log.leads_found||0)+' | Queries: '+(log.queries_run||0)+' | URLs: '+(log.urls_checked||0);hd.appendChild(st);
+      entry.appendChild(hd);
+      if(log.log_text){
+        var pre=document.createElement('pre');pre.style.cssText='font:400 11px/1.5 var(--mono);color:var(--t2);white-space:pre-wrap;word-break:break-word;max-height:300px;overflow-y:auto';pre.textContent=log.log_text;entry.appendChild(pre);
+      }
+      logSec.appendChild(entry);
+    });
+  } else {
+    var emp2=document.createElement('div');emp2.className='empty';emp2.textContent='No log entries saved for this run';logSec.appendChild(emp2);
+  }
+  c.appendChild(logSec);
+}
+
+// ═══════════════════════════════════════════════
+// LIVE LOGS (SSE stream for admin)
+// ═══════════════════════════════════════════════
+async function loadLiveLogs(){
+  var c=$('content');c.textContent='';
+  var title=document.createElement('h2');title.style.marginBottom='24px';title.textContent='Live Logs';c.appendChild(title);
+
+  // Running agents for the selector
+  var resp=await api('/api/ops/agents');
+  var running=(resp&&resp.ok&&resp.agents)?resp.agents:[];
+
+  var bar=document.createElement('div');bar.style.cssText='display:flex;gap:8px;margin-bottom:16px;flex-wrap:wrap;align-items:center';
+
+  var sel=document.createElement('select');sel.id='logsUserSel';sel.style.cssText='padding:8px 12px;border-radius:var(--r-sm);background:var(--s2);border:1px solid var(--bd);color:var(--t1);font:400 13px/1 var(--font);min-width:260px';
+  var def=document.createElement('option');def.value='';def.textContent=running.length?'Select running user…':'No running agents';sel.appendChild(def);
+  running.forEach(function(a){
+    var opt=document.createElement('option');
+    opt.value=a.user_id;
+    opt.textContent='#'+a.user_id+' · '+(a.email||'?')+' · '+(a.leads_found||0)+' leads';
+    sel.appendChild(opt);
+  });
+  bar.appendChild(sel);
+
+  var uidLabel=document.createElement('span');uidLabel.style.cssText='color:var(--t3);font-size:12px';uidLabel.textContent='or user ID:';bar.appendChild(uidLabel);
+  var uidInput=document.createElement('input');uidInput.id='logsUserIdInput';uidInput.type='number';uidInput.placeholder='123';uidInput.style.cssText='padding:8px 12px;border-radius:var(--r-sm);background:var(--s2);border:1px solid var(--bd);color:var(--t1);font:400 13px/1 var(--font);width:90px';bar.appendChild(uidInput);
+
+  var connBtn=document.createElement('button');connBtn.className='btn btn-primary btn-sm';connBtn.id='logsConnectBtn';connBtn.textContent='Connect';connBtn.onclick=connectAdminSSE;bar.appendChild(connBtn);
+  var clrBtn=document.createElement('button');clrBtn.className='btn btn-secondary btn-sm';clrBtn.textContent='Clear';clrBtn.onclick=clearAdminLogs;bar.appendChild(clrBtn);
+  var statusSpan=document.createElement('span');statusSpan.id='logsStatus';statusSpan.style.cssText='font-size:12px;color:var(--t3);display:flex;align-items:center;gap:6px';bar.appendChild(statusSpan);
+  c.appendChild(bar);
+
+  var hint=document.createElement('div');hint.style.cssText='font-size:11px;color:var(--t3);margin-bottom:12px';hint.textContent='Picks the event bus for the chosen user. The manual ID field wins if both are filled — useful for inspecting a just-ended run\u2019s final status.';c.appendChild(hint);
+
+  var wrap=document.createElement('div');wrap.id='adminLogWrap';wrap.style.cssText='background:var(--s1);border:1px solid var(--bd);border-radius:var(--r-lg);padding:16px;max-height:calc(100vh - 220px);overflow-y:auto;font:400 12px/1.6 var(--mono)';c.appendChild(wrap);
+}
+
+function connectAdminSSE(){
+  if(_logsEvtSrc){try{_logsEvtSrc.close()}catch(_){}_logsEvtSrc=null}
+  var statusEl=$('logsStatus');
+  var sel=$('logsUserSel');var uidInput=$('logsUserIdInput');
+  var raw=(uidInput&&uidInput.value)?uidInput.value:(sel?sel.value:'');
+  var uid=parseInt(raw,10);
+  if(!uid||isNaN(uid)){
+    if(statusEl){statusEl.textContent='';var d=document.createElement('span');d.style.cssText='width:6px;height:6px;border-radius:50%;background:var(--org);display:inline-block';statusEl.appendChild(d);statusEl.appendChild(document.createTextNode(' Pick a user first'))}
+    return;
+  }
+  if(statusEl)statusEl.textContent='Connecting…';
+  try{
+    _logsEvtSrc=new EventSource('/api/ops/users/'+uid+'/events');
+    _logsEvtSrc.onopen=function(){
+      if(statusEl){statusEl.textContent='';var dot=document.createElement('span');dot.style.cssText='width:6px;height:6px;border-radius:50%;background:var(--grn);display:inline-block';statusEl.appendChild(dot);var txt=document.createTextNode(' Connected · user '+uid);statusEl.appendChild(txt)}
+      var btn=$('logsConnectBtn');if(btn){btn.textContent='Disconnect';btn.onclick=disconnectAdminSSE}
+    };
+    _logsEvtSrc.onerror=function(){
+      if(statusEl){statusEl.textContent='';var dot=document.createElement('span');dot.style.cssText='width:6px;height:6px;border-radius:50%;background:var(--red);display:inline-block';statusEl.appendChild(dot);var txt=document.createTextNode(' Disconnected');statusEl.appendChild(txt)}
+    };
+    ['log','thought','status','progress','lead','screenshot','browsing_state','scan_report','credits_exhausted'].forEach(function(evt){
+      _logsEvtSrc.addEventListener(evt,function(e){addAdminLog(evt,e.data)});
+    });
+  }catch(err){
+    if(statusEl)statusEl.textContent='Failed: '+err.message;
+  }
+}
+
+function disconnectAdminSSE(){
+  if(_logsEvtSrc){try{_logsEvtSrc.close()}catch(_){}_logsEvtSrc=null}
+  var statusEl=$('logsStatus');if(statusEl){statusEl.textContent='';var dot=document.createElement('span');dot.style.cssText='width:6px;height:6px;border-radius:50%;background:var(--t3);display:inline-block';statusEl.appendChild(dot);var txt=document.createTextNode(' Disconnected');statusEl.appendChild(txt)}
+  var btn=$('logsConnectBtn');if(btn){btn.textContent='Connect';btn.onclick=connectAdminSSE}
+}
+
+var _logColors={log:'var(--t2)',thought:'var(--pur)',status:'var(--acc)',progress:'var(--blu)',lead:'var(--org)',screenshot:'var(--t3)',browsing_state:'var(--t3)',scan_report:'var(--grn)',credits_exhausted:'var(--red)'};
+
+function addAdminLog(type,raw){
+  var wrap=$('adminLogWrap');if(!wrap)return;
+  var now=new Date().toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit',second:'2-digit'});
+  var line=document.createElement('div');
+  line.style.cssText='padding:2px 0;border-bottom:1px solid var(--bd);display:flex;gap:8px';
+  var ts=document.createElement('span');ts.style.cssText='color:var(--t3);flex-shrink:0;min-width:60px';ts.textContent=now;
+  var tp=document.createElement('span');tp.style.cssText='color:'+(_logColors[type]||'var(--t2)')+';flex-shrink:0;min-width:80px;font-weight:600;text-transform:uppercase;font-size:10px';tp.textContent=type;
+  var msg=document.createElement('span');msg.style.cssText='color:var(--t2);word-break:break-word';
+  try{
+    var d=JSON.parse(raw);
+    if(type==='log')msg.textContent=d.msg||raw;
+    else if(type==='thought')msg.textContent='['+( d.mood||'?')+'] '+(d.msg||'');
+    else if(type==='status')msg.textContent=(d.state||'')+': '+(d.text||'');
+    else if(type==='progress')msg.textContent='Q:'+(d.current||0)+'/'+(d.total||0)+' URLs:'+(d.urls||0)+' Leads:'+(d.leads||0);
+    else if(type==='lead')msg.textContent='LEAD: '+(d.org_name||'?')+' (score '+(d.fit_score||0)+') '+(d.country||'');
+    else if(type==='browsing_state')msg.textContent='Browsing: '+(d.url||'');
+    else if(type==='scan_report')msg.textContent='Report: '+(d.total||0)+' leads, '+(d.hot||0)+' hot';
+    else msg.textContent=raw.substring(0,200);
+  }catch(_){msg.textContent=raw.substring(0,200)}
+  line.appendChild(ts);line.appendChild(tp);line.appendChild(msg);
+  wrap.appendChild(line);
+  if(wrap.children.length>1000)wrap.removeChild(wrap.firstChild);
+  wrap.scrollTop=wrap.scrollHeight;
+}
+
+function clearAdminLogs(){
+  var wrap=$('adminLogWrap');if(wrap)wrap.textContent='';
+}
+
+// ═══════════════════════════════════════════════
+// INCIDENTS
+// ═══════════════════════════════════════════════
+async function loadIncidents(){
+  var d=await api('/api/ops/incidents');
+  if(!d.ok){$('content').textContent='Failed to load';return}
+  var c=$('content');c.textContent='';
+
+  var title=document.createElement('h2');title.style.marginBottom='24px';title.textContent='Incidents';c.appendChild(title);
+
+  // Stat cards
+  var stats=document.createElement('div');stats.className='stat-row';
+  var errCount=(d.errors?d.errors.length:0);
+  var anomCount=(d.anomalies?d.anomalies.length:0);
+  var s1=document.createElement('div');s1.className='stat-card';
+  var v1=document.createElement('div');v1.className='stat-val';if(errCount>0)v1.style.color='var(--red)';v1.textContent=errCount;s1.appendChild(v1);
+  var l1=document.createElement('div');l1.className='stat-label';l1.textContent='Failed Runs';s1.appendChild(l1);stats.appendChild(s1);
+  var s2=document.createElement('div');s2.className='stat-card';
+  var v2=document.createElement('div');v2.className='stat-val';if(anomCount>0)v2.style.color='var(--org)';v2.textContent=anomCount;s2.appendChild(v2);
+  var l2=document.createElement('div');l2.className='stat-label';l2.textContent='Billing Anomalies';s2.appendChild(l2);stats.appendChild(s2);
+  c.appendChild(stats);
+
+  // Failed runs (using innerHTML in admin-only context, all values escaped)
+  var errSec=document.createElement('div');errSec.className='section';
+  if(d.errors&&d.errors.length){
+    var eh='<div class="section-title">Failed / Errored Runs</div><table class="tbl"><thead><tr><th>Run</th><th>User</th><th>Status</th><th>Leads</th><th>Started</th><th>Ended</th><th></th></tr></thead><tbody>';
+    d.errors.forEach(function(r){
+      eh+='<tr class="clickable" onclick="openRunDetail('+parseInt(r.id)+')">';
+      eh+='<td style="font-family:var(--mono);font-size:12px">'+parseInt(r.id)+'</td>';
+      eh+='<td>'+esc(r.email||('User '+r.user_id))+'</td>';
+      eh+='<td><span class="badge badge-suspended">'+esc(r.status)+'</span></td>';
+      eh+='<td style="font-family:var(--mono)">'+(parseInt(r.leads_found)||0)+'</td>';
+      eh+='<td style="font-size:12px;color:var(--t3)">'+fmtDate(r.started_at)+'</td>';
+      eh+='<td style="font-size:12px;color:var(--t3)">'+fmtDate(r.ended_at)+'</td>';
+      eh+='<td><button class="btn btn-secondary btn-sm" onclick="event.stopPropagation();openRunDetail('+parseInt(r.id)+')">View</button></td>';
+      eh+='</tr>';
+    });
+    eh+='</tbody></table>';errSec.innerHTML=eh;
+  } else {
+    var et=document.createElement('div');et.className='section-title';et.textContent='Failed / Errored Runs';errSec.appendChild(et);
+    var ne=document.createElement('div');ne.className='empty';ne.textContent='No failed runs';errSec.appendChild(ne);
+  }
+  c.appendChild(errSec);
+
+  // Anomalies
+  var anomSec=document.createElement('div');anomSec.className='section';
+  if(d.anomalies&&d.anomalies.length){
+    var ah='<div class="section-title">Billing Anomalies</div><table class="tbl"><thead><tr><th>User</th><th>Type</th><th>Details</th></tr></thead><tbody>';
+    d.anomalies.forEach(function(a){
+      ah+='<tr><td>'+esc(''+(a.user_id||'-'))+'</td><td>'+esc(a.type||a.anomaly_type||'-')+'</td><td style="font-size:12px">'+esc(JSON.stringify(a.details||a).slice(0,120))+'</td></tr>';
+    });
+    ah+='</tbody></table>';anomSec.innerHTML=ah;
+  } else {
+    var at2=document.createElement('div');at2.className='section-title';at2.textContent='Billing Anomalies';anomSec.appendChild(at2);
+    var na=document.createElement('div');na.className='empty';na.textContent='No anomalies detected';anomSec.appendChild(na);
+  }
+  c.appendChild(anomSec);
+
+  var refresh=document.createElement('button');refresh.className='btn btn-secondary btn-sm';refresh.style.marginTop='12px';refresh.textContent='Refresh';refresh.onclick=loadIncidents;c.appendChild(refresh);
+}
+
+// ═══════════════════════════════════════════════
+// HEALTH
+// ═══════════════════════════════════════════════
+async function loadHealth(){
+  var d=await api('/api/ops/health');
+  if(!d.ok){$('content').textContent='Failed to load';return}
+  var hl=d.health||{};
+  var c=$('content');c.textContent='';
+
+  var title=document.createElement('h2');title.style.marginBottom='24px';title.textContent='System Health';c.appendChild(title);
+
+  var stats=document.createElement('div');stats.className='stat-row';
+  [{name:'Database',key:'db',okVals:['ok']},{name:'SearXNG',key:'searxng',okVals:['ok']},{name:'Gemini',key:'gemini',okVals:['configured']}].forEach(function(svc){
+    var val=hl[svc.key]||'unknown';
+    var isOk=svc.okVals.indexOf(val)>=0;
+    var card=document.createElement('div');card.className='stat-card';
+    var v=document.createElement('div');v.className='stat-val';v.style.fontSize='18px';v.style.color=isOk?'var(--grn)':'var(--red)';v.textContent=val;card.appendChild(v);
+    var l=document.createElement('div');l.className='stat-label';l.textContent=svc.name;card.appendChild(l);
+    stats.appendChild(card);
+  });
+  c.appendChild(stats);
+
+  if(hl.db_pool){
+    var poolSec=document.createElement('div');poolSec.className='section';
+    poolSec.innerHTML='<div class="section-title">Connection Pool</div>'+detailRow('Min Connections',hl.db_pool.min)+detailRow('Max Connections',hl.db_pool.max);
+    c.appendChild(poolSec);
+  }
+
+  var refresh=document.createElement('button');refresh.className='btn btn-secondary btn-sm';refresh.style.marginTop='12px';refresh.textContent='Refresh';refresh.onclick=loadHealth;c.appendChild(refresh);
+}
+
+// ── Init ──
+switchTab('overview');
+</script>
+</body>
+</html>
