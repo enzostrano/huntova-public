@@ -1,0 +1,253 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Account — Huntova</title>
+<meta name="robots" content="noindex, nofollow">
+<link rel="icon" type="image/png" sizes="32x32" href="/static/favicon-32x32.png">
+<link rel="apple-touch-icon" sizes="180x180" href="/static/apple-touch-icon.png">
+<link rel="preconnect" href="https://api.fontshare.com" crossorigin>
+<link href="https://api.fontshare.com/v2/css?f[]=satoshi@400,500,600,700&display=swap" rel="stylesheet">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Geist+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{--bg:#08090c;--s1:#0d0f14;--s2:#11141a;--s3:#1c2029;--s4:#272b35;--t1:#eef0f4;--t2:#8a93a4;--t3:#5d6679;--bd:#1c2029;--bd2:#272b35;--acc:#7c5cff;--acc-subtle:rgba(124,92,255,.06);--acc-border:rgba(124,92,255,.18);--cyn:#7c5cff;--org:#f6b352;--red:#ff6464;--grn:#3ddc97;--r:8px;--r-sm:6px;--r-lg:12px;--font:'Satoshi',-apple-system,system-ui,sans-serif;--mono:'Geist Mono','JetBrains Mono',monospace}
+body{background:var(--bg);color:var(--t2);font:400 14px/1.6 var(--font);-webkit-font-smoothing:antialiased;min-height:100vh}
+a{color:var(--acc);text-decoration:none}a:hover{color:var(--cyn)}
+h1,h2,h3{color:var(--t1);font-weight:700;letter-spacing:-.03em}
+.topnav{display:flex;align-items:center;padding:16px 32px;border-bottom:1px solid var(--bd)}
+.topnav-logo{font:700 17px/1 var(--mono);letter-spacing:-.03em;margin-right:auto}
+.topnav-logo b{color:var(--acc)}
+.topnav a.back{font:600 13px/1 var(--font);color:var(--t3);transition:color .2s}
+.topnav a.back:hover{color:var(--t1)}
+.container{max-width:640px;margin:0 auto;padding:40px 24px 80px}
+.page-title{font-size:24px;margin-bottom:32px}
+.section{background:var(--s1);border:1px solid var(--bd);border-radius:var(--r-lg);padding:28px;margin-bottom:20px}
+.section-title{font-size:13px;font-weight:700;color:var(--t3);text-transform:uppercase;letter-spacing:.08em;margin-bottom:20px;font-family:var(--mono)}
+.field{margin-bottom:16px}
+.field label{display:block;font-size:11px;font-weight:700;color:var(--t3);text-transform:uppercase;letter-spacing:.06em;margin-bottom:6px}
+.field input{width:100%;padding:10px 14px;border-radius:var(--r-sm);background:var(--s2);border:1px solid var(--bd);color:var(--t1);font:400 13px/1 var(--font);outline:none;box-sizing:border-box;transition:.2s}
+.field input:focus{border-color:var(--acc);box-shadow:0 0 0 3px rgba(124,92,255,.06)}
+.field input:disabled{opacity:.4;cursor:not-allowed}
+.field-hint{font-size:11px;color:var(--t3);margin-top:4px}
+.field-row{display:flex;gap:12px;align-items:flex-end}
+.field-row .field{flex:1}
+.btn{padding:10px 20px;border-radius:var(--r-sm);font:700 13px/1 var(--font);border:none;cursor:pointer;transition:all .2s}
+.btn:disabled{opacity:.4;cursor:not-allowed}
+.btn-primary{background:var(--acc);color:#fff}
+.btn-primary:hover{box-shadow:0 4px 12px rgba(124,92,255,.2)}
+.btn-secondary{background:var(--s3);color:var(--t2);border:1px solid var(--bd)}
+.btn-secondary:hover{background:var(--s4);color:var(--t1)}
+.btn-danger{background:rgba(255,100,100,.08);color:var(--red);border:1px solid rgba(255,100,100,.12)}
+.btn-danger:hover{background:rgba(255,100,100,.12)}
+.badge{font:700 10px/1 var(--mono);padding:3px 8px;border-radius:999px;display:inline-block;text-transform:uppercase;letter-spacing:.06em}
+.badge-verified{background:rgba(61,220,151,.08);color:var(--grn);border:1px solid rgba(61,220,151,.12)}
+.badge-unverified{background:rgba(246,179,82,.08);color:var(--org);border:1px solid rgba(246,179,82,.12)}
+.badge-plan{background:var(--acc-subtle);color:var(--acc);border:1px solid var(--acc-border)}
+.stat-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:12px;margin-bottom:20px}
+.stat-card{background:var(--s2);border:1px solid var(--bd);border-radius:var(--r-sm);padding:16px}
+.stat-val{font:800 24px/1 var(--mono);color:var(--t1);margin-bottom:4px}
+.stat-label{font-size:11px;color:var(--t3)}
+.provider-row{display:flex;align-items:center;gap:10px;padding:10px 14px;background:var(--s2);border:1px solid var(--bd);border-radius:var(--r-sm);margin-bottom:8px;font-size:13px}
+.provider-row .provider-icon{width:20px;text-align:center;flex-shrink:0}
+.provider-row .provider-name{color:var(--t1);font-weight:600}
+.provider-row .provider-status{margin-left:auto;font-size:11px;color:var(--grn)}
+.msg{padding:10px 16px;border-radius:var(--r-sm);font-size:13px;margin-top:12px;display:none}
+.msg.ok{display:block;background:rgba(61,220,151,.06);border:1px solid rgba(61,220,151,.12);color:var(--grn)}
+.msg.err{display:block;background:rgba(255,100,100,.06);border:1px solid rgba(255,100,100,.12);color:var(--red)}
+.danger-zone{border-color:rgba(255,100,100,.12)}
+.danger-zone .section-title{color:var(--red)}
+.separator{height:1px;background:var(--bd);margin:20px 0}
+@media(max-width:600px){.container{padding:24px 16px 60px}.section{padding:20px}.stat-grid{grid-template-columns:1fr 1fr}.field-row{flex-direction:column;gap:0}}
+</style>
+</head>
+<body>
+<div class="topnav">
+  <div class="topnav-logo">Hunt<b>ova</b></div>
+  <a href="/" class="back">&larr; Back to dashboard</a>
+</div>
+<main class="container">
+  <h1 class="page-title">Account</h1>
+
+  <!-- Profile -->
+  <div class="section" id="profileSection">
+    <div class="section-title">Profile</div>
+    <div class="field"><label for="acctName">Display Name</label><input type="text" id="acctName" placeholder="Your name" autocomplete="name"></div>
+    <div class="field"><label for="acctEmail">Email</label>
+      <div style="display:flex;align-items:center;gap:8px">
+        <input type="email" id="acctEmail" disabled style="flex:1">
+        <span class="badge" id="acctVerified"></span>
+      </div>
+    </div>
+    <button class="btn btn-primary" onclick="saveProfile()">Save Profile</button>
+    <div class="msg" id="profileMsg"></div>
+  </div>
+
+  <!-- Billing — hidden in local CLI / BYOK mode -->
+  <div class="section hv-billing-only" id="billingSection">
+    <div class="section-title">Plan & Credits</div>
+    <div class="stat-grid">
+      <div class="stat-card"><div class="stat-val" id="acctPlan">Free</div><div class="stat-label">Current plan</div></div>
+      <div class="stat-card"><div class="stat-val" id="acctCredits">0</div><div class="stat-label">Credits remaining</div></div>
+      <div class="stat-card"><div class="stat-val" id="acctIncluded">10</div><div class="stat-label">Included monthly</div></div>
+      <div class="stat-card"><div class="stat-val" id="acctRuns">0</div><div class="stat-label">Agent runs</div></div>
+    </div>
+    <p style="font-size:12px;color:var(--t3);margin-bottom:16px;line-height:1.6">Credits refill monthly on your billing date. 1 credit = 1 qualified lead. Top-up credits never expire.</p>
+    <button class="btn btn-primary" onclick="window._acctUpgrade()">Upgrade Plan</button>
+    <button class="btn btn-secondary" style="margin-left:8px" onclick="window._acctUpgrade()">Buy Credits</button>
+  </div>
+
+  <!-- Security -->
+  <div class="section" id="securitySection">
+    <div class="section-title">Security</div>
+    <div style="margin-bottom:16px">
+      <div style="font-size:12px;font-weight:600;color:var(--t2);margin-bottom:8px">Sign-in methods</div>
+      <div id="providerList"></div>
+    </div>
+    <div class="separator"></div>
+    <div style="font-size:12px;font-weight:600;color:var(--t2);margin-bottom:12px" id="pwTitle">Change Password</div>
+    <div id="pwCurrentWrap" class="field"><label for="acctPwCurrent">Current Password</label><input type="password" id="acctPwCurrent" placeholder="Current password" autocomplete="current-password"></div>
+    <div class="field"><label for="acctPwNew">New Password</label><input type="password" id="acctPwNew" placeholder="At least 6 characters" minlength="6" autocomplete="new-password"></div>
+    <div class="field"><label for="acctPwConfirm">Confirm Password</label><input type="password" id="acctPwConfirm" placeholder="Repeat new password" minlength="6" autocomplete="new-password"></div>
+    <button class="btn btn-primary" onclick="changePassword()">Update Password</button>
+    <div class="msg" id="pwMsg"></div>
+  </div>
+
+  <!-- Danger Zone -->
+  <div class="section danger-zone">
+    <div class="section-title">Danger Zone</div>
+    <p style="font-size:13px;margin-bottom:16px">Permanently delete your account and all associated data. This action cannot be undone.</p>
+    <button class="btn btn-danger" onclick="openDeleteModal()">Delete Account</button>
+    <div class="msg" id="deleteMsg"></div>
+  </div>
+</main>
+
+<!-- Custom in-app delete confirmation. Replaces the unbranded
+     browser confirm() — typed-phrase gate prevents accidental clicks. -->
+<div id="deleteBg" style="display:none;position:fixed;inset:0;background:rgba(4,6,10,.72);z-index:1000;align-items:center;justify-content:center;padding:16px" role="dialog" aria-modal="true" aria-label="Confirm account deletion">
+  <div style="background:var(--s1);border:1px solid rgba(255,100,100,.3);border-radius:12px;max-width:460px;width:100%;padding:24px;box-shadow:0 20px 60px rgba(0,0,0,.5)">
+    <div style="font-size:16px;font-weight:700;color:var(--red);margin-bottom:10px">Delete your account?</div>
+    <p style="font-size:13px;color:var(--t2);line-height:1.55;margin:0 0 14px">This will permanently remove your account, all leads, hunt history, feedback, agent DNA, and settings. <strong style="color:var(--t1)">It cannot be undone.</strong></p>
+    <p style="font-size:12px;color:var(--t2);line-height:1.55;margin:0 0 8px">Type <code style="background:rgba(255,100,100,.1);color:var(--red);padding:2px 6px;border-radius:4px">DELETE MY ACCOUNT</code> to confirm:</p>
+    <input id="deleteConfirmInput" type="text" autocomplete="off" spellcheck="false" placeholder="DELETE MY ACCOUNT" style="width:100%;padding:10px 12px;border-radius:6px;border:1px solid rgba(255,255,255,.08);background:var(--bg);color:var(--t1);font-size:13px;font-family:inherit;margin-bottom:16px" oninput="onDeleteInputChange()">
+    <div style="display:flex;gap:8px;justify-content:flex-end">
+      <button class="btn btn-ghost" onclick="closeDeleteModal()">Cancel</button>
+      <button id="deleteConfirmBtn" class="btn btn-danger" onclick="confirmDeleteAccount()" disabled>Delete permanently</button>
+    </div>
+  </div>
+</div>
+
+<script>
+// 401 interceptor — redirect to login if session expired (no-op in
+// local CLI mode where auth is disabled).
+(function(){var _of=window.fetch;window.fetch=function(){return _of.apply(this,arguments).then(function(r){if(r.status===401&&!r.url.includes('/auth/'))window.location.href='/landing';return r})};})();
+
+// Hide billing surfaces if running in local CLI / BYOK mode.
+fetch('/api/runtime').then(function(r){return r.json()}).then(function(d){
+  if(d && d.runtime && !d.runtime.billing_enabled){
+    document.querySelectorAll('.hv-billing-only').forEach(function(el){el.style.display='none'});
+    document.body.classList.add('hv-no-billing');
+  }
+}).catch(function(){});
+
+var _acctData=null;
+function loadAccount(){
+  fetch('/api/account').then(function(r){if(r.status===401){window.location.href='/landing';return}return r.json()}).then(function(d){
+    if(!d||!d.ok)return;
+    _acctData=d;
+    var u=d.user,f=d.features||{};
+    document.getElementById('acctName').value=u.display_name||'';
+    document.getElementById('acctEmail').value=u.email||'';
+    var vb=document.getElementById('acctVerified');
+    if(u.email_verified){vb.textContent='VERIFIED';vb.className='badge badge-verified'}
+    else{vb.textContent='UNVERIFIED';vb.className='badge badge-unverified'}
+    document.getElementById('acctPlan').textContent=((d.tier_info||{}).name||u.tier||'Free').toUpperCase();
+    document.getElementById('acctCredits').textContent=u.credits_remaining||0;
+    var tiers={free:3,growth:25,agency:50};
+    document.getElementById('acctIncluded').textContent=(d.tier_info||{}).credits||tiers[u.tier]||3;
+    if(d.stats)document.getElementById('acctRuns').textContent=d.stats.runs||0;
+    // Providers
+    var pl=document.getElementById('providerList');
+    var provider=u.auth_provider||'email';
+    var html='';
+    if(provider==='email'||provider==='both'){
+      html+='<div class="provider-row"><span class="provider-icon">&#9993;</span><span class="provider-name">Email & Password</span><span class="provider-status">Active</span></div>';
+    }
+    if(provider==='google'||provider==='both'){
+      html+='<div class="provider-row"><span class="provider-icon"><svg width="16" height="16" viewBox="0 0 48 48"><path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"/><path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"/><path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"/><path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"/></svg></span><span class="provider-name">Google</span><span class="provider-status">Connected</span></div>';
+    }
+    if(provider==='google'){
+      document.getElementById('pwTitle').textContent='Set a Password';
+      document.getElementById('pwCurrentWrap').style.display='none';
+    }
+    if(!html)html='<div class="provider-row"><span class="provider-icon">&#9993;</span><span class="provider-name">Email & Password</span><span class="provider-status">Active</span></div>';
+    pl.innerHTML=html;
+  }).catch(function(){});
+}
+function saveProfile(){
+  var btn=document.querySelector('#profileSection .btn-primary');btn.disabled=true;
+  var msg=document.getElementById('profileMsg');msg.className='msg';msg.style.display='none';
+  fetch('/api/account/update-profile',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({display_name:document.getElementById('acctName').value.trim()})})
+  .then(function(r){return r.json()}).then(function(d){
+    msg.textContent=d.ok?'Profile updated':'Error';msg.className=d.ok?'msg ok':'msg err';btn.disabled=false;
+  }).catch(function(){msg.textContent='Network error';msg.className='msg err';btn.disabled=false;});
+}
+function changePassword(){
+  var msg=document.getElementById('pwMsg');msg.className='msg';msg.style.display='none';
+  var cur=document.getElementById('acctPwCurrent').value;
+  var pw=document.getElementById('acctPwNew').value;
+  var pw2=document.getElementById('acctPwConfirm').value;
+  if(pw.length<6){msg.textContent='Password must be at least 6 characters';msg.className='msg err';return}
+  if(pw!==pw2){msg.textContent='Passwords do not match';msg.className='msg err';return}
+  fetch('/api/account/change-password',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({current_password:cur,new_password:pw})})
+  .then(function(r){return r.json()}).then(function(d){
+    msg.textContent=d.ok?'Password updated':d.error||'Error';msg.className=d.ok?'msg ok':'msg err';
+    if(d.ok){document.getElementById('acctPwCurrent').value='';document.getElementById('acctPwNew').value='';document.getElementById('acctPwConfirm').value='';}
+  }).catch(function(){msg.textContent='Network error';msg.className='msg err';});
+}
+function openDeleteModal(){
+  var bg=document.getElementById('deleteBg');
+  if(!bg)return;
+  bg.style.display='flex';
+  var inp=document.getElementById('deleteConfirmInput');
+  if(inp){inp.value='';inp.focus()}
+  var btn=document.getElementById('deleteConfirmBtn');
+  if(btn)btn.disabled=true;
+  document.addEventListener('keydown',_deleteEscHandler);
+}
+function closeDeleteModal(){
+  var bg=document.getElementById('deleteBg');
+  if(bg)bg.style.display='none';
+  document.removeEventListener('keydown',_deleteEscHandler);
+}
+function _deleteEscHandler(e){if(e.key==='Escape')closeDeleteModal()}
+function onDeleteInputChange(){
+  var inp=document.getElementById('deleteConfirmInput');
+  var btn=document.getElementById('deleteConfirmBtn');
+  if(inp&&btn)btn.disabled = inp.value.trim() !== 'DELETE MY ACCOUNT';
+}
+function confirmDeleteAccount(){
+  var btn=document.getElementById('deleteConfirmBtn');
+  if(btn){btn.disabled=true;btn.textContent='Deleting...';}
+  fetch('/api/account/delete',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({confirm:'DELETE'})})
+  .then(function(r){return r.json()}).then(function(d){
+    if(d.ok){window.location.href='/landing'}
+    else{
+      closeDeleteModal();
+      var msg=document.getElementById('deleteMsg');
+      msg.textContent=d.error||'Error';msg.className='msg err';
+    }
+  }).catch(function(){
+    closeDeleteModal();
+    var msg=document.getElementById('deleteMsg');
+    msg.textContent='Network error';msg.className='msg err';
+  });
+}
+window._acctUpgrade=function(){window.location.href='/#pricing';};
+loadAccount();
+</script>
+</body>
+</html>
