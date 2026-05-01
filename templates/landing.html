@@ -1,0 +1,937 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="description" content="Huntova — the local-first lead-gen agent. Hunts the live web, scores prospects with your AI key, drafts cold email — on your machine. Replaces Apollo, Clay, Hunter, Instantly.">
+<meta name="color-scheme" content="dark">
+<title>Huntova — Local-first Lead-Gen Agent</title>
+
+<meta property="og:title" content="Huntova — Local-first Lead-Gen Agent">
+<meta property="og:description" content="The lead-gen agent that actually finds clients. Hunts the live web, scores prospects, sends personalised cold email — locally, on your machine.">
+<meta property="og:type" content="website">
+<meta property="og:url" content="https://huntova.com/">
+<meta property="og:image" content="https://huntova.com/static/og-image.png">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Huntova — Local-first Lead-Gen Agent">
+<meta name="twitter:description" content="Hunts the live web, scores prospects, sends personalised cold email — locally, on your machine.">
+<meta name="twitter:image" content="https://huntova.com/static/og-image.png">
+
+<link rel="preconnect" href="https://api.fontshare.com">
+<link rel="preconnect" href="https://cdn.fontshare.com" crossorigin>
+<link href="https://api.fontshare.com/v2/css?f[]=clash-display@700,600,500&f[]=satoshi@400,500,700&f[]=jetbrains-mono@400,500&display=swap" rel="stylesheet">
+
+<style>
+:root {
+  --bg-deep: #050810;
+  --bg-card: rgba(12,18,32,.72);
+  --bg-card-solid: #0c1220;
+  --bg-card-hover: #131c33;
+  --bd: rgba(255,255,255,.07);
+  --bd-strong: rgba(255,255,255,.14);
+  --t1: #eef0f5;
+  --t2: #9aa0ad;
+  --t3: #6b7388;
+  --accent: #00e5cc;
+  --accent-warm: #ff6b6b;
+  --accent-violet: #7c5cff;
+  --accent-amber: #ffb454;
+  --grad-1: linear-gradient(135deg, #ff6b6b 0%, #ffb454 30%, #00e5cc 70%, #7c5cff 100%);
+  --grad-2: linear-gradient(135deg, #00e5cc 0%, #7c5cff 100%);
+  --shadow-soft: 0 30px 80px -20px rgba(0,229,204,.15);
+  --shadow-warm: 0 30px 80px -20px rgba(255,107,107,.18);
+}
+
+* ,*::before,*::after{box-sizing:border-box}
+html{scroll-behavior:smooth}
+html,body{margin:0;padding:0;background:var(--bg-deep);color:var(--t1)}
+body{
+  font-family:'Satoshi',-apple-system,BlinkMacSystemFont,sans-serif;
+  font-size:16px;line-height:1.6;
+  -webkit-font-smoothing:antialiased;
+  text-rendering:optimizeLegibility;
+  min-height:100vh;
+  overflow-x:hidden;
+  position:relative;
+}
+a{color:var(--accent);text-decoration:none;transition:color .2s ease}
+a:hover{color:#fff}
+::selection{background:var(--accent);color:#0a0e18}
+
+/* ────────── animated atmosphere ────────── */
+.starfield, .aurora, .grid-overlay{position:fixed;inset:0;pointer-events:none;z-index:0}
+
+.starfield{
+  background-image:
+    radial-gradient(1px 1px at 20% 30%,#fff,transparent),
+    radial-gradient(1px 1px at 60% 70%,#fff,transparent),
+    radial-gradient(2px 2px at 50% 50%,rgba(255,255,255,.6),transparent),
+    radial-gradient(1px 1px at 80% 10%,#fff,transparent),
+    radial-gradient(1px 1px at 90% 60%,rgba(255,255,255,.7),transparent),
+    radial-gradient(1px 1px at 10% 80%,rgba(255,255,255,.8),transparent),
+    radial-gradient(1px 1px at 30% 90%,#fff,transparent),
+    radial-gradient(1px 1px at 70% 25%,rgba(255,255,255,.5),transparent),
+    radial-gradient(2px 2px at 15% 55%,rgba(255,255,255,.4),transparent),
+    radial-gradient(1px 1px at 45% 15%,#fff,transparent),
+    radial-gradient(1px 1px at 5% 5%,rgba(255,255,255,.5),transparent),
+    radial-gradient(1px 1px at 95% 95%,rgba(255,255,255,.7),transparent);
+  background-size:600px 600px,400px 400px,500px 500px,500px 500px,300px 300px,400px 400px,300px 300px,500px 500px,700px 700px,400px 400px,250px 250px,350px 350px;
+  opacity:.5;
+  animation:starsDrift 220s linear infinite;
+}
+
+.aurora{
+  background:
+    radial-gradient(ellipse 900px 500px at 18% 20%,rgba(255,107,107,.18),transparent 60%),
+    radial-gradient(ellipse 1000px 600px at 82% 78%,rgba(0,229,204,.14),transparent 65%),
+    radial-gradient(ellipse 600px 400px at 50% 100%,rgba(124,92,255,.10),transparent 70%);
+  animation:auroraShift 28s ease-in-out infinite alternate;
+}
+
+.grid-overlay{
+  background-image:
+    linear-gradient(rgba(255,255,255,.025) 1px,transparent 1px),
+    linear-gradient(90deg,rgba(255,255,255,.025) 1px,transparent 1px);
+  background-size:80px 80px;
+  mask-image:radial-gradient(ellipse 100% 80% at 50% 0%,#000 30%,transparent 70%);
+  -webkit-mask-image:radial-gradient(ellipse 100% 80% at 50% 0%,#000 30%,transparent 70%);
+}
+
+@keyframes auroraShift{
+  0%  {transform:translate(0,0) scale(1)}
+  50% {transform:translate(-3%, 4%) scale(1.05)}
+  100%{transform:translate(2%, -3%) scale(1.02)}
+}
+@keyframes starsDrift{
+  0%  {background-position:0 0,0 0,0 0,0 0,0 0,0 0,0 0,0 0,0 0,0 0,0 0,0 0}
+  100%{background-position:-600px 0,-400px 0,500px 0,500px 0,-300px 0,400px 0,-300px 0,500px 0,-700px 0,400px 0,250px 0,-350px 0}
+}
+@keyframes ringRotate {to{transform:rotate(360deg)}}
+@keyframes pulseDot {
+  0%,100% {opacity:.4;transform:scale(1)}
+  50%     {opacity:1;transform:scale(1.3)}
+}
+@keyframes scanSweep {
+  0%   {transform:rotate(0deg);opacity:0}
+  10%  {opacity:.6}
+  90%  {opacity:.6}
+  100% {transform:rotate(360deg);opacity:0}
+}
+@keyframes fadeUp {
+  from {opacity:0;transform:translateY(24px)}
+  to   {opacity:1;transform:translateY(0)}
+}
+@keyframes blink {
+  0%,49%   {opacity:1}
+  50%,100% {opacity:0}
+}
+@keyframes typewriter {
+  from {clip-path:inset(0 100% 0 0)}
+  to   {clip-path:inset(0 0 0 0)}
+}
+@keyframes marqueeScroll {
+  from {transform:translateX(0)}
+  to   {transform:translateX(-50%)}
+}
+@keyframes glowPulse {
+  0%,100% {filter:drop-shadow(0 0 12px rgba(0,229,204,.45))}
+  50%     {filter:drop-shadow(0 0 24px rgba(0,229,204,.75))}
+}
+
+/* ────────── layout ────────── */
+.container{position:relative;z-index:2;max-width:1120px;margin:0 auto;padding:32px 24px 96px}
+
+/* nav */
+.topnav{
+  display:flex;align-items:center;justify-content:space-between;
+  padding:8px 0 56px;
+}
+.brand{display:flex;align-items:center;gap:12px;font-family:'Clash Display',sans-serif;font-weight:600;font-size:18px;letter-spacing:-.01em}
+.brand-mark{
+  width:36px;height:36px;position:relative;display:inline-flex;align-items:center;justify-content:center;
+}
+.brand-mark svg{width:100%;height:100%;display:block}
+.nav-links{display:flex;gap:28px;align-items:center;font-size:14px}
+.nav-links a{color:var(--t2);font-weight:500}
+.nav-links a:hover{color:#fff}
+.nav-cta{
+  padding:8px 18px;border-radius:999px;background:var(--grad-2);
+  color:#0a0e18 !important;font-weight:600;font-size:13px;
+  transition:transform .25s ease,box-shadow .25s ease;
+}
+.nav-cta:hover{transform:translateY(-1px);box-shadow:0 8px 30px -8px rgba(0,229,204,.55)}
+
+/* ────────── hero ────────── */
+.hero{
+  text-align:center;padding:48px 0 72px;position:relative;
+}
+.hero-badge{
+  display:inline-flex;align-items:center;gap:8px;
+  padding:6px 14px;border-radius:999px;
+  border:1px solid var(--bd-strong);background:rgba(255,255,255,.025);
+  font-size:12px;font-weight:500;color:var(--t2);
+  letter-spacing:.04em;text-transform:uppercase;
+  margin-bottom:32px;
+  animation:fadeUp .6s ease both;
+}
+.hero-badge .dot{
+  width:6px;height:6px;border-radius:50%;background:var(--accent);
+  box-shadow:0 0 12px var(--accent);
+  animation:pulseDot 2s ease-in-out infinite;
+}
+
+.hero-mark{
+  width:120px;height:120px;margin:0 auto 28px;position:relative;
+  animation:fadeUp .6s ease .05s both, glowPulse 3.5s ease-in-out infinite;
+}
+.hero-mark svg{width:100%;height:100%}
+
+.title{
+  font-family:'Clash Display',sans-serif;font-weight:700;
+  font-size:clamp(56px,11vw,128px);line-height:.95;
+  letter-spacing:-.04em;margin:0 0 18px;
+  background:var(--grad-1);
+  -webkit-background-clip:text;background-clip:text;
+  -webkit-text-fill-color:transparent;
+  animation:fadeUp .7s ease .12s both;
+}
+.tagline{
+  font-size:clamp(20px,2.4vw,28px);line-height:1.35;font-weight:500;
+  margin:0 auto 14px;max-width:760px;color:var(--t1);
+  letter-spacing:-.015em;
+  animation:fadeUp .7s ease .22s both;
+}
+.description{
+  font-size:clamp(15px,1.4vw,17px);line-height:1.65;
+  color:var(--t2);max-width:640px;margin:0 auto 40px;
+  animation:fadeUp .7s ease .32s both;
+}
+.description b{color:var(--t1);font-weight:600}
+
+/* install card */
+.install-card{
+  position:relative;max-width:640px;margin:0 auto 14px;
+  border-radius:14px;padding:1.5px;
+  background:linear-gradient(135deg,rgba(255,107,107,.5),rgba(0,229,204,.5),rgba(124,92,255,.5));
+  background-size:200% 200%;
+  animation:fadeUp .7s ease .42s both, gradMove 8s ease-in-out infinite;
+}
+@keyframes gradMove{
+  0%,100%{background-position:0% 50%}
+  50%    {background-position:100% 50%}
+}
+.install-inner{
+  display:flex;align-items:center;gap:14px;
+  border-radius:13px;padding:16px 20px;
+  background:var(--bg-card-solid);
+  font-family:'JetBrains Mono','SF Mono',Menlo,monospace;
+  font-size:14px;
+}
+.install-prompt{color:var(--accent);font-weight:600;flex-shrink:0;user-select:none}
+.install-cmd{flex:1;color:var(--t1);overflow-x:auto;white-space:nowrap;-ms-overflow-style:none;scrollbar-width:none}
+.install-cmd::-webkit-scrollbar{display:none}
+.copy-btn{
+  flex-shrink:0;border:1px solid var(--bd-strong);background:rgba(255,255,255,.04);
+  color:var(--t1);font-family:inherit;font-size:12px;font-weight:600;
+  padding:6px 14px;border-radius:8px;cursor:pointer;
+  transition:all .2s ease;letter-spacing:.05em;text-transform:uppercase;
+}
+.copy-btn:hover{background:rgba(0,229,204,.12);border-color:rgba(0,229,204,.4);color:#fff;transform:translateY(-1px)}
+.copy-btn.copied{background:rgba(0,229,204,.2);border-color:var(--accent);color:var(--accent)}
+
+.install-alt{
+  font-size:13px;color:var(--t3);margin:0 0 32px;
+  animation:fadeUp .7s ease .5s both;
+}
+.install-alt code{
+  background:rgba(255,255,255,.05);padding:2px 8px;border-radius:5px;
+  font-family:'JetBrains Mono',monospace;font-size:12.5px;color:var(--t1);
+}
+
+/* hero stat strip */
+.hero-stats{
+  display:flex;gap:48px;justify-content:center;flex-wrap:wrap;
+  padding-top:32px;animation:fadeUp .7s ease .58s both;
+}
+.hero-stat{display:flex;flex-direction:column;align-items:center;gap:4px}
+.hero-stat-n{
+  font-family:'Clash Display',sans-serif;font-size:32px;font-weight:600;
+  background:var(--grad-2);-webkit-background-clip:text;background-clip:text;
+  -webkit-text-fill-color:transparent;letter-spacing:-.02em;line-height:1;
+}
+.hero-stat-l{font-size:11px;color:var(--t3);letter-spacing:.1em;text-transform:uppercase}
+
+/* ────────── marquee ────────── */
+.marquee-wrap{
+  margin:64px 0 96px;padding:24px 0;
+  border-top:1px solid var(--bd);border-bottom:1px solid var(--bd);
+  overflow:hidden;mask-image:linear-gradient(90deg,transparent 0,#000 8%,#000 92%,transparent 100%);
+  -webkit-mask-image:linear-gradient(90deg,transparent 0,#000 8%,#000 92%,transparent 100%);
+}
+.marquee{display:flex;gap:64px;width:max-content;animation:marqueeScroll 36s linear infinite;will-change:transform}
+.marquee-item{
+  font-family:'Clash Display',sans-serif;font-size:24px;font-weight:600;
+  color:var(--t3);white-space:nowrap;letter-spacing:-.01em;
+  display:flex;align-items:center;gap:64px;
+}
+.marquee-item::after{
+  content:'×';color:var(--t3);opacity:.4;font-weight:400;font-size:18px;
+}
+.marquee-item.tool{color:var(--t1)}
+
+/* ────────── section ────────── */
+.section{padding:64px 0;position:relative}
+.section-eyebrow{
+  display:inline-flex;align-items:center;gap:10px;
+  font-size:12px;letter-spacing:.18em;text-transform:uppercase;
+  font-weight:600;color:var(--accent);margin-bottom:18px;
+}
+.section-eyebrow::before{
+  content:'';width:24px;height:1px;background:var(--accent);display:inline-block;
+}
+.section h2{
+  font-family:'Clash Display',sans-serif;font-weight:600;
+  font-size:clamp(32px,4.4vw,52px);line-height:1.05;letter-spacing:-.025em;
+  margin:0 0 16px;max-width:720px;
+}
+.section h2 .grad{
+  background:var(--grad-2);-webkit-background-clip:text;background-clip:text;
+  -webkit-text-fill-color:transparent;
+}
+.section .lead{
+  font-size:17px;color:var(--t2);max-width:660px;margin:0 0 48px;line-height:1.65;
+}
+
+/* features grid */
+.features{
+  display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));
+  gap:18px;
+}
+.feat{
+  position:relative;border-radius:16px;padding:28px 24px 22px;
+  background:var(--bg-card);backdrop-filter:blur(14px);
+  border:1px solid var(--bd);overflow:hidden;
+  transition:transform .35s cubic-bezier(.2,.8,.2,1),border-color .35s ease,box-shadow .35s ease;
+  opacity:0;transform:translateY(28px);
+}
+.feat.in{opacity:1;transform:translateY(0)}
+.feat::before{
+  content:'';position:absolute;top:0;left:0;right:0;height:1px;
+  background:linear-gradient(90deg,transparent,rgba(0,229,204,.5),transparent);
+  opacity:0;transition:opacity .35s ease;
+}
+.feat:hover{
+  transform:translateY(-4px);
+  border-color:var(--bd-strong);
+  box-shadow:0 20px 60px -20px rgba(0,229,204,.18);
+}
+.feat:hover::before{opacity:1}
+.feat-icon{
+  width:44px;height:44px;border-radius:12px;
+  background:linear-gradient(135deg,rgba(0,229,204,.12),rgba(124,92,255,.08));
+  border:1px solid var(--bd-strong);
+  display:inline-flex;align-items:center;justify-content:center;
+  font-size:22px;margin-bottom:18px;
+  transition:transform .3s cubic-bezier(.2,.8,.2,1);
+}
+.feat:hover .feat-icon{transform:rotate(-6deg) scale(1.05)}
+.feat-t{
+  font-family:'Clash Display',sans-serif;
+  font-size:18px;font-weight:600;letter-spacing:-.012em;
+  margin-bottom:8px;color:var(--t1);
+}
+.feat-d{font-size:14px;line-height:1.6;color:var(--t2);margin-bottom:18px}
+.feat-cmd{
+  display:inline-block;font-family:'JetBrains Mono',monospace;font-size:12px;
+  background:rgba(0,229,204,.08);border:1px solid rgba(0,229,204,.2);
+  color:var(--accent);padding:4px 10px;border-radius:6px;
+}
+
+/* ────────── compare table ────────── */
+.compare{
+  border-radius:18px;overflow:hidden;
+  background:var(--bg-card);backdrop-filter:blur(14px);
+  border:1px solid var(--bd);
+}
+.compare-row{
+  display:grid;grid-template-columns:1.1fr 1.4fr 1fr;gap:0;
+  padding:18px 28px;align-items:center;
+  border-bottom:1px solid var(--bd);
+  transition:background .25s ease;
+  opacity:0;transform:translateY(12px);
+}
+.compare-row.in{opacity:1;transform:translateY(0);transition:opacity .5s ease,transform .5s ease,background .25s ease}
+.compare-row:last-child{border-bottom:none}
+.compare-row:hover{background:rgba(0,229,204,.03)}
+.compare-row.head{
+  background:rgba(255,255,255,.02);font-size:11px;color:var(--t3);
+  letter-spacing:.14em;text-transform:uppercase;font-weight:600;
+  padding:14px 28px;
+}
+.compare-tool{font-weight:600;color:var(--t1);font-family:'Clash Display',sans-serif;font-size:16px}
+.compare-tool small{display:block;font-family:'Satoshi',sans-serif;font-weight:400;font-size:12px;color:var(--t3);margin-top:3px}
+.compare-job{color:var(--t2);font-size:14px}
+.compare-cmd{
+  font-family:'JetBrains Mono',monospace;font-size:12.5px;
+  color:var(--accent);background:rgba(0,229,204,.06);
+  border:1px solid rgba(0,229,204,.18);
+  padding:6px 12px;border-radius:7px;
+  display:inline-block;justify-self:start;
+}
+
+/* ────────── terminal demo ────────── */
+.demo-grid{display:grid;grid-template-columns:1fr 1fr;gap:24px}
+@media(max-width:840px){.demo-grid{grid-template-columns:1fr}}
+
+.demo{
+  border-radius:14px;background:#070b14;border:1px solid var(--bd-strong);
+  overflow:hidden;font-family:'JetBrains Mono',monospace;
+  box-shadow:0 30px 80px -30px rgba(0,0,0,.6);
+  opacity:0;transform:translateY(24px);
+}
+.demo.in{opacity:1;transform:translateY(0);transition:opacity .6s ease,transform .6s ease}
+.demo-head{
+  display:flex;align-items:center;gap:8px;padding:10px 14px;
+  background:rgba(255,255,255,.02);border-bottom:1px solid var(--bd);
+  font-size:11px;color:var(--t3);letter-spacing:.05em;
+}
+.demo-head .dot-r{width:10px;height:10px;border-radius:50%;background:#ff5f57}
+.demo-head .dot-y{width:10px;height:10px;border-radius:50%;background:#febc2e}
+.demo-head .dot-g{width:10px;height:10px;border-radius:50%;background:#28c840}
+.demo-head .label{margin-left:auto;font-size:11px;color:var(--t3)}
+
+.demo-body{
+  padding:18px 20px;font-size:13px;line-height:1.7;color:var(--t1);
+  white-space:pre-wrap;
+}
+.demo-body .p{color:var(--accent)}
+.demo-body .c{color:var(--accent-amber);font-weight:500}
+.demo-body .o{color:var(--t2)}
+.demo-body .ok{color:var(--accent)}
+.demo-body .num{color:var(--accent-violet);font-weight:500}
+.demo-body .blink::after{content:'▌';color:var(--accent);animation:blink 1s step-end infinite;margin-left:1px}
+
+/* ────────── trust strip ────────── */
+.trust{
+  display:grid;grid-template-columns:repeat(4,1fr);gap:0;
+  border-radius:18px;background:var(--bg-card);
+  border:1px solid var(--bd);overflow:hidden;backdrop-filter:blur(14px);
+}
+@media(max-width:780px){.trust{grid-template-columns:repeat(2,1fr)}}
+.trust-cell{
+  padding:32px 24px;text-align:center;
+  border-right:1px solid var(--bd);border-bottom:1px solid var(--bd);
+  transition:background .3s ease;
+}
+@media(max-width:780px){.trust-cell:nth-child(2n){border-right:none}}
+.trust-cell:nth-child(4n){border-right:none}
+.trust-cell:nth-last-child(-n+4){border-bottom:none}
+@media(max-width:780px){.trust-cell{border-bottom:1px solid var(--bd)}.trust-cell:nth-last-child(-n+2){border-bottom:none}}
+.trust-cell:hover{background:rgba(0,229,204,.025)}
+.trust-num{
+  font-family:'Clash Display',sans-serif;font-size:36px;font-weight:600;
+  letter-spacing:-.02em;line-height:1;margin-bottom:6px;
+  background:var(--grad-2);-webkit-background-clip:text;background-clip:text;
+  -webkit-text-fill-color:transparent;
+}
+.trust-l{font-size:13px;color:var(--t2);font-weight:500}
+
+/* ────────── final CTA ────────── */
+.cta{
+  text-align:center;padding:96px 0 64px;position:relative;
+}
+.cta h2{
+  font-family:'Clash Display',sans-serif;font-weight:600;
+  font-size:clamp(40px,6vw,72px);line-height:1;letter-spacing:-.03em;
+  margin:0 0 22px;max-width:none;
+}
+.cta-actions{
+  display:flex;gap:14px;justify-content:center;flex-wrap:wrap;margin-top:40px;
+}
+.btn{
+  display:inline-flex;align-items:center;gap:10px;
+  padding:14px 28px;border-radius:10px;
+  font-family:'Satoshi',sans-serif;font-weight:600;font-size:15px;
+  cursor:pointer;border:none;
+  transition:transform .25s cubic-bezier(.2,.8,.2,1),box-shadow .25s ease;
+  text-decoration:none;
+}
+.btn-primary{
+  background:var(--grad-2);color:#0a0e18;
+  box-shadow:0 14px 40px -14px rgba(0,229,204,.55);
+}
+.btn-primary:hover{transform:translateY(-2px);box-shadow:0 22px 60px -14px rgba(0,229,204,.7);color:#0a0e18}
+.btn-ghost{
+  background:transparent;color:var(--t1);
+  border:1px solid var(--bd-strong);
+}
+.btn-ghost:hover{transform:translateY(-2px);border-color:var(--accent);color:#fff}
+
+/* ────────── footer ────────── */
+.foot{
+  margin-top:96px;padding:32px 0;border-top:1px solid var(--bd);
+  display:flex;justify-content:space-between;flex-wrap:wrap;gap:16px;
+  font-size:13px;color:var(--t3);
+}
+.foot a{color:var(--t2)}
+.foot a:hover{color:#fff}
+
+/* ────────── responsive tighten ────────── */
+@media(max-width:720px){
+  .topnav{padding-bottom:32px}
+  .nav-links{gap:14px;font-size:13px}
+  .nav-links a:not(.nav-cta){display:none}
+  .hero{padding:32px 0 56px}
+  .hero-mark{width:96px;height:96px;margin-bottom:22px}
+  .hero-stats{gap:24px;padding-top:24px}
+  .hero-stat-n{font-size:26px}
+  .install-inner{padding:14px 16px;font-size:12.5px}
+  .compare-row{grid-template-columns:1fr;gap:8px;padding:18px 20px}
+  .compare-row.head{display:none}
+  .compare-cmd{justify-self:flex-start}
+  .section{padding:48px 0}
+  .marquee-item{font-size:18px;gap:48px}
+  .marquee{gap:48px}
+}
+
+/* honor reduced-motion */
+@media(prefers-reduced-motion:reduce){
+  *,*::before,*::after{animation:none !important;transition:none !important}
+  .feat,.compare-row,.demo{opacity:1;transform:none}
+}
+</style>
+</head>
+<body>
+
+<div class="starfield"></div>
+<div class="aurora"></div>
+<div class="grid-overlay"></div>
+
+<div class="container">
+
+  <!-- nav -->
+  <nav class="topnav">
+    <a href="/" class="brand" style="color:inherit">
+      <span class="brand-mark">
+        <svg viewBox="0 0 36 36" aria-hidden="true">
+          <defs>
+            <linearGradient id="lg-mini" x1="0" y1="0" x2="1" y2="1">
+              <stop offset="0%" stop-color="#ff6b6b"/>
+              <stop offset="50%" stop-color="#ffb454"/>
+              <stop offset="100%" stop-color="#00e5cc"/>
+            </linearGradient>
+          </defs>
+          <circle cx="18" cy="18" r="14" fill="none" stroke="url(#lg-mini)" stroke-width="1.4" stroke-dasharray="3 4"/>
+          <circle cx="18" cy="18" r="7" fill="none" stroke="rgba(255,255,255,.15)" stroke-width="1"/>
+          <circle cx="18" cy="18" r="2.6" fill="url(#lg-mini)"/>
+          <line x1="18" y1="3" x2="18" y2="8" stroke="rgba(255,255,255,.2)" stroke-width="1"/>
+          <line x1="18" y1="28" x2="18" y2="33" stroke="rgba(255,255,255,.2)" stroke-width="1"/>
+          <line x1="3" y1="18" x2="8" y2="18" stroke="rgba(255,255,255,.2)" stroke-width="1"/>
+          <line x1="28" y1="18" x2="33" y2="18" stroke="rgba(255,255,255,.2)" stroke-width="1"/>
+        </svg>
+      </span>
+      <span>huntova</span>
+    </a>
+    <div class="nav-links">
+      <a href="#features">Features</a>
+      <a href="#compare">Replaces</a>
+      <a href="#demo">Demo</a>
+      <a href="https://github.com/enzostrano/huntova-public">GitHub</a>
+      <a href="/download" class="nav-cta">Install →</a>
+    </div>
+  </nav>
+
+  <!-- hero -->
+  <header class="hero">
+    <span class="hero-badge"><span class="dot"></span> v0.1.0a162 · local-first BYOK</span>
+
+    <div class="hero-mark">
+      <svg viewBox="0 0 120 120" aria-hidden="true">
+        <defs>
+          <linearGradient id="lg-main" x1="0" y1="0" x2="1" y2="1">
+            <stop offset="0%" stop-color="#ff6b6b"/>
+            <stop offset="40%" stop-color="#ffb454"/>
+            <stop offset="80%" stop-color="#00e5cc"/>
+            <stop offset="100%" stop-color="#7c5cff"/>
+          </linearGradient>
+          <radialGradient id="lg-core" cx="50%" cy="50%" r="50%">
+            <stop offset="0%" stop-color="#fff" stop-opacity=".95"/>
+            <stop offset="50%" stop-color="#00e5cc" stop-opacity=".85"/>
+            <stop offset="100%" stop-color="#7c5cff" stop-opacity=".4"/>
+          </radialGradient>
+        </defs>
+
+        <!-- outer slow rotating dashed ring -->
+        <g style="transform-origin:60px 60px;animation:ringRotate 24s linear infinite">
+          <circle cx="60" cy="60" r="52" fill="none" stroke="url(#lg-main)" stroke-width="1.4" stroke-dasharray="2 6" stroke-linecap="round"/>
+        </g>
+
+        <!-- middle counter-rotating ring -->
+        <g style="transform-origin:60px 60px;animation:ringRotate 36s linear infinite reverse">
+          <circle cx="60" cy="60" r="40" fill="none" stroke="rgba(255,255,255,.12)" stroke-width="1" stroke-dasharray="1 8"/>
+        </g>
+
+        <!-- inner concentric guides -->
+        <circle cx="60" cy="60" r="28" fill="none" stroke="rgba(255,255,255,.08)" stroke-width="1"/>
+        <circle cx="60" cy="60" r="18" fill="none" stroke="rgba(255,255,255,.10)" stroke-width="1"/>
+
+        <!-- crosshair marks (very faint) -->
+        <line x1="60" y1="2"   x2="60" y2="14"  stroke="rgba(255,255,255,.18)" stroke-width="1.3" stroke-linecap="round"/>
+        <line x1="60" y1="106" x2="60" y2="118" stroke="rgba(255,255,255,.18)" stroke-width="1.3" stroke-linecap="round"/>
+        <line x1="2"   y1="60" x2="14"  y2="60" stroke="rgba(255,255,255,.18)" stroke-width="1.3" stroke-linecap="round"/>
+        <line x1="106" y1="60" x2="118" y2="60" stroke="rgba(255,255,255,.18)" stroke-width="1.3" stroke-linecap="round"/>
+
+        <!-- scan sweep wedge -->
+        <g style="transform-origin:60px 60px;animation:scanSweep 4s ease-in-out infinite">
+          <path d="M60 60 L60 12 A48 48 0 0 1 102 48 Z" fill="url(#lg-core)" opacity=".18"/>
+        </g>
+
+        <!-- core dot -->
+        <circle cx="60" cy="60" r="6.5" fill="url(#lg-core)" style="animation:pulseDot 2.4s ease-in-out infinite"/>
+        <circle cx="60" cy="60" r="2.5" fill="#fff"/>
+      </svg>
+    </div>
+
+    <h1 class="title">Huntova</h1>
+    <p class="tagline">The lead-gen agent that <em style="font-style:normal;background:var(--grad-2);-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent">actually finds clients.</em></p>
+    <p class="description">
+      Hunts the live web, scores prospects with <b>your</b> AI key, deep-researches the top tier, and sends personalised cold email — <b>locally, on your machine</b>. No subscription. No credits. No middleware ever sees your data.
+    </p>
+
+    <div class="install-card">
+      <div class="install-inner">
+        <span class="install-prompt">$</span>
+        <span class="install-cmd" id="installCmd">curl -fsSL https://github.com/enzostrano/huntova-public/releases/latest/download/install.sh | sh</span>
+        <button class="copy-btn" id="copyBtn" type="button">Copy</button>
+      </div>
+    </div>
+    <p class="install-alt">or — <code>pipx install huntova</code> · <a href="/download" style="color:var(--accent);text-decoration:underline;text-decoration-color:rgba(0,229,204,.4);text-underline-offset:3px">all platforms →</a></p>
+
+    <div class="hero-stats">
+      <div class="hero-stat"><span class="hero-stat-n" data-count="80">0</span><span class="hero-stat-l">queries / hunt</span></div>
+      <div class="hero-stat"><span class="hero-stat-n" data-count="14">0</span><span class="hero-stat-l">pages researched</span></div>
+      <div class="hero-stat"><span class="hero-stat-n" data-count="12">0</span><span class="hero-stat-l">AI providers BYOK</span></div>
+      <div class="hero-stat"><span class="hero-stat-n" data-count="0">0</span><span class="hero-stat-l">data leaves your machine</span></div>
+    </div>
+  </header>
+
+  <!-- replaces marquee -->
+  <div class="marquee-wrap" aria-hidden="true">
+    <div class="marquee">
+      <span class="marquee-item tool">Apollo</span>
+      <span class="marquee-item tool">Clay</span>
+      <span class="marquee-item tool">Hunter</span>
+      <span class="marquee-item tool">Lemlist</span>
+      <span class="marquee-item tool">Instantly</span>
+      <span class="marquee-item tool">Mailmeteor</span>
+      <span class="marquee-item tool">GlockApps</span>
+      <span class="marquee-item tool">Mailshake</span>
+      <!-- duplicate for seamless loop -->
+      <span class="marquee-item tool">Apollo</span>
+      <span class="marquee-item tool">Clay</span>
+      <span class="marquee-item tool">Hunter</span>
+      <span class="marquee-item tool">Lemlist</span>
+      <span class="marquee-item tool">Instantly</span>
+      <span class="marquee-item tool">Mailmeteor</span>
+      <span class="marquee-item tool">GlockApps</span>
+      <span class="marquee-item tool">Mailshake</span>
+    </div>
+  </div>
+
+  <!-- features -->
+  <section class="section" id="features">
+    <span class="section-eyebrow">What it does</span>
+    <h2>Find prospects. Write the email. Send it. <span class="grad">Watch for replies.</span></h2>
+    <p class="lead">Every step of the outbound loop, collapsed into nine composable terminal commands. Same loop every B2B SaaS sells you in pieces — but on your machine, against your AI key, your SMTP, your IMAP.</p>
+
+    <div class="features">
+      <div class="feat" data-reveal>
+        <div class="feat-icon">🔭</div>
+        <div class="feat-t">Live web hunt</div>
+        <div class="feat-d">SearXNG-driven across Google, Bing, DuckDuckGo. 50–80 AI-generated queries per hunt, scored on five dimensions with verbatim evidence.</div>
+        <span class="feat-cmd">huntova hunt</span>
+      </div>
+      <div class="feat" data-reveal>
+        <div class="feat-icon">🎯</div>
+        <div class="feat-t">Deep research</div>
+        <div class="feat-d">Crawls 14 pages of the prospect's site. Drafts an opener that references something specific they'd actually recognise.</div>
+        <span class="feat-cmd">huntova research</span>
+      </div>
+      <div class="feat" data-reveal>
+        <div class="feat-icon">📤</div>
+        <div class="feat-t">Send + cadence</div>
+        <div class="feat-d">Step 1 opener, Day +4 bump, Day +9 final. Threads on the original subject. Auto-paused on reply.</div>
+        <span class="feat-cmd">huntova outreach send</span>
+      </div>
+      <div class="feat" data-reveal>
+        <div class="feat-icon">📨</div>
+        <div class="feat-t">Inbox watch</div>
+        <div class="feat-d">IMAP poll classifies replies into interested / not_now / wrong_person / unsubscribe / out_of_office automatically.</div>
+        <span class="feat-cmd">huntova inbox watch</span>
+      </div>
+      <div class="feat" data-reveal>
+        <div class="feat-icon">🩺</div>
+        <div class="feat-t">Deliverability</div>
+        <div class="feat-d">SPF / DKIM / DMARC pre-flight, MX lookup, blacklist check — before you fire your first cold send.</div>
+        <span class="feat-cmd">huntova doctor --email</span>
+      </div>
+      <div class="feat" data-reveal>
+        <div class="feat-icon">🧠</div>
+        <div class="feat-t">Self-coaching pulse</div>
+        <div class="feat-d">Daily summary of reply rate, classified inbox, what's working, what to retire. AI-written, not a chart wall.</div>
+        <span class="feat-cmd">huntova pulse</span>
+      </div>
+    </div>
+  </section>
+
+  <!-- compare table -->
+  <section class="section" id="compare">
+    <span class="section-eyebrow">What it replaces</span>
+    <h2>One CLI. <span class="grad">Eight tool subscriptions gone.</span></h2>
+    <p class="lead">Every cell on the right is a single subcommand. Your keys, your machine, no per-seat pricing, no credit gymnastics.</p>
+
+    <div class="compare">
+      <div class="compare-row head">
+        <div>Replaces</div>
+        <div>What that tool sells</div>
+        <div>huntova subcommand</div>
+      </div>
+      <div class="compare-row" data-reveal>
+        <div class="compare-tool">Apollo / Clay <small>prospect database</small></div>
+        <div class="compare-job">Find B2B leads matching an ICP</div>
+        <div><code class="compare-cmd">huntova hunt</code></div>
+      </div>
+      <div class="compare-row" data-reveal>
+        <div class="compare-tool">Hunter <small>email finder</small></div>
+        <div class="compare-job">Enrich a prospect with verified email</div>
+        <div><code class="compare-cmd">huntova research</code></div>
+      </div>
+      <div class="compare-row" data-reveal>
+        <div class="compare-tool">Lemlist / Instantly <small>cold-email sequencer</small></div>
+        <div class="compare-job">3-step cadence with auto-pause on reply</div>
+        <div><code class="compare-cmd">huntova sequence run</code></div>
+      </div>
+      <div class="compare-row" data-reveal>
+        <div class="compare-tool">Mailmeteor <small>mass-mail sender</small></div>
+        <div class="compare-job">Send personalised emails via your SMTP</div>
+        <div><code class="compare-cmd">huntova outreach send</code></div>
+      </div>
+      <div class="compare-row" data-reveal>
+        <div class="compare-tool">GlockApps <small>deliverability checker</small></div>
+        <div class="compare-job">SPF / DKIM / DMARC pre-flight</div>
+        <div><code class="compare-cmd">huntova doctor --email</code></div>
+      </div>
+      <div class="compare-row" data-reveal>
+        <div class="compare-tool">Mailshake <small>reply tracker</small></div>
+        <div class="compare-job">Watch inbox, classify replies</div>
+        <div><code class="compare-cmd">huntova inbox watch</code></div>
+      </div>
+      <div class="compare-row" data-reveal>
+        <div class="compare-tool">Reportei <small>weekly outbound report</small></div>
+        <div class="compare-job">Self-coaching summary, AI-written</div>
+        <div><code class="compare-cmd">huntova pulse</code></div>
+      </div>
+      <div class="compare-row" data-reveal>
+        <div class="compare-tool">Trainer / consultant <small>"teach the agent"</small></div>
+        <div class="compare-job">Encode your taste into the scorer</div>
+        <div><code class="compare-cmd">huntova teach</code></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- terminal demo -->
+  <section class="section" id="demo">
+    <span class="section-eyebrow">What you'll see</span>
+    <h2>From cold install to <span class="grad">first qualified leads in under three minutes.</span></h2>
+
+    <div class="demo-grid">
+      <div class="demo" data-reveal>
+        <div class="demo-head">
+          <span class="dot-r"></span><span class="dot-y"></span><span class="dot-g"></span>
+          <span class="label">first 3 minutes — terminal</span>
+        </div>
+<div class="demo-body"><span class="p">$</span> <span class="c">curl -fsSL https://github.com/enzostrano/huntova-public/releases/latest/download/install.sh | sh</span>
+<span class="o">→ pipx installed huntova v0.1.0a161</span>
+
+<span class="p">$</span> <span class="c">huntova</span>
+<span class="o">  ↳ no provider configured — running onboard wizard</span>
+<span class="o">  ↳ provider:    </span><span class="ok">anthropic</span>
+<span class="o">  ↳ ICP:         </span><span class="ok">video studios in EU, 5–25 staff</span>
+<span class="o">  ↳ from name:   </span><span class="ok">Enzo, Strano Video</span>
+<span class="o">  ↳ booking:     </span><span class="ok">https://cal.com/enzo</span>
+
+<span class="p">$</span> <span class="c">huntova hunt --countries FR,DE --max-leads 20</span>
+<span class="o">  → 73 queries, 411 results, scoring…</span>
+<span class="o">  → </span><span class="ok">14 qualified</span><span class="o"> (fit≥7 · buyability≥4 · reachability≥2)</span>
+<span class="o">  → drafts ready in </span><span class="num">~2m 48s</span><span class="blink"></span></div>
+      </div>
+
+      <div class="demo" data-reveal>
+        <div class="demo-head">
+          <span class="dot-r"></span><span class="dot-y"></span><span class="dot-g"></span>
+          <span class="label">autonomous daily — cron</span>
+        </div>
+<div class="demo-body"><span class="p">$</span> <span class="c">huntova schedule print --target launchd</span>
+<span class="o">→ wrote ~/Library/LaunchAgents/com.huntova.daily.plist</span>
+
+<span class="o"># every 09:00 local, the chain fires:</span>
+<span class="p">$</span> <span class="c">huntova update --check  # banner on new release</span>
+<span class="p">$</span> <span class="c">huntova hunt --max-leads 25</span>
+<span class="p">$</span> <span class="c">huntova sequence run --max 25  # day+4 / day+9</span>
+<span class="p">$</span> <span class="c">huntova inbox watch --since 2d</span>
+<span class="p">$</span> <span class="c">huntova pulse --since 7d</span>
+
+<span class="o">→ </span><span class="ok">5 qualified</span><span class="o"> · </span><span class="ok">2 replied</span><span class="o"> · </span><span class="ok">1 booked</span><span class="o"> · </span><span class="num">9.2%</span><span class="o"> reply rate</span><span class="blink"></span></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- trust strip -->
+  <section class="section">
+    <span class="section-eyebrow">Built different</span>
+    <h2>What stays on <span class="grad">your machine.</span></h2>
+    <p class="lead">Local-first isn't a marketing word. It's the architecture. Every byte we touch is on your laptop or in your inbox — never on huntova.com.</p>
+
+    <div class="trust">
+      <div class="trust-cell"><div class="trust-num">0</div><div class="trust-l">data sent to us</div></div>
+      <div class="trust-cell"><div class="trust-num">100%</div><div class="trust-l">local SQLite</div></div>
+      <div class="trust-cell"><div class="trust-num">12</div><div class="trust-l">AI providers</div></div>
+      <div class="trust-cell"><div class="trust-num">$0</div><div class="trust-l">credits / month</div></div>
+      <div class="trust-cell"><div class="trust-num">10</div><div class="trust-l">bundled playbooks</div></div>
+      <div class="trust-cell"><div class="trust-num">9</div><div class="trust-l">terminal commands</div></div>
+      <div class="trust-cell"><div class="trust-num">AGPL-3</div><div class="trust-l">open source</div></div>
+      <div class="trust-cell"><div class="trust-num">v0.1.0a162</div><div class="trust-l">latest release</div></div>
+    </div>
+  </section>
+
+  <!-- final CTA -->
+  <section class="cta" id="install">
+    <span class="section-eyebrow">Ship it</span>
+    <h2 style="margin:0 auto 22px">Run your first hunt <span class="grad">tonight.</span></h2>
+    <p style="font-size:17px;color:var(--t2);max-width:620px;margin:0 auto 32px;line-height:1.65">
+      One install command. One onboard wizard. Your first 5 qualified leads inside the next coffee.
+    </p>
+
+    <div class="install-card" style="margin-bottom:24px">
+      <div class="install-inner">
+        <span class="install-prompt">$</span>
+        <span class="install-cmd" id="installCmd2">curl -fsSL https://github.com/enzostrano/huntova-public/releases/latest/download/install.sh | sh</span>
+        <button class="copy-btn" id="copyBtn2" type="button">Copy</button>
+      </div>
+    </div>
+
+    <div class="cta-actions">
+      <a href="/download" class="btn btn-primary">Install instructions →</a>
+      <a href="https://github.com/enzostrano/huntova-public" class="btn btn-ghost">Read the source →</a>
+    </div>
+  </section>
+
+  <!-- footer -->
+  <footer class="foot">
+    <span>AGPL-3.0-or-later · built by <a href="https://github.com/enzostrano">@enzostrano</a></span>
+    <span><a href="https://github.com/enzostrano/huntova-public/blob/main/PRIVACY.md">Privacy</a> · <a href="https://github.com/enzostrano/huntova-public/blob/main/TERMS.md">Terms</a> · <a href="https://github.com/enzostrano/huntova-public/blob/main/CHANGELOG.md">Changelog</a></span>
+  </footer>
+
+</div>
+
+<script>
+// ── copy buttons ────────────────────────────────────────────
+(function(){
+  function wire(btnId, cmdId){
+    var btn = document.getElementById(btnId);
+    var cmd = document.getElementById(cmdId);
+    if(!btn || !cmd) return;
+    btn.addEventListener('click', function(){
+      var txt = cmd.textContent;
+      function flash(){
+        btn.textContent = '✓ Copied';
+        btn.classList.add('copied');
+        setTimeout(function(){ btn.textContent='Copy'; btn.classList.remove('copied'); }, 1800);
+      }
+      if(navigator.clipboard && navigator.clipboard.writeText){
+        navigator.clipboard.writeText(txt).then(flash).catch(legacy);
+      } else { legacy(); }
+      function legacy(){
+        try{
+          var area=document.createElement('textarea');
+          area.value=txt; area.setAttribute('readonly','');
+          area.style.position='fixed'; area.style.opacity='0';
+          document.body.appendChild(area); area.select();
+          document.execCommand('copy'); document.body.removeChild(area);
+          flash();
+        }catch(_){ /* unavailable */ }
+      }
+    });
+  }
+  wire('copyBtn','installCmd');
+  wire('copyBtn2','installCmd2');
+})();
+
+// ── reveal-on-scroll (IntersectionObserver) ────────────────
+(function(){
+  if(!('IntersectionObserver' in window)){
+    document.querySelectorAll('[data-reveal]').forEach(function(el){el.classList.add('in')});
+    return;
+  }
+  var io = new IntersectionObserver(function(entries){
+    entries.forEach(function(e){
+      if(e.isIntersecting){
+        e.target.classList.add('in');
+        io.unobserve(e.target);
+      }
+    });
+  }, {rootMargin:'-40px 0px -40px 0px', threshold:.05});
+  document.querySelectorAll('[data-reveal]').forEach(function(el,i){
+    el.style.transitionDelay = (Math.min(i,8)*60) + 'ms';
+    io.observe(el);
+  });
+})();
+
+// ── stat count-up ─────────────────────────────────────────
+(function(){
+  var stats = document.querySelectorAll('.hero-stat-n');
+  if(!stats.length) return;
+  function easeOut(t){return 1 - Math.pow(1-t,3)}
+  function tween(el, target){
+    var dur = 1100, t0 = performance.now();
+    function frame(t){
+      var p = Math.min(1, (t-t0)/dur);
+      var v = Math.round(easeOut(p) * target);
+      el.textContent = v;
+      if(p<1) requestAnimationFrame(frame);
+      else el.textContent = target;
+    }
+    requestAnimationFrame(frame);
+  }
+  if('IntersectionObserver' in window){
+    var io = new IntersectionObserver(function(entries){
+      entries.forEach(function(e){
+        if(e.isIntersecting){
+          var n = parseInt(e.target.getAttribute('data-count')||'0',10);
+          tween(e.target, n);
+          io.unobserve(e.target);
+        }
+      });
+    }, {threshold:.5});
+    stats.forEach(function(s){io.observe(s)});
+  } else {
+    stats.forEach(function(s){tween(s, parseInt(s.getAttribute('data-count')||'0',10))});
+  }
+})();
+
+// ── magnetic hover on copy button (subtle) ────────────────
+(function(){
+  var btns = document.querySelectorAll('.copy-btn, .btn-primary');
+  btns.forEach(function(b){
+    b.addEventListener('mousemove', function(e){
+      var r = b.getBoundingClientRect();
+      var x = (e.clientX - r.left - r.width/2) * .15;
+      var y = (e.clientY - r.top - r.height/2) * .15;
+      b.style.transform = 'translate('+x+'px,'+y+'px)';
+    });
+    b.addEventListener('mouseleave', function(){ b.style.transform=''; });
+  });
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,608 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Huntova — Local-first lead-gen super-tool. BYOK.</title>
+<meta name="description" content="Run an AI agent on your terminal. Search, score, qualify, and draft outreach for B2B prospects — all locally. Bring your own Gemini, Claude, or OpenAI key.">
+<meta property="og:title" content="Huntova — Local-first lead-gen super-tool">
+<meta property="og:description" content="Run an AI agent on your terminal. BYOK. Open source. No subscription.">
+<meta property="og:type" content="website">
+<meta name="twitter:card" content="summary_large_image">
+<style>
+  :root{
+    --bg:#08090c;
+    --bg2:#0d0f14;
+    --panel:#11141a;
+    --line:#1c2029;
+    --line2:#272b35;
+    --ink:#eef0f4;
+    --mute:#8a93a4;
+    --dim:#5d6679;
+    --acc:#7c5cff;
+    --acc2:#a48bff;
+    --green:#3ddc97;
+    --orange:#f6b352;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;padding:0;background:var(--bg);color:var(--ink);font-family:-apple-system,BlinkMacSystemFont,Inter,'Segoe UI',Helvetica,Arial,sans-serif;line-height:1.55;-webkit-font-smoothing:antialiased}
+  a{color:inherit;text-decoration:none}
+  a.link{color:var(--acc2);border-bottom:1px solid rgba(124,92,255,.3)}
+  a.link:hover{border-bottom-color:var(--acc2)}
+  code,pre{font-family:ui-monospace,'SF Mono','Cascadia Mono','JetBrains Mono',Consolas,monospace}
+  ::selection{background:rgba(124,92,255,.35)}
+
+  .nav{position:sticky;top:0;z-index:50;background:rgba(8,9,12,.85);backdrop-filter:saturate(150%) blur(10px);border-bottom:1px solid var(--line)}
+  .nav-inner{max-width:1080px;margin:0 auto;padding:14px 22px;display:flex;align-items:center;justify-content:space-between;gap:18px}
+  .brand{display:flex;align-items:center;gap:10px;font-weight:700;letter-spacing:-.01em;font-size:17px}
+  .brand-dot{width:9px;height:9px;border-radius:50%;background:var(--acc);box-shadow:0 0 12px var(--acc)}
+  .nav-links{display:flex;gap:22px;font-size:13.5px;color:var(--mute)}
+  .nav-links a:hover{color:var(--ink)}
+  .nav-cta{display:inline-flex;align-items:center;gap:6px;padding:7px 13px;background:var(--ink);color:var(--bg);border-radius:8px;font-weight:600;font-size:13px}
+  .nav-cta:hover{filter:brightness(.92)}
+
+  main{max-width:1080px;margin:0 auto;padding:0 22px}
+
+  .hero{padding:90px 0 60px;text-align:center;position:relative}
+  .hero::before{content:'';position:absolute;inset:-40px 0 0 0;background:radial-gradient(800px 320px at 50% 0, rgba(124,92,255,.18), transparent 60%);pointer-events:none}
+  .kicker{display:inline-flex;align-items:center;gap:8px;padding:5px 12px;border:1px solid var(--line2);border-radius:999px;font-size:12px;color:var(--mute);letter-spacing:.04em;text-transform:uppercase;margin-bottom:22px;background:var(--bg2)}
+  .kicker .pip{width:6px;height:6px;border-radius:50%;background:var(--green);box-shadow:0 0 8px var(--green)}
+  h1{font-size:54px;line-height:1.05;letter-spacing:-.025em;margin:0 auto 22px;max-width:760px;font-weight:700}
+  h1 .gradient{background:linear-gradient(135deg,#a48bff 0%,#7c5cff 60%,#5e3eff 100%);-webkit-background-clip:text;background-clip:text;color:transparent}
+  .lede{font-size:18px;color:var(--mute);max-width:580px;margin:0 auto 36px;line-height:1.6}
+  .hero-cta{display:flex;gap:14px;justify-content:center;flex-wrap:wrap}
+  .btn{display:inline-flex;align-items:center;gap:8px;padding:12px 20px;border-radius:10px;font-weight:600;font-size:14px;border:1px solid transparent;cursor:pointer;transition:all .15s}
+  .btn-primary{background:var(--ink);color:var(--bg)}
+  .btn-primary:hover{filter:brightness(.9);transform:translateY(-1px)}
+  .btn-ghost{background:transparent;color:var(--ink);border-color:var(--line2)}
+  .btn-ghost:hover{border-color:var(--ink);background:rgba(255,255,255,.03)}
+  .hero-meta{margin-top:34px;font-size:12px;color:var(--dim);display:flex;gap:18px;justify-content:center;flex-wrap:wrap}
+  .hero-meta span::before{content:'·';margin-right:18px;color:var(--line2)}
+  .hero-meta span:first-child::before{content:'';margin:0}
+
+  /* install card */
+  .install{margin:14px auto 0;max-width:720px}
+  .install-tabs{display:flex;gap:2px;background:var(--bg2);border:1px solid var(--line);border-bottom:none;border-radius:12px 12px 0 0;padding:6px 6px 0;overflow:hidden}
+  .install-tab{padding:8px 14px;font-size:13px;border:none;background:transparent;color:var(--mute);cursor:pointer;border-radius:8px 8px 0 0;font-family:inherit}
+  .install-tab.on{background:var(--panel);color:var(--ink)}
+  .install-pre{background:var(--panel);border:1px solid var(--line);border-radius:0 0 12px 12px;margin:0;padding:18px 20px;text-align:left;display:flex;align-items:center;justify-content:space-between;gap:14px;overflow-x:auto}
+  .install-pre code{font-size:14px;color:var(--ink);white-space:nowrap}
+  .install-pre code .prompt{color:var(--dim);user-select:none;margin-right:10px}
+  .install-copy{flex-shrink:0;padding:6px 12px;font-size:12px;background:var(--bg2);color:var(--mute);border:1px solid var(--line2);border-radius:6px;cursor:pointer;font-family:inherit}
+  .install-copy:hover{color:var(--ink);border-color:var(--ink)}
+  .install-copy.copied{color:var(--green);border-color:var(--green)}
+  .install-hint{margin-top:10px;font-size:12px;color:var(--dim);text-align:center}
+
+  /* sections */
+  section{padding:80px 0;border-top:1px solid var(--line)}
+  .section-eyebrow{font-size:12px;letter-spacing:.16em;text-transform:uppercase;color:var(--acc2);margin-bottom:14px}
+  h2{font-size:34px;line-height:1.15;letter-spacing:-.02em;margin:0 0 18px;font-weight:700;max-width:680px}
+  .section-lede{font-size:16px;color:var(--mute);max-width:580px;line-height:1.7;margin:0 0 44px}
+
+  /* feature grid */
+  .feature-grid{display:grid;grid-template-columns:1fr;gap:14px}
+  @media(min-width:760px){.feature-grid{grid-template-columns:1fr 1fr}}
+  @media(min-width:980px){.feature-grid{grid-template-columns:1fr 1fr 1fr}}
+  .feature{padding:22px;background:var(--bg2);border:1px solid var(--line);border-radius:14px;transition:border-color .15s,transform .15s}
+  .feature:hover{border-color:var(--line2);transform:translateY(-2px)}
+  .feature-icon{width:32px;height:32px;border-radius:8px;background:linear-gradient(135deg,rgba(124,92,255,.18),rgba(124,92,255,.05));border:1px solid rgba(124,92,255,.3);display:grid;place-items:center;margin-bottom:14px;color:var(--acc2);font-size:16px;font-weight:700}
+  .feature h3{margin:0 0 8px;font-size:15px;font-weight:600;letter-spacing:-.005em}
+  .feature p{margin:0;font-size:13.5px;color:var(--mute);line-height:1.6}
+
+  /* how it works */
+  .steps{display:grid;grid-template-columns:1fr;gap:0;counter-reset:step}
+  @media(min-width:780px){.steps{grid-template-columns:repeat(4,1fr);gap:18px}}
+  .step{counter-increment:step;padding:22px;background:var(--bg2);border:1px solid var(--line);border-radius:14px;position:relative}
+  .step::before{content:counter(step,decimal-leading-zero);font-family:ui-monospace,monospace;font-size:11px;color:var(--acc2);letter-spacing:.1em}
+  .step h3{margin:8px 0 6px;font-size:14px;font-weight:600}
+  .step p{margin:0;font-size:13px;color:var(--mute);line-height:1.6}
+
+  /* providers row */
+  .providers{display:grid;grid-template-columns:1fr;gap:14px}
+  @media(min-width:760px){.providers{grid-template-columns:1fr 1fr 1fr}}
+  .provider{padding:24px;background:var(--bg2);border:1px solid var(--line);border-radius:14px}
+  .provider-row{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px}
+  .provider h3{margin:0;font-size:15px;font-weight:600}
+  .provider .tag{font-size:10px;padding:2px 8px;border-radius:999px;background:rgba(124,92,255,.16);color:var(--acc2);letter-spacing:.06em;text-transform:uppercase}
+  .provider .tag.recommended{background:rgba(61,220,151,.15);color:var(--green)}
+  .provider p{margin:6px 0 12px;font-size:13px;color:var(--mute);line-height:1.55}
+  .provider a{font-size:12px;color:var(--acc2)}
+  .provider a:hover{text-decoration:underline}
+
+  /* faq */
+  .faq{display:grid;grid-template-columns:1fr;gap:6px}
+  details{padding:18px 20px;background:var(--bg2);border:1px solid var(--line);border-radius:12px;cursor:pointer}
+  details[open]{border-color:var(--line2)}
+  summary{font-weight:600;font-size:14.5px;list-style:none;outline:none}
+  summary::-webkit-details-marker{display:none}
+  summary::after{content:'+';float:right;color:var(--mute);font-size:18px;line-height:1;transition:transform .15s}
+  details[open] summary::after{transform:rotate(45deg)}
+  details p{margin:14px 0 0;color:var(--mute);font-size:13.5px;line-height:1.7}
+  details code{background:var(--panel);padding:2px 6px;border-radius:4px;font-size:12.5px;color:var(--ink)}
+
+  /* footer */
+  footer{border-top:1px solid var(--line);padding:42px 0 64px;color:var(--dim);font-size:12px}
+  .foot-inner{display:flex;justify-content:space-between;flex-wrap:wrap;gap:16px;align-items:center}
+  .foot-links{display:flex;gap:22px}
+  .foot-links a:hover{color:var(--ink)}
+
+  /* utilities */
+  .accent{color:var(--acc2)}
+  .green{color:var(--green)}
+
+  /* Cost-transparency block (Gemini round-70 #1 change) */
+  .cost-block{margin:36px auto 0;max-width:640px;text-align:left;background:var(--bg2);border:1px solid var(--line);border-radius:14px;padding:22px 24px}
+  .cost-eyebrow{margin:0 0 14px;color:var(--acc2);font-size:11px;letter-spacing:.16em;text-transform:uppercase;font-weight:600}
+  .cost-row{display:flex;flex-direction:column;gap:10px}
+  .cost-line{display:flex;align-items:baseline;justify-content:space-between;gap:14px;font-size:14px;flex-wrap:wrap}
+  .cost-line strong{color:var(--ink);font-weight:600}
+  .cost-line span:first-child{color:var(--mute)}
+  .cost-amount{font-family:ui-monospace,monospace;color:var(--ink);font-weight:600}
+  .cost-zero{color:var(--green)}
+  .cost-tag{font-size:11px;color:var(--dim);font-style:italic}
+  .cost-divider{height:1px;background:var(--line);margin:6px 0}
+  .cost-sub{color:var(--mute);font-size:12.5px;font-style:italic}
+
+  /* Plugin grid (Gemini round-70 D + Kimi round-69 commission shortlist) */
+  .plugin-grid{display:grid;grid-template-columns:1fr;gap:14px;margin-top:40px}
+  @media(min-width:760px){.plugin-grid{grid-template-columns:1fr 1fr 1fr}}
+  .plug-card{background:var(--bg2);border:1px solid var(--line);border-radius:14px;padding:18px;transition:border-color .15s,transform .15s}
+  .plug-card:hover{border-color:var(--line2);transform:translateY(-2px)}
+  .plug-card-name{font-family:ui-monospace,monospace;color:var(--acc2);font-weight:600;font-size:14px;letter-spacing:-.005em;margin-bottom:6px}
+  .plug-card-name .badge-verified{background:rgba(61,220,151,.15);color:#3ddc97;border:1px solid rgba(61,220,151,.4);padding:1px 6px;border-radius:6px;font-size:9px;letter-spacing:.05em;margin-left:6px;font-family:-apple-system,BlinkMacSystemFont,Inter,sans-serif;text-transform:uppercase}
+  .plug-card h3{margin:0 0 6px;font-size:14px;font-weight:600}
+  .plug-card p{margin:0 0 12px;font-size:12.5px;color:var(--mute);line-height:1.55}
+  .plug-card pre{margin:0;padding:8px 10px;background:#0b0d10;border:1px solid var(--line);border-radius:8px;font-family:ui-monospace,monospace;font-size:11.5px;color:#a48bff;overflow-x:auto}
+
+  /* Log-flex social proof block */
+  .logs-block{margin-top:42px;padding:22px 24px;background:var(--bg2);border:1px solid var(--line);border-radius:14px}
+  .logs-eyebrow{margin:0 0 12px;color:var(--mute);font-size:12px;letter-spacing:.04em;font-style:italic}
+  .logs-line{display:flex;align-items:baseline;justify-content:space-between;gap:14px;padding:9px 0;border-top:1px solid var(--line);font-size:13px;flex-wrap:wrap}
+  .logs-line:first-of-type{border-top:none}
+  .logs-line a{color:var(--acc2);text-decoration:none;font-weight:500}
+  .logs-line a:hover{text-decoration:underline}
+  .logs-meta{font-family:ui-monospace,monospace;color:var(--mute);font-size:11.5px}
+
+  /* Animated hero terminal — OpenClaw-style demo loop */
+  .hero-term{margin:42px auto 12px;max-width:780px;background:#0a0c10;border:1px solid var(--line2);border-radius:14px;box-shadow:0 30px 80px -10px rgba(124,92,255,.18),0 10px 30px rgba(0,0,0,.4);overflow:hidden;text-align:left;font-family:ui-monospace,'SF Mono','Cascadia Mono',monospace;font-size:13.5px;line-height:1.6}
+  .hero-term-bar{display:flex;align-items:center;gap:6px;padding:10px 14px;border-bottom:1px solid var(--line);background:rgba(255,255,255,.02)}
+  .hero-term-dot{width:11px;height:11px;border-radius:50%;background:#3a3e48}
+  .hero-term-dot.r{background:#ff5f57}
+  .hero-term-dot.y{background:#febc2e}
+  .hero-term-dot.g{background:#28c840}
+  .hero-term-title{margin-left:auto;color:var(--dim);font-size:11.5px;letter-spacing:.04em}
+  .hero-term-body{padding:18px 22px 22px;color:#dfe3eb;min-height:380px}
+  .hero-term-prompt{color:#5d6679;margin-right:6px;user-select:none}
+  .hero-term-cmd{color:#cbb9ff}
+  .hero-term-cmd .accent{color:#a48bff}
+  .hero-term-line{opacity:0;animation:termLine 12s infinite cubic-bezier(.5,0,.4,1)}
+  .hero-term-line.dim{color:var(--mute)}
+  .hero-term-line.ok{color:#dfe3eb}
+  .hero-term-line .lead-fit{color:#3ddc97;font-weight:600}
+  .hero-term-line .lead-org{color:#dfe3eb;font-weight:600}
+  .hero-term-line .lead-meta{color:var(--mute)}
+  /* Stagger reveal: each line starts at offset, holds, then fades on next loop */
+  .hero-term-line.l0{animation-delay:0s}
+  .hero-term-line.l1{animation-delay:.5s}
+  .hero-term-line.l2{animation-delay:1.1s}
+  .hero-term-line.l3{animation-delay:1.7s}
+  .hero-term-line.l4{animation-delay:2.4s}
+  .hero-term-line.l5{animation-delay:3.2s}
+  .hero-term-line.l6{animation-delay:4.1s}
+  .hero-term-line.l7{animation-delay:5.0s}
+  .hero-term-line.l8{animation-delay:5.9s}
+  .hero-term-line.l9{animation-delay:6.7s}
+  .hero-term-line.l10{animation-delay:7.5s}
+  .hero-term-line.l11{animation-delay:8.3s}
+  .hero-term-line.l12{animation-delay:9.0s}
+  @keyframes termLine{
+    0%, 4%   { opacity: 0; transform: translateY(2px); }
+    7%       { opacity: 1; transform: translateY(0); }
+    93%      { opacity: 1; }
+    97%, 100%{ opacity: 0; }
+  }
+  .hero-term-cursor{display:inline-block;width:8px;height:14px;background:#a48bff;vertical-align:-2px;animation:cursorBlink 1.1s steps(2) infinite;margin-left:2px}
+  @keyframes cursorBlink{0%,49%{opacity:1}50%,100%{opacity:0}}
+  @media(prefers-reduced-motion:reduce){
+    .hero-term-line{animation:none;opacity:1}
+    .hero-term-cursor{animation:none}
+  }
+  @media(max-width:680px){
+    .hero-term-body{font-size:11.5px;padding:14px 16px;min-height:320px}
+  }
+</style>
+</head>
+<body>
+
+<nav class="nav">
+  <div class="nav-inner">
+    <a class="brand" href="/">
+      <span class="brand-dot"></span>
+      <span>Huntova</span>
+    </a>
+    <div class="nav-links">
+      <a href="#features">Features</a>
+      <a href="/try">Try it free</a>
+      <a href="/demo">Live demo</a>
+      <a href="/plugins">Plugins</a>
+      <a href="#install">Install</a>
+      <a href="#faq">FAQ</a>
+      <a href="https://github.com/enzostrano/huntova-public" target="_blank" rel="noopener">GitHub</a>
+    </div>
+    <a class="nav-cta" href="#install">Download →</a>
+  </div>
+</nav>
+
+<main>
+
+<section class="hero" style="border:none;padding-top:90px">
+  <div class="kicker"><span class="pip"></span> v0.1 alpha · open source · MIT-class developer tool</div>
+  <h1>Find your next 100 customers<br><span class="gradient">from the command line.</span></h1>
+  <p class="lede">Stop paying $150/mo for stale B2B databases. Huntova is an open-source, BYOK agent that hunts the live web, scores prospects across 5 dimensions, and qualifies leads — in your terminal.</p>
+
+  <!-- Install command FIRST (per Gemini round-70: action before proof) -->
+  <div class="install" id="install" style="margin-top:34px">
+    <div class="install-tabs">
+      <button class="install-tab on" data-cmd="pipx">pipx (recommended)</button>
+      <button class="install-tab" data-cmd="curl">curl</button>
+      <button class="install-tab" data-cmd="git">git clone</button>
+    </div>
+    <div class="install-pre">
+      <code id="installCode"><span class="prompt">$</span><span id="installCmd">pipx install huntova &amp;&amp; huntova onboard</span></code>
+      <button class="install-copy" id="installCopy" type="button">Copy</button>
+    </div>
+    <p class="install-hint">macOS · Linux · Windows · Python 3.11+</p>
+  </div>
+
+  <div class="hero-cta" style="margin-top:24px">
+    <a class="btn btn-primary" href="/try">Try it now — no install →</a>
+    <a class="btn btn-ghost" href="/demo">See a live Proof Pack →</a>
+    <a class="btn btn-ghost" href="https://github.com/enzostrano/huntova-public" target="_blank" rel="noopener">View on GitHub →</a>
+  </div>
+  <div class="hero-meta">
+    <span><strong class="green">Free</strong> · open source (AGPL-3.0)</span>
+    <span><strong class="accent">BYOK</strong> · pay your provider, not us</span>
+    <span><strong>Local-first</strong> · your leads stay on your machine</span>
+  </div>
+
+  <!-- Animated terminal — full 60-sec pipeline: examples → run → outreach -->
+  <div class="hero-term" aria-label="60-second cold-email pipeline demo">
+    <div class="hero-term-bar">
+      <span class="hero-term-dot r"></span>
+      <span class="hero-term-dot y"></span>
+      <span class="hero-term-dot g"></span>
+      <span class="hero-term-title">huntova — 60-second cold-email pipeline</span>
+    </div>
+    <div class="hero-term-body">
+      <div class="hero-term-line ok l0"><span class="hero-term-prompt">$</span><span class="hero-term-cmd">huntova examples install <span class="accent">tech-recruiting</span></span></div>
+      <div class="hero-term-line dim l1">  ✓ installed example recipe tech-recruiting</div>
+      <div class="hero-term-line ok l2"><span class="hero-term-prompt">$</span><span class="hero-term-cmd">huntova recipe run <span class="accent">tech-recruiting</span></span></div>
+      <div class="hero-term-line dim l3">  · Scoring 22 candidates with Gemini 2.5 Flash</div>
+      <div class="hero-term-line ok l4">  <span class="lead-fit">✓ [9/10]</span> <span class="lead-org">Strobe Recruiting</span> <span class="lead-meta">· UK · strobe-rec.co.uk</span></div>
+      <div class="hero-term-line ok l5">  <span class="lead-fit">✓ [8/10]</span> <span class="lead-org">DevOps Talent Co</span> <span class="lead-meta">· USA · devopstalent.io</span></div>
+      <div class="hero-term-line ok l6">  <span class="lead-fit">✓ [7/10]</span> <span class="lead-org">PythonPro Search</span> <span class="lead-meta">· UK · pythonpro.co.uk</span></div>
+      <div class="hero-term-line ok l7"><span class="hero-term-prompt">$</span><span class="hero-term-cmd">huntova outreach send <span class="accent">--top 3 --dry-run</span></span></div>
+      <div class="hero-term-line dim l8">  #1 Strobe Recruiting → hello@strobe-rec.co.uk</div>
+      <div class="hero-term-line dim l9">    subject: Saw your hiring page — Senior Python role</div>
+      <div class="hero-term-line dim l10">    body: Hi Sarah, noticed Strobe is scaling its embedded team...</div>
+      <div class="hero-term-line ok l11">  ✓ 3 emails ready · re-run without --dry-run to deliver</div>
+      <div class="hero-term-line ok l12"><span class="hero-term-prompt">$</span> <span class="hero-term-cursor"></span></div>
+    </div>
+  </div>
+
+  <!-- Cost transparency — Gemini round-70 #1 change. Devs' #1 mental
+       blocker for free AI tools is "wait, who's paying for compute?" -->
+  <div class="cost-block">
+    <p class="cost-eyebrow">How much does it actually cost?</p>
+    <div class="cost-row">
+      <div class="cost-line"><strong>Huntova CLI</strong><span class="cost-amount cost-zero">€0.00 forever</span><span class="cost-tag">open source · AGPL-3.0</span></div>
+      <div class="cost-divider"></div>
+      <div class="cost-sub">You bring your own AI key. Provider pay-as-you-go (rough estimates):</div>
+      <div class="cost-line"><span>Google Gemini 2.5 Flash</span><span class="cost-amount">~$0.005 / 10 leads</span></div>
+      <div class="cost-line"><span>Anthropic Claude Sonnet 4.5</span><span class="cost-amount">~$0.04 / 10 leads</span></div>
+      <div class="cost-line"><span>OpenAI GPT-4o-mini</span><span class="cost-amount">~$0.015 / 10 leads</span></div>
+      <div class="cost-line"><span>Local Ollama / LM Studio</span><span class="cost-amount cost-zero">$0.00</span></div>
+    </div>
+  </div>
+</section>
+
+<section id="features">
+  <div class="section-eyebrow">Features</div>
+  <h2>Built like the agent you'd hire if you could.</h2>
+  <p class="section-lede">Huntova combines web search, multi-dimensional AI scoring, deep qualification, contact enrichment, and personalised email drafting into one local agent loop. No SaaS subscription, no per-lead cost — just your AI key.</p>
+
+  <div class="feature-grid">
+    <div class="feature">
+      <div class="feature-icon">⌕</div>
+      <h3>SearXNG-powered web sweep</h3>
+      <p>50–80 AI-generated queries per hunt across Google, Bing, DuckDuckGo. Domain blocklist + de-dup keep the noise out.</p>
+    </div>
+    <div class="feature">
+      <div class="feature-icon">⌬</div>
+      <h3>5-dimensional scoring</h3>
+      <p>Each prospect graded on fit, buyability, timing, reachability, decision-making authority. No generic match scores.</p>
+    </div>
+    <div class="feature">
+      <div class="feature-icon">⤓</div>
+      <h3>Playwright deep-qualify</h3>
+      <p>High-fit leads get a multi-page crawl: about, team, contact, recent posts. The agent reads pages like a salesperson would.</p>
+    </div>
+    <div class="feature">
+      <div class="feature-icon">✉</div>
+      <h3>Personalised email drafts</h3>
+      <p>Subject + body + LinkedIn note, tailored to evidence the agent actually found. Three tones to pick from. Rewrite on demand.</p>
+    </div>
+    <div class="feature">
+      <div class="feature-icon">⚙</div>
+      <h3>Agent DNA + learning loop</h3>
+      <p>The agent builds a profile of your ICP from your wizard answers. Every "good fit / bad fit" rating refines the next hunt.</p>
+    </div>
+    <div class="feature">
+      <div class="feature-icon">⌂</div>
+      <h3>Local SQLite storage</h3>
+      <p>Your leads, drafts, hunt runs — all stored at <code>~/.local/share/huntova/db.sqlite</code>. No cloud database, no privacy compromises.</p>
+    </div>
+  </div>
+</section>
+
+<section id="how">
+  <div class="section-eyebrow">How it works</div>
+  <h2>Three commands. Then start hunting.</h2>
+  <p class="section-lede">Huntova installs as a single CLI. The first run wizard asks for your provider key; <code>huntova serve</code> opens the dashboard in your browser at <code>http://127.0.0.1:5050</code>.</p>
+
+  <div class="steps">
+    <div class="step">
+      <h3>Install</h3>
+      <p><code>pipx install huntova</code> — isolated Python install, no global pollution.</p>
+    </div>
+    <div class="step">
+      <h3>Initialise</h3>
+      <p><code>huntova onboard</code> — pick provider, paste API key, set defaults.</p>
+    </div>
+    <div class="step">
+      <h3>Serve</h3>
+      <p><code>huntova serve</code> — local server boots, browser opens, dashboard ready.</p>
+    </div>
+    <div class="step">
+      <h3>Hunt</h3>
+      <p>Click <strong>Start your first hunt</strong>. Leads stream in within minutes.</p>
+    </div>
+  </div>
+
+  <div style="margin-top:36px;background:var(--bg2);border:1px solid var(--line);border-radius:14px;padding:24px">
+    <p style="margin:0 0 12px;color:var(--accent);font-size:11px;letter-spacing:.16em;text-transform:uppercase">The 60-second cold-email pipeline</p>
+    <h3 style="margin:0 0 16px;font-size:18px;font-weight:600">Three commands. Real prospects. Real personalised emails.</h3>
+    <pre style="margin:0;padding:18px 20px;background:var(--bg);border:1px solid var(--line);border-radius:10px;overflow-x:auto;font-size:13px;line-height:1.6"><code><span style="color:var(--dim)">$</span> huntova examples install <span style="color:var(--accent)">tech-recruiting</span>
+<span style="color:var(--mute)">  ✓ installed example recipe tech-recruiting</span>
+
+<span style="color:var(--dim)">$</span> huntova recipe run tech-recruiting
+  <span style="color:var(--green)">✓</span> [9/10] Strobe Recruiting        · UK  · strobe-rec.co.uk
+  <span style="color:var(--green)">✓</span> [8/10] DevOps Talent Co         · USA · devopstalent.io
+  <span style="color:var(--green)">✓</span> [7/10] PythonPro Search         · UK  · pythonpro.co.uk
+
+<span style="color:var(--dim)">$</span> huntova outreach send <span style="color:var(--accent)">--top 3 --dry-run</span>
+  #1 Strobe Recruiting → hello@strobe-rec.co.uk
+     subject: Saw your hiring page — Senior Python role
+     body:    Hi Sarah, noticed Strobe is scaling its embedded team...
+  <span style="color:var(--green)">✓</span> 3 emails ready · re-run without --dry-run to deliver
+</code></pre>
+    <p style="margin:14px 0 0;color:var(--mute);font-size:13px;line-height:1.6">Real searches via SearXNG. Real AI-drafted emails per lead. Real SMTP delivery. Your AI key, your SMTP, your machine. <code>huntova hunt --explain-scores</code> shows the per-dimension breakdown if you want to see how the agent reaches each score. <code>huntova share status &lt;slug&gt;</code> tells you who clicked.</p>
+  </div>
+</section>
+
+<section id="plugins">
+  <div class="section-eyebrow">Extensible by design</div>
+  <h2>Routing engine, not just a scraper.</h2>
+  <p class="section-lede">Huntova is a thin agent core + a plugin protocol. 4 plugins ship in the wheel; more in the registry. Drop a Python file in <code>~/.config/huntova/plugins/</code> to add your own.</p>
+
+  <div class="plugin-grid">
+    <div class="plug-card">
+      <div class="plug-card-name">huntova-notion <span class="badge-verified">verified</span></div>
+      <h3>Notion inbox</h3>
+      <p>Push every saved lead to a Notion database row. The default indie-workspace integration.</p>
+      <pre>$ pip install huntova-notion</pre>
+    </div>
+    <div class="plug-card">
+      <div class="plug-card-name">huntova-apollo <span class="badge-verified">verified</span></div>
+      <h3>Apollo enrich</h3>
+      <p>Verify and enrich contacts via Apollo.io after the agent qualifies them. Bring your own APOLLO_KEY.</p>
+      <pre>$ pip install huntova-apollo</pre>
+    </div>
+    <div class="plug-card">
+      <div class="plug-card-name">huntova-webhook <span class="badge-verified">verified</span></div>
+      <h3>Generic webhook</h3>
+      <p>POST every saved lead as JSON to any URL. One plugin unlocks Zapier, Make, n8n, Discord.</p>
+      <pre>$ pip install huntova-webhook</pre>
+    </div>
+    <div class="plug-card">
+      <div class="plug-card-name">huntova-emailguard <span class="badge-verified">verified</span></div>
+      <h3>MX deliverability</h3>
+      <p>Drop leads whose contact email's domain has no working mail server. Saves wasted draft credits.</p>
+      <pre>$ pip install huntova-emailguard</pre>
+    </div>
+    <div class="plug-card">
+      <div class="plug-card-name">huntova-hiring-signal <span class="badge-verified">verified</span></div>
+      <h3>Hiring intelligence</h3>
+      <p>Detects "we're hiring X" posts. Active hirers reply 4× more. Adds timing intelligence pre-score.</p>
+      <pre>$ pip install huntova-hiring-signal</pre>
+    </div>
+    <div class="plug-card">
+      <div class="plug-card-name">huntova-wappalyzer</div>
+      <h3>Tech-stack tags</h3>
+      <p>Detect each prospect's tech stack from their homepage. Tags the lead with platforms detected.</p>
+      <pre>$ pip install huntova-wappalyzer</pre>
+    </div>
+  </div>
+
+  <p style="margin-top:18px;color:var(--mute);font-size:13px">
+    Search the full registry: <code>huntova plugins search &lt;query&gt;</code> ·
+    Build your own: <code>huntova plugins create my-plugin</code>
+  </p>
+</section>
+
+<section id="providers">
+  <div class="section-eyebrow">Bring your own key</div>
+  <h2>You pay your AI provider. Huntova doesn't sit in the middle.</h2>
+  <p class="section-lede">Pick whichever AI fits your budget and quality bar. Switch any time — your key, your data, your rules.</p>
+
+  <div class="providers">
+    <div class="provider">
+      <div class="provider-row"><h3>Google Gemini</h3><span class="tag recommended">Default</span></div>
+      <p>Generous free tier, fast 2.5 Flash for scoring + Pro for deep analysis.</p>
+      <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">Get a key →</a>
+    </div>
+    <div class="provider">
+      <div class="provider-row"><h3>Anthropic Claude</h3><span class="tag">Premium</span></div>
+      <p>Sonnet 4.5 for the highest-quality scoring and most natural email drafts.</p>
+      <a href="https://console.anthropic.com/settings/keys" target="_blank" rel="noopener">Get a key →</a>
+    </div>
+    <div class="provider">
+      <div class="provider-row"><h3>OpenAI</h3><span class="tag">Versatile</span></div>
+      <p>GPT-4o-mini for cost efficiency or GPT-5 for the strongest reasoning.</p>
+      <a href="https://platform.openai.com/api-keys" target="_blank" rel="noopener">Get a key →</a>
+    </div>
+  </div>
+</section>
+
+<section id="faq">
+  <div class="section-eyebrow">FAQ</div>
+  <h2>Common questions.</h2>
+
+  <div class="faq">
+    <details>
+      <summary>Is Huntova really free?</summary>
+      <p>The CLI is open source under AGPL-3.0 and free to use. You pay only your AI provider's pay-as-you-go pricing (Gemini has a free tier, Claude and OpenAI charge per token). Huntova doesn't take a cut.</p>
+    </details>
+    <details>
+      <summary>What runs locally vs in the cloud?</summary>
+      <p>Everything except the AI calls and web search runs on your machine. Your leads, hunt history, settings, and email drafts all live in a local SQLite file at <code>~/.local/share/huntova/db.sqlite</code>. Web searches go to a public SearXNG instance; AI scoring goes directly to your chosen provider. Huntova has no central server seeing your data.</p>
+    </details>
+    <details>
+      <summary>Where are my API keys stored?</summary>
+      <p>In your OS keychain when available (macOS Keychain, Windows Credential Manager, Linux Secret Service). Falls back to a Fernet-encrypted file at <code>~/.config/huntova/secrets.enc</code> with a key derived from machine identifiers. Last-ditch fallback is a 0600-permission JSON file with a stern warning.</p>
+    </details>
+    <details>
+      <summary>Which platforms?</summary>
+      <p>macOS, Windows, and Linux. Python 3.11 or newer required. <code>pipx</code> is the recommended installer because it isolates Huntova's dependencies from your global Python.</p>
+    </details>
+    <details>
+      <summary>What CLI commands are available?</summary>
+      <p>
+        <strong>Find &amp; score:</strong>
+        <code>huntova examples install tech-recruiting</code> grabs a starter recipe (4 bundled: agencies-eu, b2b-saas-hiring, tech-recruiting, ecommerce-shopify).
+        <code>huntova recipe run &lt;name&gt;</code> replays a saved recipe.
+        <code>huntova hunt --explain-scores</code> runs an ad-hoc hunt and shows per-dimension score breakdowns.
+        <code>huntova ls --filter aurora</code> lists saved leads.
+        <code>huntova lead L3</code> prints one lead's full detail.
+        <br><br>
+        <strong>Send:</strong>
+        <code>huntova outreach send --top 5 --dry-run</code> previews the AI-drafted emails for your highest-fit leads.
+        Re-run without <code>--dry-run</code> to deliver via your SMTP.
+        <code>huntova outreach send --template ./pitch.txt</code> uses a custom template instead.
+        <br><br>
+        <strong>Share &amp; track:</strong>
+        <code>huntova share --top 10</code> mints a /h/&lt;slug&gt; URL of your best leads.
+        <code>huntova share status &lt;slug&gt;</code> shows view counts.
+        <code>huntova export</code> dumps CSV or JSON.
+        <br><br>
+        <strong>Plugins:</strong>
+        <code>huntova plugins search hubspot</code> finds plugins in the registry.
+        <code>huntova plugins install &lt;name&gt;</code> one-command install.
+        <code>huntova plugins create my-thing</code> scaffolds a new plugin.
+        <code>huntova plugins contribute</code> opens the registry PR flow.
+        <br><br>
+        <strong>Ops:</strong>
+        <code>huntova serve</code> opens the dashboard.
+        <code>huntova doctor</code> diagnoses provider/keychain/SearXNG/Playwright/plugin issues.
+        <code>huntova metrics show</code> prints daily event funnel (admin-only, needs HV_ADMIN_TOKEN).
+        <code>huntova update</code> self-upgrades via pipx.
+        <code>huntova telemetry enable</code> opts in to anonymous usage stats.
+      </p>
+    </details>
+    <details>
+      <summary>How is this different from Apollo / Hunter / Clay / ZoomInfo?</summary>
+      <p>Those tools sell you access to a static prospect database. Huntova runs a fresh agent every time, finding prospects from the open web matching your specific ICP, then scoring and qualifying each one. Three things win: <strong>truth</strong> (every lead comes with evidence + source URLs), <strong>actionability</strong> (drafts and outreach paths included), and <strong>control</strong> (BYOK, local data, reproducible).</p>
+    </details>
+    <details>
+      <summary>Can I contribute?</summary>
+      <p>Yes — issues + pull requests welcome on <a class="link" href="https://github.com/enzostrano/huntova-public" target="_blank" rel="noopener">GitHub</a>. The repo follows a small-commit cadence; if you're shipping something invasive, open an issue first to align on direction.</p>
+    </details>
+    <details>
+      <summary>What about updates?</summary>
+      <p><code>pipx upgrade huntova</code> for the released path. <code>git pull</code> if you cloned the repo. The CLI checks for updates on first launch each day and notes when a newer version is on PyPI (no auto-update).</p>
+    </details>
+  </div>
+</section>
+
+<footer>
+  <div class="foot-inner" style="max-width:1080px;margin:0 auto;padding:0 22px">
+    <div>© 2026 Huntova · AGPL-3.0 · BYOK</div>
+    <div class="foot-links">
+      <a href="https://github.com/enzostrano/huntova-public" target="_blank" rel="noopener">GitHub</a>
+      <a href="https://github.com/enzostrano/huntova-public/issues" target="_blank" rel="noopener">Issues</a>
+      <a href="/privacy">Privacy</a>
+      <a href="/terms">Terms</a>
+    </div>
+  </div>
+</footer>
+
+</main>
+
+<script>
+  // Tabbed install commands
+  var INSTALL_CMDS = {
+    pipx: 'pipx install huntova && huntova onboard',
+    curl: 'curl -fsSL https://github.com/enzostrano/huntova-public/releases/latest/download/install.sh | sh',
+    git:  'git clone https://github.com/enzostrano/huntova-public.git && cd huntova-public && pip install -e . && huntova onboard',
+  };
+  var tabs = document.querySelectorAll('.install-tab');
+  var codeEl = document.getElementById('installCmd');
+  tabs.forEach(function(tab){
+    tab.addEventListener('click', function(){
+      tabs.forEach(function(t){t.classList.remove('on')});
+      tab.classList.add('on');
+      var cmd = INSTALL_CMDS[tab.dataset.cmd] || INSTALL_CMDS.pipx;
+      codeEl.textContent = cmd;
+    });
+  });
+  // Copy
+  var copyBtn = document.getElementById('installCopy');
+  copyBtn.addEventListener('click', function(){
+    var txt = codeEl.textContent;
+    function _flashCopied(){
+      copyBtn.textContent = 'Copied';
+      copyBtn.classList.add('copied');
+      setTimeout(function(){ copyBtn.textContent = 'Copy'; copyBtn.classList.remove('copied'); }, 1400);
+    }
+    if(navigator.clipboard && navigator.clipboard.writeText){
+      navigator.clipboard.writeText(txt).then(_flashCopied).catch(function(){
+        // Older Safari blocks the async API on http origins — fall through.
+        _legacyCopy();
+      });
+      return;
+    }
+    _legacyCopy();
+    function _legacyCopy(){
+      try{
+        var area = document.createElement('textarea');
+        area.value = txt; area.setAttribute('readonly','');
+        area.style.position='fixed'; area.style.opacity='0';
+        document.body.appendChild(area); area.select();
+        document.execCommand('copy');
+        document.body.removeChild(area);
+        _flashCopied();
+      }catch(_){ /* fully unavailable — leave button untouched */ }
+    }
+  });
+  // Smooth scroll for anchor nav
+  document.querySelectorAll('a[href^="#"]').forEach(function(a){
+    a.addEventListener('click', function(e){
+      var id = a.getAttribute('href').slice(1);
+      var el = document.getElementById(id);
+      if(el){ e.preventDefault(); el.scrollIntoView({behavior:'smooth', block:'start'}); }
+    });
+  });
+</script>
+
+</body>
+</html>
