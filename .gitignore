@@ -1,0 +1,57 @@
+# Data files (user-specific, not for deployment)
+master_leads.json
+archived_leads.json
+seen_history.json
+domain_blocklist.json
+user_blocked.json
+agent_state.json
+settings.json
+wal.jsonl
+.heartbeat
+huntova.db
+
+# Logs & backups
+logs/
+backups/
+reports/
+__pycache__/
+*.pyc
+
+# Environment
+.env
+*.bat
+
+# IDE
+.vscode/
+.idea/
+
+REDESIGN.md
+STRATEGY.md
+
+# Pivot additions
+*.egg-info/
+build/
+dist/
+*.sqlite
+*.sqlite-wal
+*.sqlite-shm
+.pytest_cache/
+.venv/
+
+# Internal sprint / product docs — not for public release
+CLAUDE.md
+CHECKPOINT.md
+NEXT_PHASE_PLAN.md
+STABILITY-SWEEP-*.md
+ROADMAP.md
+benchmark_brain.py
+# Per-release notes are transient — written only to feed the
+# `gh release create --notes-file` step. CHANGELOG.md is the
+# durable record.
+RELEASE-v*.md
+
+# Build artefacts and test baselines (added 2026-04-30 cleanup)
+frontend/node_modules/
+frontend/dist/
+frontend/.vite/
+tests/baselines/
