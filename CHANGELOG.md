@@ -6,6 +6,47 @@ Versioning: `0.1.0aNN` alpha increments. Public install path: `pipx install hunt
 
 ---
 
+## 0.1.0a471 — May 4 2026 — Wizard `_knowledge` audit list grew unbounded on every successful complete; 50-entry recent-N cap added (BRAIN-102)
+
+### Bug fix (BRAIN-102, embedded-array growth)
+
+Every successful `/api/wizard/complete` appended a fresh
+`_knowledge` entry (~2-3KB dict) to the user's
+`user_settings.data`. The list had no cap, so a power user
+or automated retry loop could accumulate hundreds of entries:
+
+- 200 completes × 2.5KB = ~500KB row inflation per user.
+- Every `merge_settings` reads + writes the full JSON blob —
+  IO grows linearly in retraining count.
+- Every `get_settings` JSON parse on every wizard / agent /
+  status request gets slower.
+- Hits SQLite row size pain at thousands of entries.
+
+Standard guidance for embedded arrays: cap to a recent-N
+window. Operational state lives in `user_settings`; deep
+history (if needed) belongs in a separate table.
+
+Fix:
+
+- New constant `_KNOWLEDGE_LIST_MAX = 50` (env-overridable
+  via `HV_WIZARD_KNOWLEDGE_LIST_MAX`).
+- The merge mutator's `_knowledge` append now slices to the
+  most recent N entries via `kn[-_KNOWLEDGE_LIST_MAX:]`
+  whenever the list exceeds the cap.
+- Tail slice (not head) — newest entry survives, oldest
+  falls off.
+- 50 × ~2.5KB = ~125KB max bounded inflation per user.
+
+5 new regression tests in
+`tests/test_wizard_knowledge_list_cap.py` including a
+behavioral test that fires `cap + 50` simulated completes
+and verifies the stored list never exceeds the cap while
+preserving the newest entry.
+
+424 of 424 tests passing.
+
+---
+
 ## 0.1.0a470 — May 4 2026 — BRAIN-85 idempotency cache had no TTL; a six-month-old completion fingerprint could keep short-circuiting against evolved scoring rules + brain heuristics. 14-day freshness window added (BRAIN-101)
 
 ### Bug fix (BRAIN-101, cache TTL semantics)

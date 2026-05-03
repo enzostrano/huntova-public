@@ -504,6 +504,14 @@ _ASSIST_DAILY_MAX = int(os.environ.get("HV_WIZARD_ASSIST_DAILY_MAX") or "200")
 # tight enough that a stale 6-month-old cache can't keep
 # suppressing real work after substantial product evolution.
 _COMPLETE_CACHE_TTL_SECONDS = int(os.environ.get("HV_WIZARD_COMPLETE_CACHE_TTL") or str(14 * 86400))
+# a471 (BRAIN-102): bound the wizard `_knowledge` audit list to
+# a recent-N window. Per Huntova engineering review on
+# embedded-array growth: every successful complete appends a
+# ~2-3KB entry; an unbounded list bloats user_settings.data
+# linearly and slows every JSON parse on every read. 50 entries
+# × ~2.5KB = ~125KB max bounded inflation per user — generous
+# context for retraining audits without unbounded growth.
+_KNOWLEDGE_LIST_MAX = int(os.environ.get("HV_WIZARD_KNOWLEDGE_LIST_MAX") or "50")
 
 # State: {(user_id, utc_date_str): count}. The date suffix in
 # the key is the natural cleanup mechanism — yesterday's keys
@@ -9125,6 +9133,13 @@ async def api_wizard_complete(request: Request, user: dict = Depends(require_use
         # holds, so concurrent writers' counter bumps don't get lost.
         kn = list(w.get("_knowledge") or [])
         kn.append(_knowledge_entry)
+        # a471 fix (BRAIN-102): bound the list to a recent-N
+        # window. Tail slice keeps the entry we just appended
+        # (newest first) and trims the oldest when the cap is
+        # hit. Per Huntova engineering review on embedded-array
+        # growth.
+        if len(kn) > _KNOWLEDGE_LIST_MAX:
+            kn = kn[-_KNOWLEDGE_LIST_MAX:]
         w["_knowledge"] = kn
         w["_train_count"] = (w.get("_train_count", 0) or 0) + 1
         w["_last_trained"] = _now_iso
