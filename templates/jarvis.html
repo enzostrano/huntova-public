@@ -3726,7 +3726,13 @@ body.hv-has-update-banner{padding-top:var(--hv-update-banner-h, 38px)}
         const r = await fetch('/api/settings'); const d = await r.json();
         const w = (d && d.wizard) || {};
         if (w._wizard_answers) Object.assign(_brainState.answers, w._wizard_answers);
-        if (typeof w._wizard_phase === 'number') {
+        // BRAIN-87: prefer the free-moving cursor over the monotonic
+        // max phase. A user who clicked Back to review earlier answers
+        // shouldn't be force-snapped forward on reload. Fall back to
+        // _wizard_phase for legacy state without a cursor field.
+        if (typeof w._wizard_cursor === 'number') {
+          _brainState.qi = Math.min(w._wizard_cursor, _BRAIN_QUESTIONS.length - 1);
+        } else if (typeof w._wizard_phase === 'number') {
           _brainState.qi = Math.min(w._wizard_phase, _BRAIN_QUESTIONS.length - 1);
         }
         // a428 fix (BRAIN-68): capture the revision token so
@@ -4517,9 +4523,42 @@ body.hv-has-update-banner{padding-top:var(--hv-update-banner-h, 38px)}
     nav.appendChild(back); nav.appendChild(next); nav.appendChild(skip); nav.appendChild(navStatus);
     card.appendChild(nav);
 
-    back.addEventListener('click', () => {
+    back.addEventListener('click', async () => {
       _brainState.qi = Math.max(0, _brainState.qi - 1);
       _brainRenderQuestion(body);
+      // BRAIN-87: persist cursor so reload doesn't snap the user
+      // back forward to the highest phase ever seen. Fire-and-forget;
+      // failures are non-blocking (Back is a UI-only convenience).
+      try {
+        const _bodyObj = {
+          answers: _brainState.answers,
+          phase: q.phase,
+          cursor: _brainState.qi,
+        };
+        if (typeof _brainState.revision === 'number') {
+          _bodyObj.expected_revision = _brainState.revision;
+        }
+        if (typeof _brainState.epoch === 'number') {
+          _bodyObj.expected_epoch = _brainState.epoch;
+        }
+        const _r = await fetch('/api/wizard/save-progress', {
+          method: 'POST', headers: {'Content-Type':'application/json'},
+          body: JSON.stringify(_bodyObj),
+        });
+        if (_r.ok) {
+          try {
+            const _d = await _r.json();
+            if (_d && typeof _d.revision === 'number') _brainState.revision = _d.revision;
+            if (_d && typeof _d.epoch === 'number') _brainState.epoch = _d.epoch;
+          } catch (_) {}
+        } else if (_r.status === 410) {
+          // Reset boundary mid-navigation — converge.
+          if (typeof _toast === 'function') {
+            _toast('Wizard was reset elsewhere. Reloading to start fresh.', 'err');
+          }
+          setTimeout(() => { try { location.reload(); } catch (_) {} }, 1500);
+        }
+      } catch (_) {}
     });
     next.addEventListener('click', async () => {
       // Type-aware extraction so chips return arrays + textarea-list

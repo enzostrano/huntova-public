@@ -60,15 +60,16 @@ def _all_save_progress_blocks() -> list[str]:
     return blocks
 
 
-def test_three_save_progress_callsites_present():
-    """Sanity: the wizard JS has exactly three save-progress
-    callsites today. If a future refactor consolidates them, this
-    test should be relaxed — not deleted."""
+def test_save_progress_callsites_present():
+    """Sanity: the wizard JS has multiple save-progress callsites
+    (Continue, scan-success, Skip, plus BRAIN-87 added Back). The
+    point of this test is to keep the contract uniform: every
+    callsite must forward both tokens. If a future refactor
+    consolidates them, relax this — don't drop the contract."""
     blocks = _all_save_progress_blocks()
-    assert len(blocks) == 3, (
-        f"BRAIN-84 sanity: expected 3 save-progress callsites; "
-        f"found {len(blocks)}. If a refactor consolidated them, "
-        f"adjust the regression — don't drop the contract."
+    assert len(blocks) >= 3, (
+        f"BRAIN-84 sanity: expected at least 3 save-progress "
+        f"callsites; found {len(blocks)}."
     )
 
 

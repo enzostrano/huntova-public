@@ -8931,6 +8931,17 @@ async def api_wizard_save_progress(request: Request, user: dict = Depends(requir
     answers = body.get("answers", {})
     phase = body.get("phase", 0)
     confidence = body.get("confidence", 0)
+    # a456 (BRAIN-87): cursor — currently-viewed question index.
+    # Distinct from `phase`: phase is monotonic max ever reached
+    # (BRAIN-3 stale-tab guard); cursor moves freely backward and
+    # forward within [0, max_phase] so users can review prior
+    # answers without being snapped forward on reload. Optional
+    # — old clients omit it, server falls back to phase.
+    cursor = body.get("cursor")
+    try:
+        cursor = int(cursor) if cursor is not None else None
+    except (TypeError, ValueError):
+        cursor = None
     # a428 fix (BRAIN-68): optional optimistic-concurrency token.
     # Client passes the revision it last saw; if the row already
     # moved past that, another tab won the race and this write is
@@ -9018,6 +9029,18 @@ async def api_wizard_save_progress(request: Request, user: dict = Depends(requir
         # gave on later questions. Now: only forward.
         w["_wizard_phase"] = _monotonic_phase(w.get("_wizard_phase"), phase)
         w["_wizard_confidence"] = _monotonic_phase(w.get("_wizard_confidence"), confidence)
+        # a456 (BRAIN-87): cursor write — NOT monotonic. Free-moving
+        # within [0, max_phase] so a Back-then-reload doesn't snap
+        # the user forward to the highest phase ever reached.
+        if cursor is not None:
+            _max_unlocked = int(w.get("_wizard_phase", 0) or 0)
+            # Clamp to [0, max_unlocked] — cursor cannot point past
+            # what the user has actually unlocked.
+            if cursor < 0:
+                cursor = 0
+            if cursor > _max_unlocked:
+                cursor = _max_unlocked
+            w["_wizard_cursor"] = cursor
         # a322: map real wizard field names through every save so the
         # top-level fields always reflect the latest in-progress answers.
         _DIRECT_FIELDS = (
@@ -9699,6 +9722,11 @@ async def api_wizard_status(user: dict = Depends(require_user)):
         # with save-progress. Mismatch → reset boundary detected.
         "wizard_epoch": int(w.get("_wizard_epoch", 0) or 0),
         "wizard_revision": int(w.get("_wizard_revision", 0) or 0),
+        # a456 (BRAIN-87): cursor — currently-viewed question
+        # index. Distinct from phase (monotonic max). Client
+        # uses this on reload so backward navigation survives.
+        # Falls back to phase for legacy state without cursor.
+        "wizard_cursor": int(w.get("_wizard_cursor", w.get("_wizard_phase", 0)) or 0),
     }
 
 

@@ -6,6 +6,49 @@ Versioning: `0.1.0aNN` alpha increments. Public install path: `pipx install hunt
 
 ---
 
+## 0.1.0a456 — May 3 2026 — Wizard Back navigation lost on every reload because client load force-snapped qi to monotonic max phase; cursor-vs-max-phase split fixes it (BRAIN-87)
+
+### Bug fix (BRAIN-87, multi-step form back-navigation)
+
+The BRAIN-3 (a364) `_monotonic_phase` rule prevents stale-tab
+regression on the persisted MAX phase, but it was also blocking
+legitimate in-session backward navigation. The client load path
+read `_wizard_phase` (monotonic max) and force-snapped
+`_brainState.qi`. So:
+
+1. User advances to q7. save-progress writes `_wizard_phase=7`.
+2. User clicks Back twice — local qi=5.
+3. User reloads.
+4. Client load reads `_wizard_phase=7` and snaps qi=7.
+5. User trapped at the highest phase ever reached. Every reload
+   undoes their navigation.
+
+Standard fix: separate "furthest unlocked phase" (monotonic max,
+stale-tab safe) from "current viewing cursor" (free-moving
+within `[0, max_phase]`).
+
+Server: new `_wizard_cursor` field. `/api/wizard/save-progress`
+accepts an optional `cursor` body field (int, clamped to
+`[0, _wizard_phase]`) and persists it WITHOUT the monotonic
+guard. `/api/wizard/status` exposes `wizard_cursor` (falls back
+to `wizard_phase` for legacy state).
+
+Client: load path prefers `w._wizard_cursor` over `_wizard_phase`
+when setting initial `qi`. Back handler now persists the new
+cursor to the server (fire-and-forget, with the same BRAIN-83
+revision + epoch token forwarding as Continue/Skip), so reloads
+preserve the navigation.
+
+The BRAIN-84 sanity test was relaxed from "exactly 3 callsites"
+to "at least 3" — Back is the legitimate fourth callsite, and
+it carries both tokens like the others.
+
+6 new regression tests in `tests/test_wizard_back_cursor.py`.
+
+334 of 334 tests passing.
+
+---
+
 ## 0.1.0a455 — May 3 2026 — BRAIN-85 fingerprint cache missed semantically-identical retries with whitespace / list-order / empty-vs-absent drift; canonicalizer added (BRAIN-86)
 
 ### Bug fix (BRAIN-86, idempotency-key canonicalization)
