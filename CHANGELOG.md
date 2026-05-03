@@ -6,6 +6,55 @@ Versioning: `0.1.0aNN` alpha increments. Public install path: `pipx install hunt
 
 ---
 
+## 0.1.0a462 — May 4 2026 — BRAIN-92 daily quota was process-local in-memory; restart/deploy reset the counter to 0 and refunded the daily cap. Persistent storage closes the durability gap (BRAIN-93)
+
+### Bug fix (BRAIN-93, quota durability)
+
+BRAIN-92 (a461) capped scans at 50/UTC-day per user via an
+in-memory dict `_scan_daily_state`. As BRAIN-92's docstring
+called out, "if multi-process becomes the deployment shape
+later, this needs Redis or a DB row" — but even single-
+process deployments hit the same gap on restart. A user could:
+
+1. Burn 50 scans → quota exhausted, 429 returned.
+2. Wait for the next deploy / crash / restart.
+3. New process boots with empty `_scan_daily_state`.
+4. Drain another 50 scans before hitting the cap again.
+
+Effective per-day cap = `50 × n_restarts`, not `50`. Standard
+guidance for spend-control quotas: counters must be durable,
+not per-process.
+
+Fix:
+
+- New async helper `_check_scan_daily_quota_async(user_id)`
+  uses `db.merge_settings` to atomically check + increment
+  the counter under `_quotas.wizard_scan = {date, count}`
+  in the user's `user_settings.data`.
+- Counter lives at the SETTINGS ROOT (not inside the wizard
+  sub-object), so the BRAIN-80 wizard reset doesn't refund
+  the daily cap.
+- Date keying uses the timezone-aware
+  `datetime.now(timezone.utc)` (replaces the deprecated
+  `datetime.utcnow()` call from BRAIN-92).
+- Mutator resets count to 0 on UTC-date rollover; blocks
+  with `>= _SCAN_DAILY_MAX` (closes the off-by-one
+  possibility).
+- DB transient errors fall through fail-open (the in-memory
+  BRAIN-92 helper still runs as second-tier defense), so
+  infrastructure flakes don't trap a user with a healthy
+  wallet behind an unrelated outage.
+- `/api/wizard/scan` now `await`s the durable variant; the
+  in-memory `_check_scan_daily_quota` is kept as a labeled
+  legacy fallback but is no longer the load-bearing path.
+
+7 new regression tests in
+`tests/test_wizard_scan_quota_persistent.py`.
+
+370 of 370 tests passing.
+
+---
+
 ## 0.1.0a461 — May 4 2026 — `/api/wizard/scan` per-minute bucket throttled bursts but didn't cap long-horizon spend; daily quota closes the slow-burn BYOK drain gap (BRAIN-92)
 
 ### Bug fix (BRAIN-92, metered-API quota)

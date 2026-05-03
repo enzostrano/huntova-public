@@ -493,11 +493,20 @@ _scan_daily_state: dict[tuple, int] = {}
 
 
 def _check_scan_daily_quota(user_id: int) -> bool:
-    """Returns True if the user has exhausted their daily scan
-    quota and the request should be blocked. Increments the
-    counter on each non-blocked call (atomic under the rate
-    lock). Quota window resets on UTC date boundary."""
-    today = datetime.utcnow().strftime("%Y-%m-%d")
+    """Process-local in-memory daily-quota check.
+
+    NOTE: legacy from BRAIN-92. The durable check is
+    `_check_scan_daily_quota_async` (BRAIN-93) which persists
+    via `db.merge_settings`. This sync variant is kept as a
+    cheap pre-flight (avoids a DB round-trip when the user is
+    already known to be over budget in this process) but
+    MUST NOT be used as the sole authority — process restarts
+    wipe its state.
+
+    Returns True if blocked. Increments counter on success.
+    Quota window resets on UTC date boundary.
+    """
+    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
     key = (int(user_id), today)
     with _ai_rate_lock:
         used = _scan_daily_state.get(key, 0)
@@ -505,14 +514,62 @@ def _check_scan_daily_quota(user_id: int) -> bool:
             return True
         _scan_daily_state[key] = used + 1
         # Opportunistic cleanup of stale (non-today) entries.
-        # Cheap because the dict stays small for typical usage
-        # — at most one entry per user per day.
         if used == 0 and len(_scan_daily_state) > 256:
             _scan_daily_state_keys = list(_scan_daily_state.keys())
             for _k in _scan_daily_state_keys:
                 if _k[1] != today:
                     _scan_daily_state.pop(_k, None)
         return False
+
+
+# a462 (BRAIN-93): durable async quota check. Persists via
+# `db.merge_settings` so the counter survives process
+# restarts, deploys, and worker crashes. Per Huntova
+# engineering review on quota-durability guidance: an
+# in-memory-only quota is best-effort throttling, not
+# enforceable spend control. Storage lives at the settings
+# root (`_quotas.wizard_scan`) — NOT inside the wizard
+# sub-object — so a BRAIN-80 wizard reset doesn't refund
+# the daily allowance.
+async def _check_scan_daily_quota_async(user_id: int) -> bool:
+    """Returns True if the request should be blocked.
+
+    Atomic check + increment via `db.merge_settings`.
+    Mutator compares stored UTC date against today and
+    resets the counter on date boundary, then increments
+    if under the cap. Blocks if at or over `_SCAN_DAILY_MAX`.
+    """
+    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    blocked = {"value": False, "current": 0}
+
+    def _quota_mutator(cur: dict) -> dict:
+        cur = {**DEFAULT_SETTINGS, **(cur or {})}
+        quotas = dict(cur.get("_quotas") or {})
+        scan_q = dict(quotas.get("wizard_scan") or {})
+        # Reset counter on UTC date rollover.
+        if scan_q.get("date") != today:
+            scan_q = {"date": today, "count": 0}
+        if scan_q["count"] >= _SCAN_DAILY_MAX:
+            blocked["value"] = True
+            blocked["current"] = scan_q["count"]
+            return cur  # don't increment; leave row unchanged
+        scan_q["count"] = scan_q["count"] + 1
+        blocked["current"] = scan_q["count"]
+        quotas["wizard_scan"] = scan_q
+        cur["_quotas"] = quotas
+        return cur
+
+    try:
+        await db.merge_settings(int(user_id), _quota_mutator)
+    except Exception as _ms_err:
+        # Fail-open on DB transients to avoid trapping a
+        # user with a working wallet behind an infrastructure
+        # blip. The in-memory legacy quota in
+        # `_check_scan_daily_quota` still applies as the
+        # second-tier defense.
+        print(f"[QUOTA] durable check failed (non-fatal): {_ms_err}")
+        return False
+    return blocked["value"]
 
 
 # Mount static files
@@ -8311,7 +8368,12 @@ async def api_wizard_scan(request: Request, user: dict = Depends(require_user)):
     # patient client from staying under 8/min and still draining
     # ~$576/day BYOK; quotas close that gap. Check fires BEFORE
     # any crawl/AI work so denials are cheap.
-    if _check_scan_daily_quota(user["id"]):
+    # a462 fix (BRAIN-93): the durable variant
+    # `_check_scan_daily_quota_async` persists the counter via
+    # db.merge_settings so it survives process restarts,
+    # deploys, and worker crashes. The in-memory variant
+    # (BRAIN-92 legacy) is no longer the load-bearing path.
+    if await _check_scan_daily_quota_async(user["id"]):
         return JSONResponse(
             {
                 "error": (
