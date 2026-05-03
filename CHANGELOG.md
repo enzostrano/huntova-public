@@ -6,6 +6,72 @@ Versioning: `0.1.0aNN` alpha increments. Public install path: `pipx install hunt
 
 ---
 
+## 0.1.0a469 — May 4 2026 — Trust-separation regression guards on the BRAIN-99 underscore allowlist; verified server-side `_apply_wizard_mutations` writes still land while client smuggling is blocked (BRAIN-100)
+
+### Bug fix (BRAIN-100, validation trust-separation regression-prevention)
+
+BRAIN-99 (a468) tightened `_coerce_wizard_answer` to reject
+all underscore-prefixed keys. That helper is called from two
+boundaries:
+
+1. **Untrusted**: `_merge_wizard_answers` → save-progress
+   client input.
+2. **Untrusted**: client `profile` filter at the top of
+   `api_wizard_complete`.
+
+Inside `api_wizard_complete`, AFTER the client profile is
+filtered, `_apply_wizard_mutations` writes server-owned
+flags via direct dict assignment:
+
+```python
+w["_site_scanned"] = True
+w["_interview_complete"] = True
+```
+
+Those writes do NOT route through `_coerce_wizard_answer` —
+they're inside the merge mutator closure, set unconditionally
+by trusted server code. So BRAIN-99 didn't break them. But a
+future refactor that flattens "client validation" and
+"server mutation" into one unified validator would silently
+drop the writes against the BRAIN-99 underscore-block. The
+endpoint would appear to succeed; status would lie about
+completion; downstream training gates would behave as if
+interview state never finalized.
+
+This release adds regression guards that pin both halves of
+the trust-separation seam:
+
+- **Source-level**: `_apply_wizard_mutations` body must
+  contain `w["_interview_complete"] = True` and
+  `w["_site_scanned"] = True` as direct assignments.
+- **Source-level**: that mutator body MUST NOT reference
+  `_coerce_wizard_answer(`. Trusted writes route around
+  the validator on purpose.
+- **Behavioral**: `_coerce_wizard_answer` continues to drop
+  client-supplied `_interview_complete`, `_site_scanned`,
+  `_wizard_phase`, `_dna_state`,
+  `_last_complete_fingerprint`, etc.
+- **Behavioral end-to-end (uses `local_env` fixture)**:
+  a server-side merge writes `_interview_complete = True`
+  + `_site_scanned = True` and `get_settings` reads them
+  back. Confirms `merge_settings` itself doesn't reject
+  underscore keys (only the client validator does).
+- **Defense in depth**: BRAIN-75's explicit profile-filter
+  skip-list (`("_interview_complete", "_site_scanned",
+  "_summary")`) stays as documentation + double-check on
+  top of BRAIN-99's validator.
+
+If a future change flattens the trust seam, this test suite
+fails LOUDLY at the pre-fix boundary instead of silently
+breaking the wizard's completion contract.
+
+6 new regression tests in
+`tests/test_wizard_underscore_trust_separation.py`.
+
+413 of 413 tests passing.
+
+---
+
 ## 0.1.0a468 — May 4 2026 — Client save-progress could mass-assign server-owned underscore-prefixed control fields; allowlist enforcement closes the OWASP Object Property Manipulation hole (BRAIN-99)
 
 ### Bug fix (BRAIN-99, mass-assignment / Object Property Manipulation)
