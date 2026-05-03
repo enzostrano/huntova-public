@@ -6,6 +6,61 @@ Versioning: `0.1.0aNN` alpha increments. Public install path: `pipx install hunt
 
 ---
 
+## 0.1.0a458 — May 4 2026 — BRAIN-85 idempotency fingerprint could short-circuit when derived artifacts (brain/dossier) were missing; defense-in-depth at both read + write boundary (BRAIN-89)
+
+### Bug fix (BRAIN-89, idempotency-key atomicity)
+
+BRAIN-85 stored `_last_complete_fingerprint` inside the same
+merge mutator that wrote `normalized_hunt_profile` (brain) and
+`training_dossier`. Single `merge_settings` call → atomic
+SQLite txn → both succeed or neither does on the happy path.
+
+But the system could still arrive at "fingerprint present,
+artifacts missing" through paths the txn atomicity doesn't
+cover:
+
+- A future hot-fix migration touches wizard state outside
+  this code path.
+- Operator-issued direct DB UPDATEs.
+- A future refactor reorders the mutator body.
+- A silent regression in `_build_hunt_brain` returning None
+  or an empty dict.
+
+If any path leaves fingerprint+artifacts inconsistent, BRAIN-85
+returns `reused: true` even though the agent will then run
+with no brain — silent quality degradation, no signal to the
+user.
+
+Standard idempotency-record guidance: dedup marker and
+business result must move as one atomic unit. Verify both
+sides defensively.
+
+Fix — defense in depth at both boundaries:
+
+1. **Read side** (BRAIN-85 short-circuit): the eligibility
+   check now also requires
+   `isinstance(_prior_brain, dict) and len(_prior_brain) > 0`
+   AND the same for `_prior_dossier`. If either is missing or
+   empty, the short-circuit does NOT fire; the full pipeline
+   runs to repair the missing state. A new log line surfaces
+   the cache-invalid case for operator visibility.
+
+2. **Write side** (final merge mutator): the fingerprint
+   advance is now gated on `_artifacts_ok = isinstance(brain,
+   dict) and len(brain) > 0 and isinstance(dossier, dict) and
+   len(dossier) > 0`. If the compute step returns malformed
+   artifacts, the brain/dossier writes still land (they're
+   not gated on this check) but the fingerprint stays at its
+   prior value. The next submit sees a missing/stale
+   fingerprint and runs the pipeline again — fail-open.
+
+4 new regression tests in
+`tests/test_wizard_complete_fingerprint_artifact_consistency.py`.
+
+343 of 343 tests passing.
+
+---
+
 ## 0.1.0a457 — May 3 2026 — Re-train left `_dna_state="ready"` during the multi-second brain+dossier compute window; agent-gate proceeded with stale DNA (BRAIN-88)
 
 ### Bug fix (BRAIN-88, durable-workflow state-truth)

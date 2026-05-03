@@ -8466,11 +8466,32 @@ async def api_wizard_complete(request: Request, user: dict = Depends(require_use
     _prior_fingerprint = _w_snap.get("_last_complete_fingerprint") or ""
     _prior_epoch = int(_w_snap.get("_last_complete_epoch", -1) or -1)
     _prior_dna_state = _w_snap.get("_dna_state", "unset")
+    # a458 fix (BRAIN-89): the dedup marker (fingerprint) and the
+    # business result (brain + dossier) must be consistent before
+    # we trust a cache hit. Per Huntova engineering review on
+    # idempotency-key atomicity. The single-merge txn already
+    # commits them atomically on the happy path, but we defend
+    # against drift caused by:
+    #   - hot-fix migrations that touch wizard state outside this
+    #     code path,
+    #   - operator-issued UPDATEs,
+    #   - future refactors that reorder the merge body.
+    # Snapshot must contain a non-empty `normalized_hunt_profile`
+    # AND a non-empty `training_dossier` to qualify for reuse;
+    # otherwise we run the full pipeline to repair the missing
+    # artifacts.
+    _prior_brain = _w_snap.get("normalized_hunt_profile")
+    _prior_dossier = _w_snap.get("training_dossier")
+    _prior_artifacts_ok = (
+        isinstance(_prior_brain, dict) and len(_prior_brain) > 0
+        and isinstance(_prior_dossier, dict) and len(_prior_dossier) > 0
+    )
     if (
         _prior_fingerprint
         and _prior_fingerprint == _complete_fingerprint
         and _prior_epoch == _captured_epoch
         and _prior_dna_state != "failed"
+        and _prior_artifacts_ok
     ):
         print(f"[WIZARD] complete short-circuit (idempotent) for user {user['id']}: same fingerprint+epoch, dna_state={_prior_dna_state}")
         return {
@@ -8483,6 +8504,17 @@ async def api_wizard_complete(request: Request, user: dict = Depends(require_use
             "dna_state": _prior_dna_state,
             "last_completed_at": _w_snap.get("_last_complete_at", ""),
         }
+    if (
+        _prior_fingerprint
+        and _prior_fingerprint == _complete_fingerprint
+        and _prior_epoch == _captured_epoch
+        and not _prior_artifacts_ok
+    ):
+        # Fingerprint says "completed" but artifacts are gone.
+        # Fall through to the full pipeline so the next attempt
+        # repairs the row instead of looping forever on a stale
+        # cache hit. Log it so an operator can investigate.
+        print(f"[WIZARD] complete cache invalid (BRAIN-89) for user {user['id']}: fingerprint+epoch match but artifacts missing/empty; running full pipeline to repair")
 
     _PROTECTED_KEYS = {
         "normalized_hunt_profile", "training_dossier", "archetype",
@@ -8726,9 +8758,26 @@ async def api_wizard_complete(request: Request, user: dict = Depends(require_use
         # a454 (BRAIN-85): persist fingerprint + epoch so a duplicate
         # submit short-circuits next time. Stored alongside the
         # other completion derivatives so a reset wipes them all.
-        w["_last_complete_fingerprint"] = _complete_fingerprint
-        w["_last_complete_epoch"] = _captured_epoch
-        w["_last_complete_at"] = _now_iso
+        # a458 fix (BRAIN-89): defense-in-depth — only advance the
+        # fingerprint if the brain + dossier objects from the
+        # compute step are well-formed dicts. A silent regression
+        # in `_build_hunt_brain` returning None would otherwise
+        # land a fingerprint pointing at no derived state and
+        # poison every future short-circuit.
+        _artifacts_ok = (
+            isinstance(brain, dict) and len(brain) > 0
+            and isinstance(dossier, dict) and len(dossier) > 0
+        )
+        if _artifacts_ok:
+            w["_last_complete_fingerprint"] = _complete_fingerprint
+            w["_last_complete_epoch"] = _captured_epoch
+            w["_last_complete_at"] = _now_iso
+        else:
+            # Don't advance the fingerprint. The brain/dossier
+            # writes still landed (they're not gated) but the
+            # next submit will see a missing fingerprint and run
+            # the pipeline again — the safest fail-open.
+            print(f"[WIZARD] BRAIN-89: refusing to advance fingerprint — brain/dossier malformed (brain_keys={len(brain) if isinstance(brain, dict) else 'NA'} dossier_keys={len(dossier) if isinstance(dossier, dict) else 'NA'})")
         cur["wizard"] = w
         return cur
 
