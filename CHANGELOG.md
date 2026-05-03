@@ -6,6 +6,60 @@ Versioning: `0.1.0aNN` alpha increments. Public install path: `pipx install hunt
 
 ---
 
+## 0.1.0a457 — May 3 2026 — Re-train left `_dna_state="ready"` during the multi-second brain+dossier compute window; agent-gate proceeded with stale DNA (BRAIN-88)
+
+### Bug fix (BRAIN-88, durable-workflow state-truth)
+
+Pre-fix, the `api_wizard_complete` merge mutator that flips
+`_dna_state` from "ready" to "pending" only ran AT THE END of
+the request, AFTER the BRAIN-72 watchdog'd brain+dossier
+compute (up to 45s). During the compute window:
+
+- `/api/wizard/status` returned `dna_state: "ready"` —
+  surfacing the OLD DNA as authoritative.
+- `/agent/control action=start` (BRAIN-79 gate) saw "ready"
+  and proceeded to launch hunts using the OLD DNA against the
+  user's NEW inputs. Quality drift, no signal.
+
+The product lied about training-artifact authority during
+regeneration.
+
+Fix: split the merge in two. A new `_pending_flip_mutator` runs
+right after the BRAIN-85 idempotency cache miss but BEFORE
+`_apply_wizard_mutations(_w_snap)` and the brain compute. It
+atomically flips `_dna_state="pending"` + sets
+`_dna_started_at` + clears `_dna_completed_at` /
+`_dna_error` / `_dna_failed_at`. The BRAIN-14 (revision) +
+BRAIN-81 (epoch) guards still apply: a stale tab can't smuggle
+the flip past those checks. On revision/epoch mismatch the
+endpoint returns the matching 409/410 distinction.
+
+Order:
+1. Validation gate + schema validation.
+2. Snapshot read + revision/epoch capture.
+3. **BRAIN-85** fingerprint cache (returns `reused: True` for
+   identical-profile resubmits — no flip on duplicates).
+4. **BRAIN-88 NEW**: pending-flip merge.
+5. BRAIN-72 watchdog'd brain+dossier compute.
+6. Final merge with brain + dossier + train_count + knowledge.
+
+Status + agent-gate consumers see "pending" within
+milliseconds of the Re-train submit instead of after the
+multi-second compute window.
+
+The BRAIN-72 watchdog test was tightened: it now anchors on
+the FINAL merge (the one that writes
+`normalized_hunt_profile`) rather than any `merge_settings`,
+since the new pending-flip is also a merge but doesn't commit
+derived artifacts.
+
+5 new regression tests in
+`tests/test_wizard_retrain_dna_transition.py`.
+
+339 of 339 tests passing.
+
+---
+
 ## 0.1.0a456 — May 3 2026 — Wizard Back navigation lost on every reload because client load force-snapped qi to monotonic max phase; cursor-vs-max-phase split fixes it (BRAIN-87)
 
 ### Bug fix (BRAIN-87, multi-step form back-navigation)

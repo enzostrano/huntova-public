@@ -122,24 +122,32 @@ def test_complete_returns_504_on_watchdog_timeout():
     )
 
 
-def test_complete_504_path_does_not_commit_partial_state():
-    """The watchdog must fire BEFORE the merge_settings call, so
-    no partial brain/dossier ever gets committed on timeout. The
-    user's save-progress answers stay intact and can be used on
-    retry."""
+def test_complete_504_path_does_not_commit_partial_brain_or_dossier():
+    """The watchdog must fire BEFORE the FINAL merge that commits
+    brain/dossier/train_count. Earlier `merge_settings` calls
+    (e.g. the BRAIN-88 ready→pending state-flip) are fine because
+    they don't write derived artifacts — only state markers.
+
+    What's NOT fine: brain or dossier landing on disk from a
+    timed-out compute. The check below verifies `wait_for`
+    precedes the FINAL merge that writes
+    `normalized_hunt_profile` / `training_dossier`.
+    """
     from server import api_wizard_complete
     src = inspect.getsource(api_wizard_complete)
-    # Verify the timeout handler exists BEFORE the merge_settings
-    # call. This is best-checked by source ordering: the
-    # `wait_for` and 504 return must come before
-    # `db.merge_settings`.
     wf_idx = src.find("wait_for")
-    merge_idx = src.find("merge_settings")
-    assert wf_idx != -1 and merge_idx != -1
-    assert wf_idx < merge_idx, (
+    # The final merge is the one that writes brain + dossier.
+    # Anchor on `w["normalized_hunt_profile"] = brain` which is
+    # only inside the final merge mutator.
+    final_merge_idx = src.find('w["normalized_hunt_profile"] = brain')
+    assert wf_idx != -1
+    assert final_merge_idx != -1, (
+        "BRAIN-72 sanity: final brain-write line missing — has "
+        "the merge mutator been refactored?"
+    )
+    assert wf_idx < final_merge_idx, (
         "BRAIN-72 regression: wait_for (and the 504 return path) "
-        "must run BEFORE merge_settings. If watchdog fires AFTER "
-        "the merge has committed, the user has partial derived "
-        "artifacts but the timeout response says it failed → "
-        "split-brain state."
+        "must run BEFORE the final merge that writes brain + "
+        "dossier. Otherwise a watchdog'd request lands partial "
+        "derived artifacts on disk."
     )

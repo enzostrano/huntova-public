@@ -8490,6 +8490,81 @@ async def api_wizard_complete(request: Request, user: dict = Depends(require_use
         "_last_trained",
     }
 
+    # a457 fix (BRAIN-88): atomic ready→pending flip BEFORE the
+    # multi-second brain+dossier compute window opens. Pre-fix,
+    # _dna_state moved to "pending" only inside the FINAL merge
+    # mutator, after the BRAIN-72 watchdog'd compute. So during a
+    # Re-train submit, /api/wizard/status surfaced stale "ready"
+    # for the entire compute window and BRAIN-79 agent-gate let
+    # hunts proceed against the OLD DNA. Per Huntova engineering
+    # review on durable-workflow state-truth: the moment Re-train
+    # is accepted, persisted state must reflect "regeneration in
+    # flight" — not the prior ready snapshot.
+    #
+    # Order matters:
+    #  1. BRAIN-85 idempotency cache (just above this) returns
+    #     `reused: True` for identical-profile resubmits, so the
+    #     flip never fires on duplicates.
+    #  2. This early-flip merge runs ONCE for legitimate retrains
+    #     (cache miss).
+    #  3. Brain+dossier compute runs.
+    #  4. Final merge writes brain/dossier/train_count/knowledge.
+    _now_iso_flip = datetime.now().isoformat()
+    _flip_stale = {"value": False, "kind": None}
+
+    def _pending_flip_mutator(cur: dict) -> dict:
+        cur = {**DEFAULT_SETTINGS, **(cur or {})}
+        w = dict(cur.get("wizard", {}))
+        # Honor BRAIN-14 (revision) + BRAIN-81 (epoch) guards. A
+        # stale tab that lost a race shouldn't smuggle a flip past
+        # the same checks that protect every other write.
+        _cur_rev = int(w.get("_wizard_revision", 0) or 0)
+        _cur_epoch = int(w.get("_wizard_epoch", 0) or 0)
+        if _cur_epoch != _captured_epoch:
+            _flip_stale["value"] = True
+            _flip_stale["kind"] = "wizard_reset"
+            return cur
+        if _cur_rev != _captured_revision:
+            _flip_stale["value"] = True
+            _flip_stale["kind"] = "stale_revision"
+            return cur
+        # Atomic ready→pending. Clear all prior terminal-state
+        # metadata so /api/wizard/status surfaces a clean "in
+        # flight" view during regeneration.
+        w["_dna_state"] = "pending"
+        w["_dna_started_at"] = _now_iso_flip
+        w.pop("_dna_completed_at", None)
+        w.pop("_dna_error", None)
+        w.pop("_dna_failed_at", None)
+        cur["wizard"] = w
+        return cur
+
+    await db.merge_settings(user["id"], _pending_flip_mutator)
+    if _flip_stale["value"]:
+        # The flip merge raced against a sibling tab's reset/edit.
+        # Surface the same 410/409 distinction the save-progress
+        # path uses (BRAIN-81). The brain+dossier compute would
+        # have failed the BRAIN-14 guard inside the final merge
+        # anyway; bailing here saves the BYOK spend.
+        if _flip_stale["kind"] == "wizard_reset":
+            return JSONResponse(
+                {
+                    "ok": False,
+                    "error": "Wizard was reset elsewhere. Reload to start fresh.",
+                    "error_kind": "wizard_reset",
+                },
+                status_code=410,
+            )
+        return JSONResponse(
+            {
+                "ok": False,
+                "stale": True,
+                "error": "Your wizard answers changed during training. Refresh and click Complete training again.",
+                "error_kind": "stale_revision",
+            },
+            status_code=409,
+        )
+
     def _apply_wizard_mutations(w: dict) -> None:
         """In-place mutation applied to the freshest wizard blob both
         for the off-txn snapshot (brain+dossier inputs) and inside the
