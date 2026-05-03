@@ -8135,6 +8135,16 @@ _PROMPT_INJECTION_WARNING = (
 #  - "bool": boolean. Coerce truthy non-bool to bool.
 #  - "int": int. Coerce numeric strings, reject otherwise.
 _WIZARD_STR_MAX = 50_000
+# a467 (BRAIN-98): aggregate-payload cap. Per-field caps in
+# `_coerce_wizard_answer` stop one giant string; this cap stops
+# death-by-thousand-cuts (a client sending hundreds of tiny p5_*
+# keys, each individually within budget but bloating the row +
+# every downstream JSON parse + brain build + dossier scan + AI
+# prompt assembly + fingerprint canonicalization).
+# Wizard surface area: ~9 base + ~5 phase-5 + ~30 legacy mapping
+# = ~44 natural keys. 150 is 3-4× headroom for future-proofing
+# without enabling abuse.
+_WIZARD_ANSWERS_MAX_KEYS = 150
 _WIZARD_LIST_MAX = 200
 _WIZARD_FIELD_SCHEMA: dict[str, str] = {
     # Scalar string fields
@@ -8425,13 +8435,26 @@ def _merge_wizard_answers(prev, incoming) -> dict:
     if not isinstance(incoming, dict) or not incoming:
         return dict(prev_d)
     out = dict(prev_d)
+    # a467 (BRAIN-98): aggregate-payload cap. Per-field caps in
+    # _coerce_wizard_answer stop one giant string; this cap stops
+    # death-by-thousand-cuts. New keys past _WIZARD_ANSWERS_MAX_KEYS
+    # drop; existing keys are always allowed to update (so a
+    # legitimate user whose row sits near the cap can still revise
+    # answers).
+    _overflow_dropped = 0
     for k, v in incoming.items():
         if not isinstance(k, str):
             continue
         coerced = _coerce_wizard_answer(k, v)
         if coerced is _WIZARD_DROP:
             continue
+        # If this is a NEW key and we're at the cap, drop it.
+        if k not in out and len(out) >= _WIZARD_ANSWERS_MAX_KEYS:
+            _overflow_dropped += 1
+            continue
         out[k] = coerced
+    if _overflow_dropped:
+        print(f"[WIZARD] _merge_wizard_answers aggregate-cap dropped {_overflow_dropped} new keys (cap={_WIZARD_ANSWERS_MAX_KEYS}, current={len(out)})")
     return out
 
 

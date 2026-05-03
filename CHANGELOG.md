@@ -6,6 +6,53 @@ Versioning: `0.1.0aNN` alpha increments. Public install path: `pipx install hunt
 
 ---
 
+## 0.1.0a467 — May 4 2026 — `_wizard_answers` had per-field caps but no aggregate key-count cap — many-small-fields payloads bloated the row + slowed every downstream consumer (BRAIN-98)
+
+### Bug fix (BRAIN-98, aggregate payload bounding)
+
+BRAIN-73's `_coerce_wizard_answer` stops per-field abuse: a
+50KB string in one field, a nested dict, a smuggled key.
+But the answers dict itself had no aggregate bound. A
+client could send hundreds of `p5_*` keys (the dynamic
+phase-5 prefix is a wildcard in the schema), each
+individually within budget, and bloat the row by megabytes
+without tripping any per-field check.
+
+Cost of un-bounded answers blob:
+
+- Bigger `user_settings.data` JSON to read + write on every
+  `merge_settings` call.
+- Slower brain build, dossier generation, fallback query
+  generation (all iterate the dict).
+- Slower BRAIN-86 fingerprint canonicalization (walks every
+  key + value).
+- More SQLite WAL pressure under concurrent users.
+
+Standard API-validation guidance: bound aggregate posted
+data, not just per-field. Per-field caps stop one giant
+string; aggregate caps stop death-by-thousand-cuts.
+
+Fix:
+
+- New constant `_WIZARD_ANSWERS_MAX_KEYS = 150` (3-4× the
+  natural ~44-key wizard surface area — base + phase-5 +
+  legacy mappings).
+- `_merge_wizard_answers` now drops NEW keys past the cap.
+  Existing keys can still be revised (a legitimate user
+  whose row sits near the cap can still update answers).
+- Cap-trip logs a `[WIZARD] _merge_wizard_answers
+  aggregate-cap dropped N new keys` line so an operator
+  can spot the abuse before it becomes a support ticket.
+- BRAIN-6 empty-payload no-op preserved (the cap check
+  only runs when the loop has items to process).
+
+6 new regression tests in
+`tests/test_wizard_save_progress_aggregate_cap.py`.
+
+402 of 402 tests passing.
+
+---
+
 ## 0.1.0a466 — May 4 2026 — Quota counter writes amplified DB load on phase-5/complete; fold the increment into the existing merge mutator instead of spawning a second write (BRAIN-97)
 
 ### Bug fix (BRAIN-97, SQLite write amplification)
