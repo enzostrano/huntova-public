@@ -6,6 +6,63 @@ Versioning: `0.1.0aNN` alpha increments. Public install path: `pipx install hunt
 
 ---
 
+## 0.1.0a470 — May 4 2026 — BRAIN-85 idempotency cache had no TTL; a six-month-old completion fingerprint could keep short-circuiting against evolved scoring rules + brain heuristics. 14-day freshness window added (BRAIN-101)
+
+### Bug fix (BRAIN-101, cache TTL semantics)
+
+BRAIN-85 caches the canonical input fingerprint after a
+successful complete. A duplicate submit with the same
+fingerprint short-circuits the brain+dossier+DNA pipeline —
+saves BYOK on legitimate retries.
+
+But the cache had NO TTL. A user who completed six months
+ago and re-submits the same profile today gets `reused: true`
+even though scoring rules + brain heuristics + DNA generation
+all evolved across releases. The product silently returns
+stale derived artifacts because the fingerprint matches.
+
+Standard cache-TTL guidance: bound any cache used to gate
+decisions about expensive work. Long TTLs trade correctness
+for hit rate; gating decisions can't afford that trade.
+
+Fix:
+
+- New constant
+  `_COMPLETE_CACHE_TTL_SECONDS = 14 * 86400 = 1,209,600`
+  (14 days). Env-overridable via
+  `HV_WIZARD_COMPLETE_CACHE_TTL`.
+- BRAIN-85 short-circuit eligibility now also requires the
+  cached `_last_complete_at` timestamp to be within the TTL
+  window.
+- Defensive parse: missing or unparseable timestamp falls
+  through to the full pipeline (fail-open: re-run fresh
+  rather than serve stale).
+- Timezone-aware `datetime.now(timezone.utc)` +
+  `datetime.fromisoformat` (no deprecated `utcnow()`).
+  Tolerates both naive and aware ISO timestamps in the
+  stored field by normalizing naive to UTC.
+- `_age_seconds < 0` (clock skew / future timestamp) also
+  falls through.
+
+Why 14 days:
+
+- Generous enough for legitimate "user closed laptop overnight,
+  reopened a week later, accidentally clicked Complete twice"
+  patterns.
+- Tight enough that a stale 6-month-old cache can't keep
+  suppressing real work after substantial product evolution.
+- Operators on faster release cycles can shorten via env;
+  operators on slower cycles can lengthen.
+
+6 new regression tests in
+`tests/test_wizard_complete_cache_ttl.py`. BRAIN-89 tests
+widened (window grew because the new TTL block precedes the
+cache-hit conditions in the source).
+
+419 of 419 tests passing.
+
+---
+
 ## 0.1.0a469 — May 4 2026 — Trust-separation regression guards on the BRAIN-99 underscore allowlist; verified server-side `_apply_wizard_mutations` writes still land while client smuggling is blocked (BRAIN-100)
 
 ### Bug fix (BRAIN-100, validation trust-separation regression-prevention)

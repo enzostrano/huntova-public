@@ -60,7 +60,7 @@ def test_short_circuit_requires_brain_present():
         fire_idx = src.find("'reused': True")
     assert fire_idx != -1
     # Look back ~1000 chars for the conditions.
-    block = src[max(0, fire_idx - 1500):fire_idx]
+    block = src[max(0, fire_idx - 3000):fire_idx]
     assert "normalized_hunt_profile" in block, (
         "BRAIN-89 regression: BRAIN-85 short-circuit must verify "
         "`normalized_hunt_profile` is present in the snapshot "
@@ -78,7 +78,7 @@ def test_short_circuit_requires_dossier_present():
     if fire_idx == -1:
         fire_idx = src.find("'reused': True")
     assert fire_idx != -1
-    block = src[max(0, fire_idx - 1500):fire_idx]
+    block = src[max(0, fire_idx - 3000):fire_idx]
     assert "training_dossier" in block, (
         "BRAIN-89 regression: short-circuit must also verify "
         "`training_dossier` exists before reusing the prior "
@@ -96,7 +96,7 @@ def test_short_circuit_falls_through_when_brain_empty():
     fire_idx = src.find('"reused": True')
     if fire_idx == -1:
         fire_idx = src.find("'reused': True")
-    block = src[max(0, fire_idx - 1500):fire_idx]
+    block = src[max(0, fire_idx - 3000):fire_idx]
     # Either explicit dict-and-non-empty check, or `bool(...)`,
     # or `isinstance(...,dict) and len(...) > 0`-style.
     has_emptiness_guard = (

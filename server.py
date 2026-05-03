@@ -493,6 +493,17 @@ _SCAN_DAILY_MAX = int(os.environ.get("HV_WIZARD_SCAN_DAILY_MAX") or "50")
 _PHASE5_DAILY_MAX = int(os.environ.get("HV_WIZARD_PHASE5_DAILY_MAX") or "50")
 _COMPLETE_DAILY_MAX = int(os.environ.get("HV_WIZARD_COMPLETE_DAILY_MAX") or "30")
 _ASSIST_DAILY_MAX = int(os.environ.get("HV_WIZARD_ASSIST_DAILY_MAX") or "200")
+# a470 (BRAIN-101): freshness window for the BRAIN-85
+# idempotent fingerprint cache. Without a TTL, a wizard
+# completed months ago short-circuits the pipeline against
+# evolved scoring rules + brain heuristics. Per Huntova
+# engineering review on cache TTL semantics: bound any cache
+# used to gate decisions about expensive work. 14 days is
+# generous for legitimate reload-and-resubmit patterns
+# (e.g. user closes laptop overnight, reopens next day) but
+# tight enough that a stale 6-month-old cache can't keep
+# suppressing real work after substantial product evolution.
+_COMPLETE_CACHE_TTL_SECONDS = int(os.environ.get("HV_WIZARD_COMPLETE_CACHE_TTL") or str(14 * 86400))
 
 # State: {(user_id, utc_date_str): count}. The date suffix in
 # the key is the natural cleanup mechanism — yesterday's keys
@@ -8835,12 +8846,35 @@ async def api_wizard_complete(request: Request, user: dict = Depends(require_use
         isinstance(_prior_brain, dict) and len(_prior_brain) > 0
         and isinstance(_prior_dossier, dict) and len(_prior_dossier) > 0
     )
+    # a470 fix (BRAIN-101): TTL on the BRAIN-85 short-circuit.
+    # A months-old fingerprint match doesn't represent a fresh
+    # decision — scoring rules + brain heuristics evolve across
+    # releases. Per Huntova engineering review on cache TTL
+    # semantics. Defensive parse: missing/unparseable timestamp
+    # falls through to the full pipeline (fail-open).
+    _prior_complete_at_str = _w_snap.get("_last_complete_at", "")
+    _prior_cache_fresh = False
+    if isinstance(_prior_complete_at_str, str) and _prior_complete_at_str:
+        try:
+            _prior_complete_at = datetime.fromisoformat(_prior_complete_at_str)
+            # Normalize to UTC. ISO timestamps without tzinfo are
+            # treated as naive UTC since BRAIN-78/79/93 all write
+            # with `datetime.now(timezone.utc)` /
+            # `datetime.now().isoformat()` (mix that we tolerate).
+            if _prior_complete_at.tzinfo is None:
+                _prior_complete_at = _prior_complete_at.replace(tzinfo=timezone.utc)
+            _now_utc = datetime.now(timezone.utc)
+            _age_seconds = (_now_utc - _prior_complete_at).total_seconds()
+            _prior_cache_fresh = 0 <= _age_seconds <= _COMPLETE_CACHE_TTL_SECONDS
+        except (ValueError, TypeError):
+            _prior_cache_fresh = False
     if (
         _prior_fingerprint
         and _prior_fingerprint == _complete_fingerprint
         and _prior_epoch == _captured_epoch
         and _prior_dna_state != "failed"
         and _prior_artifacts_ok
+        and _prior_cache_fresh
     ):
         print(f"[WIZARD] complete short-circuit (idempotent) for user {user['id']}: same fingerprint+epoch, dna_state={_prior_dna_state}")
         return {
