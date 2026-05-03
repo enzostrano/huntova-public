@@ -8018,6 +8018,125 @@ def _coerce_wizard_answer(key: str, value):
 _WIZARD_DROP = object()  # sentinel: "drop this key from the merge"
 
 
+# a455 (BRAIN-86): list fields in the wizard schema where order is
+# semantically irrelevant — `regions: ["US","IT"]` and `["IT","US"]`
+# describe the same business reach. Sorting these before hashing
+# prevents the BRAIN-85 idempotency cache from missing a duplicate
+# submit just because the client serialized the array differently.
+# History (the Q/A transcript) is intentionally NOT in this set:
+# conversation order is meaningful.
+_CANONICAL_UNORDERED_LIST_FIELDS = frozenset({
+    "regions",
+    "services",
+    "buyer_roles",
+    "icp_industries",
+    "exclusions",
+    "lookalikes",
+    "competitors",
+    "tech_stack",
+    "certifications",
+    "social_proof",
+    "languages",
+    "example_good_clients",
+    "example_bad_clients",
+    "lead_sources",
+    "triggers",
+    "buying_signals",
+    "disqualification_signals",
+    "buyer_search_terms",
+    "hiring_signals",
+    "past_clients",
+    "web_discovery_pages",
+    "anti_customer_pills",
+})
+
+
+def _canonicalize_complete_payload(profile, history):
+    """Canonical post-validation form for /api/wizard/complete's
+    fingerprint cache (BRAIN-85 / BRAIN-86).
+
+    Per Huntova engineering review on idempotency-key
+    canonicalization: the BRAIN-85 SHA256 cache only catches
+    byte-identical duplicates. A buggy client that varies
+    whitespace, list order, or empty-vs-absent shape on each
+    retry would defeat the cache and re-spend on every submit.
+
+    Normalizations:
+    - Each string value `.strip()`-ed and internal whitespace
+      runs collapsed to a single space.
+    - List elements (where order is semantically irrelevant per
+      `_CANONICAL_UNORDERED_LIST_FIELDS`) sorted.
+    - Empty strings, empty lists, and `None` values dropped.
+    - History list preserves order (conversation flow matters)
+      but each Q/A pair's `question` + `answer` are trimmed.
+
+    Output is a `(profile_dict, history_list)` tuple suitable for
+    `json.dumps(..., sort_keys=True)` → `sha256` hex digest.
+    """
+    def _norm_string(s):
+        if not isinstance(s, str):
+            s = str(s)
+        return " ".join(s.split())  # strip + collapse runs
+
+    def _norm_value(key, value):
+        if value is None:
+            return None
+        if isinstance(value, str):
+            v = _norm_string(value)
+            return v if v else None
+        if isinstance(value, list):
+            cleaned = []
+            for item in value:
+                if item is None:
+                    continue
+                if isinstance(item, str):
+                    v = _norm_string(item)
+                    if v:
+                        cleaned.append(v)
+                elif isinstance(item, (int, float, bool)):
+                    cleaned.append(item)
+                # dict/list nested items deliberately skipped — the
+                # schema layer (BRAIN-73) already filters those out.
+            if not cleaned:
+                return None
+            if key in _CANONICAL_UNORDERED_LIST_FIELDS:
+                # Sort by string representation for determinism
+                # across mixed-type list elements.
+                cleaned.sort(key=lambda x: (type(x).__name__, str(x)))
+            return cleaned
+        if isinstance(value, dict):
+            # Defensive: schema should have rejected dict for any
+            # scalar/list field. Leave dicts alone but they're
+            # unlikely to appear here.
+            return value
+        return value
+
+    norm_profile = {}
+    if isinstance(profile, dict):
+        for k, v in profile.items():
+            if not isinstance(k, str):
+                continue
+            normalized = _norm_value(k, v)
+            if normalized is None:
+                continue
+            norm_profile[k] = normalized
+
+    norm_history = []
+    if isinstance(history, list):
+        for item in history:
+            if not isinstance(item, dict):
+                continue
+            q = item.get("question")
+            a = item.get("answer")
+            q = _norm_string(q) if isinstance(q, str) else ""
+            a = _norm_string(a) if isinstance(a, str) else ""
+            if not q and not a:
+                continue
+            norm_history.append({"question": q, "answer": a})
+
+    return norm_profile, norm_history
+
+
 def _merge_wizard_answers(prev, incoming) -> dict:
     """Merge `incoming` answers onto `prev`, never clobbering with an
     empty/missing payload (BRAIN-6 / a367). The wizard's
@@ -8325,8 +8444,18 @@ async def api_wizard_complete(request: Request, user: dict = Depends(require_use
     # A failed prior attempt always falls through to a fresh run so
     # the user can recover.
     import hashlib as _hashlib
+    # a455 (BRAIN-86): canonicalize profile + history before
+    # hashing so semantically-identical retries that differ only
+    # in whitespace, list ordering on unordered fields, or
+    # empty-vs-absent shape collide on the same fingerprint.
+    # Without this, a buggy client serializing `regions:
+    # ["US","IT"]` then `["IT","US"]` on retry would defeat the
+    # BRAIN-85 cache and re-spend the brain+dossier+DNA pipeline.
+    _canon_profile, _canon_history = _canonicalize_complete_payload(
+        profile, history
+    )
     _canonical = json.dumps(
-        {"profile": profile, "history": history},
+        {"profile": _canon_profile, "history": _canon_history},
         sort_keys=True,
         default=str,
     )

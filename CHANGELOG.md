@@ -6,6 +6,56 @@ Versioning: `0.1.0aNN` alpha increments. Public install path: `pipx install hunt
 
 ---
 
+## 0.1.0a455 — May 3 2026 — BRAIN-85 fingerprint cache missed semantically-identical retries with whitespace / list-order / empty-vs-absent drift; canonicalizer added (BRAIN-86)
+
+### Bug fix (BRAIN-86, idempotency-key canonicalization)
+
+BRAIN-85 (a454) hashes
+`json.dumps({profile, history}, sort_keys=True)` of the
+post-validation payload. That handles unknown-key smuggling
+(schema layer rejected those upstream) but the cache still
+missed semantically-identical submits that differed in:
+
+- Whitespace inside string fields (`"Acme"` vs `"Acme "` vs
+  `" Acme"` vs `"Acme\t"`).
+- Internal whitespace runs (`"Series A B2B"` vs
+  `"Series A  B2B"`).
+- List ordering for fields where order is semantically
+  irrelevant (`regions: ["US","IT"]` vs `["IT","US"]`).
+- Empty-vs-absent shape (`outreach_tone: ""` vs missing).
+
+Each near-miss re-ran brain + dossier + DNA generation. A
+client retrying with slightly different serialization defeated
+the cache on every attempt.
+
+Fix: new `_canonicalize_complete_payload(profile, history)`
+helper produces a normalized form before hashing:
+
+- String values: `.strip()` + internal whitespace runs
+  collapsed to a single space.
+- Lists in `_CANONICAL_UNORDERED_LIST_FIELDS` (regions,
+  services, buyer_roles, icp_industries, exclusions,
+  lookalikes, competitors, tech_stack, certifications,
+  social_proof, languages, example_good_clients,
+  example_bad_clients, lead_sources, triggers, buying_signals,
+  disqualification_signals, buyer_search_terms, hiring_signals,
+  past_clients, web_discovery_pages, anti_customer_pills):
+  sorted deterministically.
+- Empty strings, empty lists, None values dropped.
+- History list preserves order (conversation flow is
+  semantically meaningful) but each Q/A pair's strings are
+  trimmed.
+
+`api_wizard_complete` now feeds the canonical form into the
+SHA256 fingerprint, so all the drift cases above hit the cache.
+
+9 new regression tests in
+`tests/test_wizard_complete_fingerprint_canonical.py`.
+
+328 of 328 tests passing.
+
+---
+
 ## 0.1.0a454 — May 3 2026 — `/api/wizard/complete` re-ran brain + dossier + DNA generation on every duplicate submit; fingerprint short-circuit eliminates BYOK waste (BRAIN-85)
 
 ### Bug fix (BRAIN-85, idempotent expensive endpoint)
