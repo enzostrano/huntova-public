@@ -6,6 +6,51 @@ Versioning: `0.1.0aNN` alpha increments. Public install path: `pipx install hunt
 
 ---
 
+## 0.1.0a461 — May 4 2026 — `/api/wizard/scan` per-minute bucket throttled bursts but didn't cap long-horizon spend; daily quota closes the slow-burn BYOK drain gap (BRAIN-92)
+
+### Bug fix (BRAIN-92, metered-API quota)
+
+BRAIN-91 (a460) gave `/api/wizard/scan` an 8 calls / 60s
+bucket. Bursts are throttled — but a patient client (or a
+buggy one looping on a backoff timer) can stay under 8/min
+indefinitely and still drain the BYOK wallet. Worst-case
+arithmetic:
+
+- 8 scans/min × 60 min × 24 hr = 11,520 scans/day.
+- Each scan = 200-page crawl + Gemini Pro on ~14k chars.
+  Roughly $0.05 per scan.
+- Daily BYOK drain on the user's own key: ~$576.
+
+Rate limits control burst speed; quotas control long-horizon
+cost. Both are needed.
+
+Fix:
+
+- New `_SCAN_DAILY_MAX = 50` constant (overridable via env
+  `HV_WIZARD_SCAN_DAILY_MAX` for power users). 50 scans/day
+  caps worst-case at ~$2.50 BYOK while leaving plenty of
+  headroom for normal demo + setup.
+- New `_check_scan_daily_quota(user_id)` helper using a
+  `(user_id, utc_date)` keyed counter. Resets on UTC date
+  boundary. Opportunistic cleanup on first-of-day write
+  prunes yesterday's keys.
+- `/api/wizard/scan` calls the quota helper RIGHT AFTER the
+  per-minute bucket check, so denials are cheap (no crawl,
+  no AI call).
+- Quota response carries `error_kind:
+  "daily_quota_exceeded"` with `daily_max` so the UI shows
+  "You've used your 50 scans for today. Quota resets at
+  00:00 UTC" instead of the generic "Too many requests".
+
+6 new regression tests in
+`tests/test_wizard_scan_daily_quota.py` — including a
+behavioral test that exhausts the quota and asserts the next
+call blocks.
+
+363 of 363 tests passing.
+
+---
+
 ## 0.1.0a460 — May 4 2026 — Wizard endpoints shared one user-scoped rate bucket; fast typists self-DoS'd their own assist + scan calls. Per-route buckets restore fairness (BRAIN-91)
 
 ### Bug fix (BRAIN-91, rate-limiter fairness)

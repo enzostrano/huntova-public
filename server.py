@@ -471,6 +471,50 @@ class _AiRateLegacyView:
 _ai_rate = _AiRateLegacyView()
 
 
+# ── Daily quotas (BRAIN-92): persistent per-user spend caps ──
+# a461 (BRAIN-92): the BRAIN-91 per-minute buckets throttle
+# bursts but don't cap long-horizon spend. A patient client
+# staying under 8 scans/min still drains 11,520 scans/day —
+# ~$576/day BYOK. Per Huntova engineering review on metered-API
+# quota guidance: rate limits + quotas are complementary, both
+# needed for cost control.
+#
+# Default 50 scans/day caps a worst-case at ~$2.50 BYOK
+# (assuming $0.05/scan) but leaves plenty of headroom for
+# normal demo + setup flows. Cap configurable via
+# `HV_WIZARD_SCAN_DAILY_MAX` env var for power users.
+_SCAN_DAILY_MAX = int(os.environ.get("HV_WIZARD_SCAN_DAILY_MAX") or "50")
+
+# State: {(user_id, utc_date_str): count}. The date suffix in
+# the key is the natural cleanup mechanism — yesterday's keys
+# are dead and get pruned by the same periodic cleanup that
+# handles _rate_state.
+_scan_daily_state: dict[tuple, int] = {}
+
+
+def _check_scan_daily_quota(user_id: int) -> bool:
+    """Returns True if the user has exhausted their daily scan
+    quota and the request should be blocked. Increments the
+    counter on each non-blocked call (atomic under the rate
+    lock). Quota window resets on UTC date boundary."""
+    today = datetime.utcnow().strftime("%Y-%m-%d")
+    key = (int(user_id), today)
+    with _ai_rate_lock:
+        used = _scan_daily_state.get(key, 0)
+        if used >= _SCAN_DAILY_MAX:
+            return True
+        _scan_daily_state[key] = used + 1
+        # Opportunistic cleanup of stale (non-today) entries.
+        # Cheap because the dict stays small for typical usage
+        # — at most one entry per user per day.
+        if used == 0 and len(_scan_daily_state) > 256:
+            _scan_daily_state_keys = list(_scan_daily_state.keys())
+            for _k in _scan_daily_state_keys:
+                if _k[1] != today:
+                    _scan_daily_state.pop(_k, None)
+        return False
+
+
 # Mount static files
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
@@ -8261,6 +8305,24 @@ def _is_safe_url(url: str) -> bool:
 async def api_wizard_scan(request: Request, user: dict = Depends(require_user)):
     if _check_ai_rate(user["id"], bucket="wizard_scan"):
         return JSONResponse({"error": "Too many scan requests. Wait a moment."}, status_code=429)
+    # a461 fix (BRAIN-92): persistent daily quota in addition to
+    # the BRAIN-91 burst bucket. Per Huntova engineering review
+    # on metered-API spend control. Burst caps don't stop a
+    # patient client from staying under 8/min and still draining
+    # ~$576/day BYOK; quotas close that gap. Check fires BEFORE
+    # any crawl/AI work so denials are cheap.
+    if _check_scan_daily_quota(user["id"]):
+        return JSONResponse(
+            {
+                "error": (
+                    f"You've used your {_SCAN_DAILY_MAX} scans for today. "
+                    "Quota resets at 00:00 UTC."
+                ),
+                "error_kind": "daily_quota_exceeded",
+                "daily_max": _SCAN_DAILY_MAX,
+            },
+            status_code=429,
+        )
     body = await request.json()
     url = (body.get("url") or "").strip()
     if not url:
