@@ -6,6 +6,47 @@ Versioning: `0.1.0aNN` alpha increments. Public install path: `pipx install hunt
 
 ---
 
+## 0.1.0a454 — May 3 2026 — `/api/wizard/complete` re-ran brain + dossier + DNA generation on every duplicate submit; fingerprint short-circuit eliminates BYOK waste (BRAIN-85)
+
+### Bug fix (BRAIN-85, idempotent expensive endpoint)
+
+Pre-fix, every `/api/wizard/complete` invocation ran the full
+pipeline: validation gate → off-loop brain build → dossier
+generation → background DNA generation. A user reloading,
+double-submitting, or retrying on a flaky network reprocessed
+the SAME profile + history from scratch. Each duplicate burned
+provider tokens, blocked the request through the BRAIN-72 watchdog
+window, bumped `_train_count`, and replaced `_last_trained` with a
+fresh timestamp even though the trained brain hadn't changed.
+
+Fix: fingerprint the canonical `(profile, history)` payload via
+`hashlib.sha256(json.dumps(..., sort_keys=True))` and short-circuit
+when the fingerprint matches the last successful complete for the
+same wizard epoch AND the prior DNA state isn't `failed`.
+
+- Stored: `_last_complete_fingerprint`, `_last_complete_epoch`,
+  `_last_complete_at` — written alongside `_dna_state="pending"`
+  inside the existing merge mutator. A reset wipes them via the
+  full-wipe pattern; a real edit invalidates them via fingerprint
+  mismatch.
+- Short-circuit fires AFTER the vague-answer gate + schema
+  validation but BEFORE the snapshot brain compute, so the
+  duplicate-submit path returns in milliseconds instead of seconds.
+- Response carries `{ok: true, reused: true, idempotent: true,
+  fingerprint, epoch, revision, dna_state, last_completed_at}` so
+  the UI can render "Already trained" rather than a duplicate
+  "Trained!" success toast.
+- `_dna_state == "failed"` always falls through — a permanently
+  failed wizard must be able to recover by re-submitting the same
+  profile.
+
+7 new regression tests in
+`tests/test_wizard_complete_idempotent_fingerprint.py`.
+
+319 of 319 tests passing.
+
+---
+
 ## 0.1.0a453 — May 3 2026 — Skip handler + scan-success post-persist save-progress callsites bypassed BRAIN-83 epoch contract (BRAIN-84)
 
 ### Bug fix (BRAIN-84, optimistic-concurrency end-to-end coverage gap)

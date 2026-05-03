@@ -8312,6 +8312,49 @@ async def api_wizard_complete(request: Request, user: dict = Depends(require_use
     # overwrite the user's newer state.
     _captured_revision = int(_w_snap.get("_wizard_revision", 0) or 0)
 
+    # a454 fix (BRAIN-85): idempotent short-circuit. Per Huntova
+    # engineering review on duplicate-submit BYOK spend. If the
+    # canonical (profile, history) fingerprint matches the last
+    # successful complete for the SAME wizard epoch AND the prior
+    # DNA generation didn't fail, return early with `reused: true`.
+    # Avoids re-running brain + dossier + DNA when the user reloads,
+    # double-clicks, or retries on a flaky network.
+    #
+    # Reset boundary (BRAIN-81 epoch bump) invalidates the cached
+    # fingerprint automatically because the epoch comparison fails.
+    # A failed prior attempt always falls through to a fresh run so
+    # the user can recover.
+    import hashlib as _hashlib
+    _canonical = json.dumps(
+        {"profile": profile, "history": history},
+        sort_keys=True,
+        default=str,
+    )
+    _complete_fingerprint = _hashlib.sha256(
+        _canonical.encode("utf-8")
+    ).hexdigest()
+    _captured_epoch = int(_w_snap.get("_wizard_epoch", 0) or 0)
+    _prior_fingerprint = _w_snap.get("_last_complete_fingerprint") or ""
+    _prior_epoch = int(_w_snap.get("_last_complete_epoch", -1) or -1)
+    _prior_dna_state = _w_snap.get("_dna_state", "unset")
+    if (
+        _prior_fingerprint
+        and _prior_fingerprint == _complete_fingerprint
+        and _prior_epoch == _captured_epoch
+        and _prior_dna_state != "failed"
+    ):
+        print(f"[WIZARD] complete short-circuit (idempotent) for user {user['id']}: same fingerprint+epoch, dna_state={_prior_dna_state}")
+        return {
+            "ok": True,
+            "reused": True,
+            "idempotent": True,
+            "fingerprint": _complete_fingerprint,
+            "epoch": _captured_epoch,
+            "revision": _captured_revision,
+            "dna_state": _prior_dna_state,
+            "last_completed_at": _w_snap.get("_last_complete_at", ""),
+        }
+
     _PROTECTED_KEYS = {
         "normalized_hunt_profile", "training_dossier", "archetype",
         "archetype_confidence", "_knowledge", "_train_count",
@@ -8476,6 +8519,12 @@ async def api_wizard_complete(request: Request, user: dict = Depends(require_use
         w.pop("_dna_error", None)
         w.pop("_dna_failed_at", None)
         w.pop("_dna_completed_at", None)
+        # a454 (BRAIN-85): persist fingerprint + epoch so a duplicate
+        # submit short-circuits next time. Stored alongside the
+        # other completion derivatives so a reset wipes them all.
+        w["_last_complete_fingerprint"] = _complete_fingerprint
+        w["_last_complete_epoch"] = _captured_epoch
+        w["_last_complete_at"] = _now_iso
         cur["wizard"] = w
         return cur
 
