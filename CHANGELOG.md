@@ -6,6 +6,48 @@ Versioning: `0.1.0aNN` alpha increments. Public install path: `pipx install hunt
 
 ---
 
+## 0.1.0a463 — May 4 2026 — Behavioral race-safety regression guards on the BRAIN-93 durable scan quota; verified atomic check-and-increment under 20-way concurrency (BRAIN-94)
+
+### Bug fix (BRAIN-94, regression-prevention guards on quota concurrency)
+
+BRAIN-93 (a462) made the daily scan quota durable via
+`db.merge_settings`. The atomic `BEGIN IMMEDIATE` (SQLite) /
+`SELECT … FOR UPDATE` (Postgres) lock from BRAIN-6 (a347)
+already serializes concurrent writers per user_id, so the
+classic check-then-increment race on quota oversubscription
+SHOULD be impossible. But "should be" isn't a regression-test;
+a future refactor of `merge_settings`, `_xlate`, or the driver
+RLock could silently break the guarantee — and a quota that
+quietly stops enforcing is the worst-case spend-control bug.
+
+This release adds behavioral concurrency tests that fire 5
+and 20 simultaneous quota checks for the same user and assert
+EXACTLY the expected number succeed. The race is verified to
+not exist today; the tests are the durable safeguard against
+future regressions.
+
+What's tested:
+
+1. **Boundary case**: count seeded at `_SCAN_DAILY_MAX - 1`,
+   5 concurrent calls — exactly 1 success, 4 blocks, final
+   stored count == `_SCAN_DAILY_MAX` (never above).
+2. **High-contention case**: fresh user (count=0), 20
+   concurrent calls — successes capped at `_SCAN_DAILY_MAX`,
+   remaining blocked, final count = min(20, cap).
+
+Both tests use the existing `local_env` fixture. Both pass on
+the current implementation, confirming BRAIN-93's atomicity
+holds. If a future change introduces a check-then-increment
+race, these tests fail loudly with concrete oversubscription
+counts.
+
+2 new regression tests in
+`tests/test_wizard_scan_quota_concurrent.py`.
+
+372 of 372 tests passing.
+
+---
+
 ## 0.1.0a462 — May 4 2026 — BRAIN-92 daily quota was process-local in-memory; restart/deploy reset the counter to 0 and refunded the daily cap. Persistent storage closes the durability gap (BRAIN-93)
 
 ### Bug fix (BRAIN-93, quota durability)
