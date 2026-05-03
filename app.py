@@ -498,7 +498,7 @@ def _atomic_write(path, data):
     data blocks are persisted. A crash after the rename but before the
     next periodic disk flush left master_leads.json (and every other
     file written via this helper) pointing to an unwritten inode →
-    silent data corruption surfaced after restart. Per GPT-5.4 audit
+    silent data corruption surfaced after restart. Per Huntova review
     on db.py / journal-replay class. The fsync()+atomic-rename pattern
     is the standard durable-write recipe.
     """
@@ -669,7 +669,7 @@ def save_domain_blocklist():
     except Exception: pass
 
 def record_domain_fail(url):
-    # Stability fix (Perplexity bug #69): use _hostish_netloc here so
+    # Stability fix (bug #69): use _hostish_netloc here so
     # the key written matches the key is_blocked reads. With raw
     # urlparse, schemeless URLs produced an empty key, then is_blocked
     # also read empty — both functions silently no-op'd, the fail
@@ -693,7 +693,7 @@ def save_user_blocked(data):
 def is_user_blocked(url, org_name):
     """Check the user's manual blocklist for a given URL/org.
 
-    Stability fix (Perplexity bug #68): two issues fixed together —
+    Stability fix (bug #68): two issues fixed together —
     (1) the previous version used raw urlparse(url).netloc which
         returns empty for schemeless URLs (competitor.com/page), so
         those bypassed the blocklist entirely (same root cause as
@@ -736,7 +736,7 @@ def is_user_blocked(url, org_name):
     return False
 
 def is_blocked(url):
-    # Stability fix (Perplexity bug #69): match record_domain_fail by
+    # Stability fix (bug #69): match record_domain_fail by
     # using _hostish_netloc so schemeless URLs ("google.com/jobs")
     # don't bypass both the fail-count block AND the mega-corp block.
     d = _hostish_netloc(url)
@@ -1209,7 +1209,7 @@ def _ai_json_kwargs(**kw):
     """Add response_format for JSON when using Gemini (reduces parse errors)
     + cap timeout per call so a stalled provider can't freeze the agent
     thread for the OpenAI SDK default of 600s.
-    Stability fix per Perplexity round-5 review:
+    Stability fix per engineering round 5 review:
       - 30s baseline for cheap scorer/extractor calls
       - 60s for higher-effort planner/writer/critic calls (passing
         purpose='planner'|'writer'|'critic' or model contains 'pro' upgrades)
@@ -1545,7 +1545,7 @@ def _fp_normalize(s):
 def _hostish_netloc(raw):
     """Extract a normalized hostname from a URL-or-host string.
 
-    Stability fix (Perplexity bug #63): plain `urlparse('example.com')`
+    Stability fix (bug #63): plain `urlparse('example.com')`
     returns netloc='' because there's no scheme — the hostname lands
     in path. That made make_fingerprint fall back to the org+event
     fingerprint for any schemeless org_website, so the SAME prospect
@@ -3917,7 +3917,7 @@ Respond with a detailed, structured strategy. Name real industries, real job tit
         emit_log("🧠 Phase 1: Analysing your business to create hunt strategy...", "ai")
         emit_thought("Deep-analysing your business model, buyers, and market...", "thinking")
         
-        # Stability fix (Perplexity bug #36): explicit 60s timeout so a
+        # Stability fix (bug #36): explicit 60s timeout so a
         # stuck Gemini upstream can't hang the wizard's strategy
         # generation forever. Same pattern as _ai_json_kwargs.
         resp1 = client.chat.completions.create(
@@ -4117,7 +4117,7 @@ def _normalize_examples(raw):
     used list-of-dicts. Three places had a near-identical helper
     (a331's `_normalize_examples_top` inside `_generate_training_dossier`,
     a368's `_norm_examples` inside `_generate_brain_queries`, plus
-    inline coercions in `_build_hunt_brain`). GPT-5.4's audit flagged
+    inline coercions in `_build_hunt_brain`). Huntova engineering's audit flagged
     the duplication as the root of an upcoming family of shape-drift
     bugs ("function A normalized this field, function B assumed the
     pre-normalized contract"). One canonical shape: list-of-dicts
@@ -5916,7 +5916,7 @@ def _fallback_queries(wizard_data, countries):
 class SearchResult:
     url: str; title: str; snippet: str
 
-# Stability fix (Perplexity bug #66): module-level requests.Session
+# Stability fix (bug #66): module-level requests.Session
 # pools the TCP+TLS connection to the SearXNG host across the 50-300
 # queries fired per agent run. Without it, every search() call paid a
 # fresh handshake — wasted RTTs and fd churn under load.
@@ -6169,7 +6169,7 @@ def fetch_page_requests(url, limit=10000):
         try:
             if _check_stop(): return "", ""
             headers = {"User-Agent": USER_AGENT}
-            # Stability fix (Perplexity bug #67): the previous version
+            # Stability fix (bug #67): the previous version
             # called requests.get() WITHOUT stream=True, then checked
             # len(r.content) > 2_000_000 — but by then `r.content` had
             # already buffered the entire response body into memory.
@@ -6972,7 +6972,7 @@ Fields:
                 "messages": [{"role":"system","content":"You are a ruthlessly precise B2B lead analyst. Output ONLY a single valid JSON object (not an array). No markdown, no explanation, no wrapping in []."},{"role":"user","content":prompt}],
                 "temperature": 0.35,
                 "max_tokens": 16000,
-                # Stability fix (Perplexity bug #36): 60s upper bound on
+                # Stability fix (bug #36): 60s upper bound on
                 # the per-lead AI call so a stuck Gemini stream can't
                 # hang the entire agent run. analyse_lead is on the hot
                 # path; without this a single bad upstream pause stops
@@ -7683,8 +7683,8 @@ def run_agent():
         # higher thresholds doesn't exist. Now: lightweight mode CAPS
         # thresholds at the relaxed default (min); full mode still picks
         # the stricter dossier value (max) since the verification
-        # signals justify it. Per GPT-5.4 senior-engineer audit
-        # (Perplexity, this session) on silent threshold inversion.
+        # signals justify it. Per Huntova engineering review
+        # (engineering review) on silent threshold inversion.
         def _merge_threshold(dossier_val, default_val):
             if not dossier_val:
                 return default_val
@@ -7730,7 +7730,7 @@ def run_agent():
     # Pre-fix: if brain's normalized field was EMPTY (e.g. _clean()
     # filtered all "vague" industries to []), `.get(key, default)`
     # returned the empty list (key present, empty value), silently
-    # overwriting the user's raw _wiz_data with []. Per GPT-5.4 audit
+    # overwriting the user's raw _wiz_data with []. Per Huntova review
     # on the "or chain graveyard" pattern. Now: empty brain values
     # fall through to raw wiz_data instead of clobbering.
     _wiz_data["services"] = _brain.get("services_clean") or _wiz_data.get("services") or []
@@ -7834,8 +7834,8 @@ def run_agent():
     # returned 4 ICP-tailored queries (below the previous `>= 5`
     # threshold), they were silently DISCARDED — the cascade fell
     # through to generic templates and the user experienced "the hunt
-    # feels generic" with no visible failure. Per GPT-5.4 senior-
-    # engineer audit (Perplexity, this session) on the silent-
+    # feels generic" with no visible failure. Per Huntova engineering senior-
+    # engineer audit (engineering review) on the silent-
     # downgrade-to-generic class. Now: any DNA queries are preserved
     # at the top, subsequent tiers append unique queries until we
     # reach the target count.
@@ -8996,7 +8996,7 @@ def run_agent():
                         pass
 
                     # Save to DB first, THEN deduct credit (prevents phantom credit loss).
-                    # Stability fix (Perplexity bug #59): only deduct
+                    # Stability fix (bug #59): only deduct
                     # when upsert_lead reports it INSERTED a new row.
                     # On UPDATE (re-discovery via different URL on the
                     # same domain producing the same lead_id) we
@@ -9158,7 +9158,7 @@ def run_agent():
                                 _lead_saved = True
                             except Exception as _save_err:
                                 emit_log(f"Failed to save rescued lead: {_save_err}", "error")
-                        # Stability fix (Perplexity bug #59, rescued-lead
+                        # Stability fix (engineering bug #59, rescued-lead
                         # path): only deduct on a true insert. A re-rescue
                         # of an already-saved prospect refreshes the row
                         # but doesn't charge.
@@ -9365,7 +9365,7 @@ def run_agent():
         # batch 2 onwards, even though _generate_brain_queries still
         # produces useful role/industry/example-client queries via
         # its common sections regardless of archetype. Same silent-
-        # downgrade class as BRAIN-15. Per GPT-5.4 audit pattern.
+        # downgrade class as BRAIN-15. Per Huntova review pattern.
         if _brain.get("hunt_brain_version", 0) >= 1:
             new_queries = _generate_brain_queries(_brain, _sel_countries, _batch_size * 2)
         else:

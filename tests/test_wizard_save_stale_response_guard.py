@@ -53,7 +53,7 @@ def _continue_handler_block() -> str:
         "BRAIN-67 regression: `_brainSaveSeq` token missing entirely "
         "— Continue handler has no stale-response protection."
     )
-    return src[max(0, idx - 800):idx + 3500]
+    return src[max(0, idx - 800):idx + 6000]
 
 
 def test_continue_handler_disables_buttons_during_save():

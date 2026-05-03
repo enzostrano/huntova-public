@@ -45,7 +45,7 @@ def _local_db_path() -> Path:
         p = Path(override).expanduser()
     else:
         # XDG data dir convention. Mirrors how the CLI stores config in
-        # ~/.config/huntova/. Per Perplexity round 65 + Gemini's plan,
+        # ~/.config/huntova/. Per engineering round 65 + Gemini's plan,
         # secrets live in ~/.config/huntova/, mutable data lives in
         # ~/.local/share/huntova/.
         base = os.environ.get("XDG_DATA_HOME") or str(Path.home() / ".local" / "share")

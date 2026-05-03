@@ -790,7 +790,7 @@ class GenericWebhookPlugin:
             # receivers using the legacy bare-sha256 form continue to
             # see the v1 value (just with a t= prefix). New receivers
             # should reject any t= that's more than ~5 minutes old.
-            # Per GPT-5.4 audit on webhook replay class.
+            # Per Huntova review on webhook replay class.
             import hmac as _hmac
             import hashlib as _hashlib
             signed_payload = f"{_ts}.".encode("utf-8") + body

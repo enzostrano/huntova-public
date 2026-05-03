@@ -4673,7 +4673,7 @@ def cmd_recipe(args: argparse.Namespace) -> int:
         # webpage, or a victim on a VM tricked into hitting cloud-
         # metadata endpoints, would have the server-side fetcher
         # request attacker-chosen destinations. Per OWASP SSRF guidance
-        # + GPT-5.4 senior-engineer audit (Perplexity, this session):
+        # + Huntova engineering review:
         # only http/https + public-host allowlist; reject redirects
         # to private destinations.
         from urllib.parse import urlparse as _urlparse, urlunparse as _urlunparse

@@ -29,7 +29,7 @@ def generate_token() -> str:
 def generate_verification_token(email: str, user_id: int = 0) -> str:
     """Sign an email-verify token bound to BOTH the email and the user_id.
 
-    Stability fix (Perplexity bug #72): the previous version signed
+    Stability fix (bug #72): the previous version signed
     only the email. After a user delete + resignup with the same
     address, an old verification link issued to the deleted user
     could verify the NEW user (get_user_by_email at redeem time
@@ -66,7 +66,7 @@ def verify_verification_token(token: str, max_age: int = 86400) -> tuple[str, in
 def _password_hash_fingerprint(password_hash: str) -> str:
     """Short hex fingerprint of the user's password_hash. Used to bind
     reset tokens to the password state at issue time so a successful
-    reset invalidates all prior tokens (Perplexity bug #70)."""
+    reset invalidates all prior tokens (engineering bug #70)."""
     import hashlib as _hl
     return _hl.sha256((password_hash or "").encode("utf-8")).hexdigest()[:16]
 
@@ -74,7 +74,7 @@ def _password_hash_fingerprint(password_hash: str) -> str:
 def generate_reset_token(email: str, password_hash: str = "") -> str:
     """Sign a reset token bound to the user's CURRENT password_hash.
 
-    Stability fix (Perplexity bug #70): the previous version signed
+    Stability fix (bug #70): the previous version signed
     only the email, so tokens issued in the same 1-hour window all
     stayed valid independently. Sequence: user requests reset twice,
     uses token A successfully — token B is still valid for the rest
@@ -212,7 +212,7 @@ async def login(email: str, password: str) -> tuple[dict, str]:
         # by the constant-time dummy bcrypt above.
         raise ValueError("Invalid email or password")
     if not user.get("password_hash"):
-        # Stability fix (Perplexity bug #50): OAuth-only users
+        # Stability fix (bug #50): OAuth-only users
         # (Google sign-in, no local password) used to return INSTANTLY
         # here while unknown-email users paid the dummy-hash cost. That
         # made OAuth users timing-distinguishable from non-existent
@@ -442,7 +442,7 @@ async def get_current_user(request: Request) -> dict | None:
         return None
     user = await db.get_user_by_id(session["user_id"])
     if not user:
-        # Stability fix (Perplexity bug #62): if the user row is gone
+        # Stability fix (bug #62): if the user row is gone
         # (account deletion cascade race, manual DB cleanup, etc.) we
         # used to just return None and leave the session row in place.
         # Every subsequent request would re-fetch the same dead session

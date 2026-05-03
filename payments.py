@@ -105,7 +105,7 @@ async def create_checkout(user_id: int, product_id: str) -> dict:
 
     if product["mode"] == "subscription":
         params["line_items[0][price_data][recurring][interval]"] = product.get("interval", "month")
-        # Stability fix (Perplexity bug #75): Stripe does NOT auto-copy
+        # Stability fix (bug #75): Stripe does NOT auto-copy
         # session metadata onto the Subscription object that gets
         # created. Renewal/update/cancel webhooks need the user_id +
         # product_id on the subscription itself; without
@@ -196,7 +196,7 @@ async def handle_webhook(payload: bytes, sig_header: str) -> dict:
     if already:
         return {"ok": True, "message": "Already processed"}
 
-    # Stability fix (Perplexity bug #52): record_webhook below claims
+    # Stability fix (bug #52): record_webhook below claims
     # the event_id BEFORE the side-effect writes (credit grant, tier
     # change, refund log) finish. If anything between the claim and
     # the final ledger write raises, Stripe will retry — but the
@@ -228,7 +228,7 @@ async def _dispatch_webhook_event(event: dict, event_type: str, event_id: str) -
         if not product:
             return {"ok": False, "error": "Unknown product"}
 
-        # Stability fix (Perplexity bug #47): Stripe fires BOTH
+        # Stability fix (bug #47): Stripe fires BOTH
         # checkout.session.completed AND
         # checkout.session.async_payment_succeeded for async payment
         # methods (SEPA, Bacs, etc.) — completed fires when the user
@@ -267,7 +267,7 @@ async def _dispatch_webhook_event(event: dict, event_type: str, event_id: str) -
         # apply_credit_delta combines UPDATE + ledger in one txn so a
         # failure rolls back BOTH; rollback_webhook then leaves a
         # genuinely clean state for the retry.
-        # Per GPT-5.4 audit on Stripe webhook idempotency.
+        # Per Huntova review on Stripe webhook idempotency.
         _reason = "topup" if not product.get("tier") else "subscription"
         _applied, new_credits = await db.apply_credit_delta(
             user_id, product["credits"], _reason, product_id)
@@ -380,7 +380,7 @@ async def _dispatch_webhook_event(event: dict, event_type: str, event_id: str) -
         if not first_writer:
             return {"ok": True, "message": "Already processed (race-caught)"}
         if user and user.get("tier") != "free":
-            # Stability fix (Perplexity bug #48): the previous version
+            # Stability fix (bug #48): the previous version
             # clamped credits_remaining to the free tier ceiling on
             # cancel. That burned ANY one-time topup credits the user
             # had paid for separately — credits are fungible in
@@ -480,7 +480,7 @@ async def _dispatch_webhook_event(event: dict, event_type: str, event_id: str) -
                 user = await db.get_user_by_email(cust_email.lower())
         if not user:
             return {"ok": True, "message": "subscription.updated — user not found"}
-        # Stability fix (Perplexity bug #61): scan ALL subscription
+        # Stability fix (bug #61): scan ALL subscription
         # items, not just items[0]. Stripe subscriptions can contain
         # multiple items (e.g. base plan + add-ons), and we don't
         # control the order. Reading only the first one would miss

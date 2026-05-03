@@ -410,8 +410,8 @@ async def _scan_inbox(user_id: int, since_days: int = 14, dry_run: bool = False)
             # could send a fake "reply" that flips the lead's status to
             # "replied" / "won" / "lost" based on body classification,
             # poisoning the Pulse counter, the DNA generation feedback
-            # loop, and the auto-advance sequence flow. Per GPT-5.4
-            # senior-engineer audit (Perplexity, this session) on
+            # loop, and the auto-advance sequence flow. Per Huntova engineering
+            # engineering review (engineering review) on
             # email-spoofing-via-From class. Threading-header binding
             # is the only authenticated correlation; drop the fallback.
             # Edge case loss: a prospect who composes a fresh email

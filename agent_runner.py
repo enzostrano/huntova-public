@@ -86,7 +86,7 @@ class AgentRunner:
         ctx = get_or_create_context(user_id, user_email, user_tier)
 
         with self._lock:
-            # Stability fix (round-3 multi-agent + round-8 Perplexity review):
+            # Stability fix (round-3 + round-8 review):
             # self-clean dead/ghost threads BEFORE size + presence checks so a
             # crashed prior thread (no finally cleanup) doesn't permanently
             # prevent the user from restarting AND doesn't waste a slot
@@ -161,13 +161,13 @@ class AgentRunner:
             }
 
             if len(self._running) < MAX_CONCURRENT_AGENTS:
-                # Stability fix (Perplexity bug #60): drop stale queue entry
+                # Stability fix (bug #60): drop stale queue entry
                 # so _process_queue doesn't later spawn a duplicate thread.
                 try:
                     self._queue.remove(user_id)
                 except ValueError:
                     pass
-                # Stability fix (Perplexity bug #64): the previous
+                # Stability fix (bug #64): the previous
                 # version did `ctx.agent_ctrl = {"action": None}` —
                 # wholesale-clobbering any "stop" action a user had
                 # queued via stop_agent while they were waiting. If
@@ -295,7 +295,7 @@ class AgentRunner:
         ctx = get_or_create_context(user_id)
         run_id = None
         loop = asyncio.new_event_loop()
-        # Stability fix (Perplexity bug #49): track the terminal UI
+        # Stability fix (bug #49): track the terminal UI
         # status so finally doesn't overwrite a crash with "Idle". The
         # bus only caches the LAST terminal status for SSE replay, so
         # if the except branch emits "error" and finally then emits
@@ -467,7 +467,7 @@ class AgentRunner:
     def _process_queue(self):
         """Start next queued agent if capacity available.
 
-        Stability fix (Perplexity bug #65): mirror of #64 in start_agent.
+        Stability fix (bug #65): mirror of #64 in start_agent.
         If a user clicked Stop while queued, ctx.agent_ctrl["action"]
         is "stop". Previously this function wholesale-reset that ctrl
         and spawned the thread anyway, ignoring the user's stop. Now

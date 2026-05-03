@@ -113,7 +113,7 @@ def put_conn(conn):
     to putconn(close=True) so a Railway network blip doesn't mark up to
     10 pool slots dead and starve the next 10 callers.
 
-    Stability fix (Perplexity bug #34): even live connections can be
+    Stability fix (bug #34): even live connections can be
     returned to the pool mid-transaction or in an aborted state.
     psycopg2 starts an implicit transaction on every statement, so any
     code path that skipped the explicit commit/rollback (or saw rollback
@@ -456,7 +456,7 @@ CREATE INDEX IF NOT EXISTS idx_feedback_user ON lead_feedback(user_id);
 CREATE INDEX IF NOT EXISTS idx_feedback_user_signal_created ON lead_feedback(user_id, signal, created_at DESC);
 -- NOTE: idx_lead_feedback_user_lead (UNIQUE) used to be declared here
 -- so SQLite installs would inherit it. Stability fix (audit wave 27):
--- on Postgres installs that pre-date Perplexity bug #77's dedupe (i.e.
+-- on Postgres installs that pre-date engineering bug #77's dedupe (i.e.
 -- the very installs the dedupe was written to rescue), running this
 -- statement inside SCHEMA_SQL would fail with "could not create
 -- unique index … is duplicated" — and the post-SCHEMA dedupe block
@@ -508,7 +508,7 @@ CREATE TABLE IF NOT EXISTS used_reset_tokens (
     token_hash TEXT PRIMARY KEY,
     used_at TEXT NOT NULL
 );
--- Feature F1 (Perplexity round 59): shareable replay URLs.
+-- Feature F1 (engineering round 59): shareable replay URLs.
 -- A `slug` resolves to a frozen-in-time snapshot of one or more leads
 -- the creator wants to surface publicly (sales asset, founder
 -- outreach, landing-page proof). Snapshot, NOT live-link, so the
@@ -547,7 +547,7 @@ CREATE TABLE IF NOT EXISTS hunt_recipes (
     UNIQUE(user_id, name)
 );
 CREATE INDEX IF NOT EXISTS idx_hunt_recipes_user ON hunt_recipes(user_id);
--- Feature F6 (Perplexity round 64): light growth analytics. Capture
+-- Feature F6 (engineering round 64): light growth analytics. Capture
 -- intent at checkout-start (which paywall surface drove the click)
 -- separately from completed payments — completed-only data hides the
 -- best signal: which prompts converted vs which only got clicks.
@@ -731,7 +731,7 @@ def init_db_sync():
         # Post-dedupe unique index (audit wave 27): the unique index
         # used to live inside SCHEMA_SQL but was relocated here so the
         # Postgres path can dedupe FIRST (legacy installs predating
-        # Perplexity bug #77 have duplicate lead_feedback rows that
+        # engineering bug #77 have duplicate lead_feedback rows that
         # would otherwise crash the unique-index creation inside
         # SCHEMA_SQL and roll back the whole transaction). Fresh SQLite
         # installs have no duplicates by construction, so no dedupe
@@ -790,7 +790,7 @@ def init_db_sync():
             conn.commit()
         except Exception:
             conn.rollback()
-        # Stability fix (Perplexity bug #77): dedupe lead_feedback (keep
+        # Stability fix (bug #77): dedupe lead_feedback (keep
         # latest per user+lead) then enforce unique constraint so
         # double-clicks can't inflate DNA-regen counts. The DELETE is
         # a no-op once the index exists; CREATE UNIQUE INDEX IF NOT
@@ -839,7 +839,7 @@ async def create_user(email: str, password_hash: str, display_name: str = "") ->
 
 
 async def get_user_by_email(email: str) -> dict | None:
-    # Stability fix (Perplexity bug #54): use LOWER(email) on the
+    # Stability fix (bug #54): use LOWER(email) on the
     # column side so a row stored mixed-case (legacy import, manual
     # admin insert, future code that forgets to normalize) is still
     # findable. All write paths today already lowercase before INSERT
@@ -892,7 +892,7 @@ async def check_and_reset_credits(user_id: int) -> int:
         return user.get("credits_remaining", 0)
 
     # Reset date is past — handle webhook-deferred renewals first.
-    # Stability fix (Perplexity bug #45): credit_ledger.created_at is
+    # Stability fix (bug #45): credit_ledger.created_at is
     # TEXT, so the previous WHERE created_at > %s did a STRING compare,
     # not a real timestamp compare. ISO-8601 strings sort
     # chronologically only when every row uses the same suffix; if any
@@ -957,9 +957,9 @@ async def check_and_reset_credits(user_id: int) -> int:
 
 
 async def deduct_credit(user_id: int, amount: int = 1) -> bool:
-    # Stability fix (Perplexity bug #46): reject negative/zero amount
+    # Stability fix (bug #46): reject negative/zero amount
     # so a buggy caller can't invert the money direction.
-    # Stability fix (Perplexity bug #55): the credits-decrement and the
+    # Stability fix (bug #55): the credits-decrement and the
     # ledger insert now happen in ONE transaction via apply_credit_delta
     # — a crash between the two no longer leaves the user's balance
     # changed without an audit row.
@@ -976,8 +976,8 @@ async def deduct_credit(user_id: int, amount: int = 1) -> bool:
 
 async def refund_credit(user_id: int, amount: int, reason: str, reference: str = ""):
     # Return credits after a pre-paid op (e.g. Deep Research) failed.
-    # Stability fix (Perplexity bug #46): reject inverted amount.
-    # Stability fix (Perplexity bug #55): credit + ledger atomic.
+    # Stability fix (bug #46): reject inverted amount.
+    # Stability fix (bug #55): credit + ledger atomic.
     if amount <= 0:
         raise ValueError("refund_credit amount must be > 0")
     await apply_credit_delta(user_id, amount, reason, reference)
@@ -986,7 +986,7 @@ async def refund_credit(user_id: int, amount: int, reason: str, reference: str =
 def _claim_reset_token_and_set_password_sync(token_hash: str, user_id: int, new_password_hash: str) -> bool:
     """Atomically claim a reset token and update the password + wipe sessions.
 
-    Stability fix (Perplexity bug #58): the previous flow called
+    Stability fix (bug #58): the previous flow called
     mark_reset_token_used (own connection) FIRST, then update_user
     (separate connection) and delete_user_sessions (third connection).
     Any failure after the token claim left the token burned but the
@@ -1069,7 +1069,7 @@ async def check_webhook_processed(event_id: str) -> bool:
 async def rollback_webhook(event_id: str):
     """Delete a recorded webhook row so a Stripe retry can re-process.
 
-    Stability fix (Perplexity bug #52): record_webhook claims the
+    Stability fix (bug #52): record_webhook claims the
     event_id BEFORE side effects run. If side effects crash midway,
     the next retry sees the recorded row and short-circuits — the
     user permanently misses credits. Callers should call this from an
@@ -1085,7 +1085,7 @@ async def record_webhook(event_id: str, event_type: str, user_id: int, product_i
     # check-and-mutate pair race-free: two concurrent webhooks for the same
     # event can both pass check_webhook_processed, but only one will see
     # True from this insert and do the credit update.
-    # Stability fix (round-3 multi-agent + round-4 Perplexity): never swallow
+    # Stability fix (round-3 + round-4): never swallow
     # DB exceptions here. True = first-writer (proceed), False = duplicate
     # (skip side effects, still 200), exception = infra failure → bubbles up
     # so FastAPI returns 5xx and Stripe retries the webhook.
@@ -1108,7 +1108,7 @@ def _apply_credit_delta_sync(user_id: int, delta: int, reason: str, reference: s
                               gate: str = "") -> tuple[bool, int]:
     """Atomic credits_remaining adjustment + ledger insert in ONE transaction.
 
-    Stability fix (Perplexity bug #55): the legacy pattern was
+    Stability fix (bug #55): the legacy pattern was
     update_user → add_credit_ledger as two separate `_aexec` calls,
     each on its own pooled connection. A process crash or DB blip
     between the two left credits_remaining changed but no audit row
@@ -1199,7 +1199,7 @@ def _admin_apply_credit_change_sync(user_id: int, mode: str, amount: int,
                                      ledger_reason: str, reference: str) -> tuple[int, int] | None:
     """Atomic admin credit mutation across grant / revoke / set_exact.
 
-    Stability fix (Perplexity bug #73): the admin route used to do
+    Stability fix (bug #73): the admin route used to do
     read-modify-write on credits_remaining. Concurrent agent deducts
     or a second admin action could be lost. Now one SQL mutation
     returns (old_balance, new_balance); the ledger gets a row with
@@ -1575,7 +1575,7 @@ async def get_session(token: str) -> dict | None:
         exp = datetime.fromisoformat(str(row["expires_at"]))
         if not exp.tzinfo:
             exp = exp.replace(tzinfo=timezone.utc)  # Assume UTC if naive
-        # Stability fix (Perplexity bug #51): use <= so a session at
+        # Stability fix (bug #51): use <= so a session at
         # the exact expiry instant is rejected. With < the session
         # would still be accepted at exp == now, which contradicts the
         # "valid only before expiry" spec. Microsecond-precision edge
@@ -1611,7 +1611,7 @@ async def get_leads(user_id: int, limit: int | None = None, offset: int = 0) -> 
     # one request. Frontend can page with limit/offset for user >10k leads.
     HARD_CAP = 10000
     effective_limit = HARD_CAP if limit is None else max(1, min(limit, HARD_CAP))
-    # Stability fix (Perplexity bug #38): id DESC tiebreaker so two leads
+    # Stability fix (bug #38): id DESC tiebreaker so two leads
     # sharing the same created_at don't swap positions between page
     # fetches. PostgreSQL only guarantees deterministic LIMIT/OFFSET
     # results when ORDER BY uniquely identifies each row.
@@ -1660,7 +1660,7 @@ _GENERIC_EMAIL_PREFIX = re.compile(
 def _merge_lead_sync(user_id: int, lead_id: str, mutator) -> dict | None:
     """Atomic read-modify-write for a single lead row.
 
-    Stability fix (Perplexity bug #79): /api/update used to do
+    Stability fix (bug #79): /api/update used to do
     get_lead + Python mutation + upsert_lead as three separate calls,
     which is the classic lost-update race — concurrent edits to
     different fields from different CRM panels (status dropdown, notes,
@@ -1751,7 +1751,7 @@ async def upsert_lead(user_id: int, lead_id: str, data: dict) -> bool:
     """Insert OR update a lead. Returns True if a NEW row was inserted,
     False if an existing row was updated.
 
-    Stability fix (Perplexity bug #59): agent code uses the return
+    Stability fix (bug #59): agent code uses the return
     value to decide whether to deduct a credit. lead_id is a
     deterministic hash from the prospect fingerprint, so two
     different URLs on the same domain can produce the same lead_id.
@@ -1858,7 +1858,7 @@ async def delete_lead(user_id: int, lead_id: str) -> dict | None:
 
 
 async def restore_lead(user_id: int, lead_id: str) -> dict | None:
-    # Stability fix (Perplexity bug #57): the previous version did
+    # Stability fix (bug #57): the previous version did
     # DELETE archived → INSERT leads ... ON CONFLICT DO NOTHING in
     # one pipeline transaction. If a live row with the same lead_id
     # already existed (agent re-found the same domain after the user
@@ -1931,7 +1931,7 @@ async def save_settings(user_id: int, data: dict):
 def _merge_settings_sync(user_id: int, mutator) -> dict:
     """Atomic read-modify-write for user_settings.data.
 
-    Stability fix (Perplexity bug #76): plain get_settings + mutate +
+    Stability fix (bug #76): plain get_settings + mutate +
     save_settings is a classic lost-update pattern — two endpoints
     that both load the same JSON, mutate different keys, and both
     save will silently overwrite each other (whoever writes last
@@ -2063,7 +2063,7 @@ async def save_agent_dna(user_id: int, dna: dict):
 # ── Lead Feedback ──
 
 async def save_lead_feedback(user_id: int, lead_id: str, signal: str, reason: str = ""):
-    # Stability fix (Perplexity bug #77): the previous version was a
+    # Stability fix (bug #77): the previous version was a
     # blind INSERT — double-clicks, accidental re-submits, browser
     # retries all produced duplicate rows for the same user+lead.
     # get_lead_feedback_count uses raw row count, so duplicates

@@ -189,7 +189,7 @@ def _send_email_sync(to: str, subject: str, html_body: str, plain_body: str = ""
     # List-Unsubscribe mailto, the Message-ID domain, and the SMTP
     # envelope sender. A poisoned setting (admin in cloud, user in
     # local) could inject Bcc/Cc headers via CRLF in from_email.
-    # Per GPT-5.4 audit on email_service.py SMTP-header-injection
+    # Per Huntova review on email_service.py SMTP-header-injection
     # class. formataddr does NOT strip CRLF — only the name
     # component gets RFC2047-encoded; the address is trusted.
     _from_email_raw = (s.get("from_email") or "").strip()
@@ -248,7 +248,7 @@ def _send_email_sync(to: str, subject: str, html_body: str, plain_body: str = ""
     if plain_body:
         msg.attach(MIMEText(plain_body, "plain", "utf-8"))
     msg.attach(MIMEText(html_body, "html", "utf-8"))
-    # Stability fix (Perplexity bug #56): starttls() without an
+    # Stability fix (bug #56): starttls() without an
     # explicit SSL context relied on Python's stdlib defaults which
     # don't reliably verify the SMTP server cert/hostname. A MITM on
     # the SMTP path could intercept SMTP_USER + SMTP_PASSWORD on

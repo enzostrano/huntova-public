@@ -33,7 +33,7 @@ class UserEventBus:
         self._subscribers: set[queue.Queue] = set()
         self._lock = threading.Lock()
         self._last_terminal: str | None = None
-        # Stability fix (Perplexity bug #39): also cache the latest
+        # Stability fix (bug #39): also cache the latest
         # non-status snapshots clients need to render correct UI on
         # reconnect — without this, an SSE drop in the middle of a run
         # left the user's UI showing whatever progress they last saw

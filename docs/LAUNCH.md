@@ -1,7 +1,7 @@
 # Huntova launch plan — Tuesday May 5, 2026
 
 This is the operational launch playbook synthesised from the 3-tab Perplexity
-brainstorm rounds (GPT-5.4 strategy, Gemini 3.1 Pro GTM, Kimi K2.6 architecture).
+brainstorm rounds (Huntova engineering strategy, Gemini 3.1 Pro GTM, Kimi K2.6 architecture).
 **Date and angle are locked.** Read this top-to-bottom before launch day.
 
 ## Date and angle
@@ -424,7 +424,7 @@ critique cluster.
   critical failure (no providers, SearXNG unreachable, data dir unwritable,
   AI probe fail). This is the launch gate.
 
-## Frontend readiness (GPT-5.4 + Gemini)
+## Frontend readiness (Huntova engineering + Gemini)
 
 - `/try` Preview Mode framing throughout: kicker, h1, lede, disclaimer, CTA,
   powered-by line all explicitly labeled. Disclaimer enumerates what /try
@@ -648,7 +648,7 @@ based on HN sentiment whether to flip the flag and post a v1.1 follow-up.
 ## The buyer-intent reply (Round 76 synthesis)
 
 Tuesday night Enzo sees ≥1 cold-email reply from an agency owner saying "this
-is sick — when can I use it for my own client list?". GPT-5.4 + Gemini
+is sick — when can I use it for my own client list?". Huntova engineering + Gemini
 converged on a hybrid — give them the free CLI to prove the value AND open
 the design-partner door for the Cloud Proxy wedge. Don't anchor a price yet
 (GPT round 76 — premature precision before knowing operating cost), but DO

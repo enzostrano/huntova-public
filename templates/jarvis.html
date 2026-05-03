@@ -3925,7 +3925,7 @@ body.hv-has-update-banner{padding-top:var(--hv-update-banner-h, 38px)}
           // class as BRAIN-67 save-progress, but with the extra
           // hazard that phase-5 mutates a shared module-level
           // array (_BRAIN_QUESTIONS), not just per-handler state.
-          // Per GPT-5.4 LLM-output-fragility + async-race audit.
+          // Per Huntova engineering LLM-output-fragility + async-race audit.
           window._brainPhase5Seq = (window._brainPhase5Seq || 0) + 1;
           const _myP5Tok = window._brainPhase5Seq;
           try {
@@ -4561,7 +4561,7 @@ body.hv-has-update-banner{padding-top:var(--hv-update-banner-h, 38px)}
       // save with a monotonically-increasing token, and only apply
       // the response if the token is still current (covers the case
       // where the disable-toggle races with a queued click event).
-      // Per GPT-5.4 senior-engineer audit (Perplexity, this session)
+      // Per Huntova engineering review
       // on stale-async-response wizard race class.
       next.disabled = true;
       back.disabled = true;

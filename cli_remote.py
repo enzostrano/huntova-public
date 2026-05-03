@@ -232,8 +232,8 @@ def _watch_loop(token: str, allowed: set[int], *, verbose: bool = False) -> int:
     # who knew the bot's @handle (handles are publicly searchable)
     # could send commands like "list leads" / "delete X" / "share
     # top 10" and Huntova would dispatch them against the operator's
-    # local install. Per Telegram bot security guidance + GPT-5.4
-    # senior-engineer audit (Perplexity, this session): authorization
+    # local install. Per Telegram bot security guidance + Huntova engineering
+    # engineering review (engineering review): authorization
     # MUST be on the immutable Telegram user_id / chat_id, fail-closed
     # by default. Now: explicit refusal at startup if no chats are
     # whitelisted, with a clear pointer to `huntova remote setup`.
@@ -356,7 +356,7 @@ def send_notification(text: str) -> bool:
         # succeeds → Huntova would notify Telegram chats 1, 2, 3,
         # 4, 5 (random real users) on every hunt completion. Same
         # fail-OPEN class as BRAIN-61 — ambiguous config types
-        # turning into unintended fan-out. Per GPT-5.4 senior-
+        # turning into unintended fan-out. Per Huntova engineering senior-
         # engineer audit on send_notification path.
         _raw_chats = cfg.get("notify_chats")
         if not isinstance(_raw_chats, list) or not _raw_chats:
