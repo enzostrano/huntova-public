@@ -6,6 +6,54 @@ Versioning: `0.1.0aNN` alpha increments. Public install path: `pipx install hunt
 
 ---
 
+## 0.1.0a465 — May 4 2026 — Phase-5/complete/assist had per-minute caps but no daily quota — slow-burn BYOK drain still possible. Per-endpoint daily quotas added in parity with scan (BRAIN-96)
+
+### Bug fix (BRAIN-96, cost-governance parity)
+
+BRAIN-92/93/94 added a durable daily quota to
+`/api/wizard/scan`. The other three paid wizard endpoints
+stayed behind: per-minute caps from BRAIN-91 stopped bursts
+but did nothing against patient slow-burn that stayed under
+the cap and still drained BYOK over hours.
+
+Worst-case daily BYOK without a daily quota:
+
+- `/api/wizard/generate-phase5`: 8/min × 60 × 24 ≈ ~$230/day
+- `/api/wizard/complete`: 6/min × 60 × 24 ≈ ~$864/day
+  (mitigated by BRAIN-85 idempotency cache, but cache-misses
+  still spend)
+- `/api/wizard/assist`: 30/min × 60 × 24 ≈ ~$432/day
+
+Standard cost-governance guidance: per-route quotas in
+addition to per-route rate limits. Quotas cap long-horizon
+spend; rate limits cap burst speed. They're complementary,
+both needed.
+
+Fix:
+
+- New constants `_PHASE5_DAILY_MAX = 50`,
+  `_COMPLETE_DAILY_MAX = 30`, `_ASSIST_DAILY_MAX = 200` —
+  all env-overridable (`HV_WIZARD_PHASE5_DAILY_MAX` etc.).
+- New generic helper `_check_paid_endpoint_quota_async(user_id,
+  bucket_name, daily_max)` — same atomicity + durability +
+  fail-open + UTC-rollover semantics as BRAIN-93's scan
+  helper, parametrized over the bucket name. Counter lives
+  at `_quotas.<bucket_name>` (settings root → wizard reset
+  doesn't refund).
+- Each paid endpoint now `await`s the helper AFTER the
+  per-minute bucket check and BEFORE any AI call. Distinct
+  `error_kind` per endpoint (`phase5_daily_quota_exceeded`
+  / `complete_daily_quota_exceeded` /
+  `assist_daily_quota_exceeded`) so the UI can render
+  endpoint-specific recovery messages.
+
+10 new regression tests in
+`tests/test_wizard_paid_endpoints_daily_quotas.py`.
+
+387 of 387 tests passing.
+
+---
+
 ## 0.1.0a464 — May 4 2026 — Admin wizard reset didn't bump `_wizard_epoch` and used non-atomic save_settings; stale tabs survived admin resets and concurrent agent threads could race in stale state (BRAIN-95)
 
 ### Bug fix (BRAIN-95, reset generation parity)

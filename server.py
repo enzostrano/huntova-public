@@ -484,6 +484,15 @@ _ai_rate = _AiRateLegacyView()
 # normal demo + setup flows. Cap configurable via
 # `HV_WIZARD_SCAN_DAILY_MAX` env var for power users.
 _SCAN_DAILY_MAX = int(os.environ.get("HV_WIZARD_SCAN_DAILY_MAX") or "50")
+# a465 (BRAIN-96): per-endpoint daily quotas for the other paid
+# wizard endpoints. Per Huntova engineering review on
+# cost-governance parity. Each cap protects against slow-burn
+# BYOK drain that stays under the BRAIN-91 per-minute cap but
+# accumulates real spend over hours/days. Env-overridable for
+# power users.
+_PHASE5_DAILY_MAX = int(os.environ.get("HV_WIZARD_PHASE5_DAILY_MAX") or "50")
+_COMPLETE_DAILY_MAX = int(os.environ.get("HV_WIZARD_COMPLETE_DAILY_MAX") or "30")
+_ASSIST_DAILY_MAX = int(os.environ.get("HV_WIZARD_ASSIST_DAILY_MAX") or "200")
 
 # State: {(user_id, utc_date_str): count}. The date suffix in
 # the key is the natural cleanup mechanism — yesterday's keys
@@ -568,6 +577,48 @@ async def _check_scan_daily_quota_async(user_id: int) -> bool:
         # `_check_scan_daily_quota` still applies as the
         # second-tier defense.
         print(f"[QUOTA] durable check failed (non-fatal): {_ms_err}")
+        return False
+    return blocked["value"]
+
+
+# a465 (BRAIN-96): generic durable daily quota helper for paid
+# wizard endpoints. Same atomicity + durability semantics as
+# BRAIN-93's scan helper, parametrized over (bucket_name,
+# daily_max). Counter lives at `_quotas.<bucket_name>` at the
+# settings root so a wizard reset (BRAIN-80) doesn't refund
+# the daily cap. Per Huntova engineering review on
+# cost-governance parity for paid endpoints.
+async def _check_paid_endpoint_quota_async(
+    user_id: int, bucket_name: str, daily_max: int
+) -> bool:
+    """Returns True if the user has exhausted their daily
+    quota for the named bucket. Atomic check + increment via
+    db.merge_settings. Resets on UTC date rollover. Fails open
+    on DB transient errors so infrastructure flakes don't trap
+    a user with a working wallet."""
+    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    blocked = {"value": False, "current": 0}
+
+    def _quota_mutator(cur: dict) -> dict:
+        cur = {**DEFAULT_SETTINGS, **(cur or {})}
+        quotas = dict(cur.get("_quotas") or {})
+        bucket = dict(quotas.get(bucket_name) or {})
+        if bucket.get("date") != today:
+            bucket = {"date": today, "count": 0}
+        if bucket["count"] >= daily_max:
+            blocked["value"] = True
+            blocked["current"] = bucket["count"]
+            return cur  # leave row unchanged
+        bucket["count"] = bucket["count"] + 1
+        blocked["current"] = bucket["count"]
+        quotas[bucket_name] = bucket
+        cur["_quotas"] = quotas
+        return cur
+
+    try:
+        await db.merge_settings(int(user_id), _quota_mutator)
+    except Exception as _ms_err:
+        print(f"[QUOTA] durable check ({bucket_name}) failed (non-fatal): {_ms_err}")
         return False
     return blocked["value"]
 
@@ -8494,6 +8545,20 @@ async def api_wizard_complete(request: Request, user: dict = Depends(require_use
     # engineering review on idempotency.
     if _check_ai_rate(user["id"], bucket="wizard_complete"):
         return JSONResponse({"error": "Too many requests. Wait a moment."}, status_code=429)
+    # a465 fix (BRAIN-96): durable daily quota on complete to
+    # cap slow-burn BYOK drain (parity with BRAIN-93 scan).
+    if await _check_paid_endpoint_quota_async(user["id"], "wizard_complete", _COMPLETE_DAILY_MAX):
+        return JSONResponse(
+            {
+                "error": (
+                    f"You've used your {_COMPLETE_DAILY_MAX} training "
+                    "completions for today. Quota resets at 00:00 UTC."
+                ),
+                "error_kind": "complete_daily_quota_exceeded",
+                "daily_max": _COMPLETE_DAILY_MAX,
+            },
+            status_code=429,
+        )
     body = await request.json()
     raw_profile = body.get("profile", {}) or {}
     raw_history = body.get("history", []) or []
@@ -9434,6 +9499,20 @@ async def api_wizard_generate_phase5(request: Request, user: dict = Depends(requ
     # user real spend on their BYOK key. Same 2-line guard pattern.
     if _check_ai_rate(user["id"], bucket="wizard_phase5"):
         return JSONResponse({"error": "Too many requests. Wait a moment."}, status_code=429)
+    # a465 fix (BRAIN-96): durable daily quota on phase-5 to
+    # cap slow-burn BYOK drain (parity with BRAIN-93 scan).
+    if await _check_paid_endpoint_quota_async(user["id"], "wizard_phase5", _PHASE5_DAILY_MAX):
+        return JSONResponse(
+            {
+                "error": (
+                    f"You've used your {_PHASE5_DAILY_MAX} phase-5 generations "
+                    "for today. Quota resets at 00:00 UTC."
+                ),
+                "error_kind": "phase5_daily_quota_exceeded",
+                "daily_max": _PHASE5_DAILY_MAX,
+            },
+            status_code=429,
+        )
     body = await request.json()
     answers = body.get("answers", {}) or {}
     scan_data = body.get("scanData") or {}
@@ -9686,6 +9765,20 @@ async def api_wizard_assist(request: Request, user: dict = Depends(require_user)
     """AI assistant for the wizard — helps users craft better, more specific answers."""
     if _check_ai_rate(user["id"], bucket="wizard_assist"):
         return JSONResponse({"error": "Too many requests. Wait a moment."}, status_code=429)
+    # a465 fix (BRAIN-96): durable daily quota on assist to
+    # cap slow-burn BYOK drain (parity with BRAIN-93 scan).
+    if await _check_paid_endpoint_quota_async(user["id"], "wizard_assist", _ASSIST_DAILY_MAX):
+        return JSONResponse(
+            {
+                "error": (
+                    f"You've used your {_ASSIST_DAILY_MAX} assist messages "
+                    "for today. Quota resets at 00:00 UTC."
+                ),
+                "error_kind": "assist_daily_quota_exceeded",
+                "daily_max": _ASSIST_DAILY_MAX,
+            },
+            status_code=429,
+        )
     body = await request.json()
     message = (body.get("message") or "").strip()
     # a374 fix (BRAIN-13): clip user-supplied prompt fields. message,
