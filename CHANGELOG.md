@@ -6,6 +6,91 @@ Versioning: `0.1.0aNN` alpha increments. Public install path: `pipx install hunt
 
 ---
 
+## 0.1.0a466 — May 4 2026 — Quota counter writes amplified DB load on phase-5/complete; fold the increment into the existing merge mutator instead of spawning a second write (BRAIN-97)
+
+### Bug fix (BRAIN-97, SQLite write amplification)
+
+BRAIN-93/96 enforced durable daily quotas via
+`_check_paid_endpoint_quota_async`, which called
+`merge_settings` for every successful request. Two of the
+four paid endpoints already do their own `merge_settings`:
+
+- `/api/wizard/generate-phase5` writes `_phase5_questions`
+  (BRAIN-90).
+- `/api/wizard/complete` writes the BRAIN-88 pending-flip
+  mutator + the BRAIN-93 final merge.
+
+For those two, the quota helper added a SECOND merge call per
+request: the user-visible work persisted in one txn, then the
+quota counter persisted in another. SQLite serializes writes;
+under concurrent users this becomes hidden tail latency that's
+correct functionally but slow under load. Standard SQLite
+write-budget guidance: don't add an extra durable write to a
+path that's already performing one.
+
+`/api/wizard/scan` and `/api/wizard/assist` don't currently
+do their own merges, so they keep the standalone helper —
+nothing to fold into.
+
+Fix: split the helper into a read-only check and an
+in-mutator increment.
+
+```python
+async def _read_paid_quota_async(user_id, bucket_name, daily_max):
+    """Read-only check, no DB write. Returns (blocked, count)."""
+    s = await db.get_settings(user_id)
+    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    quotas = (s.get("_quotas") or {})
+    bucket = (quotas.get(bucket_name) or {})
+    if bucket.get("date") != today:
+        return False, 0
+    cur_count = int(bucket.get("count", 0) or 0)
+    return cur_count >= daily_max, cur_count
+
+
+def _paid_quota_inplace(cur_quotas, bucket_name, daily_max, today):
+    """Sync in-mutator increment. Caller folds into their merge."""
+    quotas = dict(cur_quotas or {})
+    bucket = dict(quotas.get(bucket_name) or {})
+    if bucket.get("date") != today:
+        bucket = {"date": today, "count": 0}
+    if bucket["count"] >= daily_max:
+        quotas[bucket_name] = bucket
+        return quotas, (True, bucket["count"])
+    bucket["count"] += 1
+    quotas[bucket_name] = bucket
+    return quotas, (False, bucket["count"])
+```
+
+Endpoints:
+
+- **phase-5**: pre-checks via `_read_paid_quota_async`,
+  returns 429 early if blocked. On success, the increment
+  folds into the existing `_persist_phase5` merge mutator
+  alongside the schema persist.
+- **complete**: pre-checks via `_read_paid_quota_async`,
+  returns 429 early. On success, the increment folds into
+  the BRAIN-88 `_pending_flip_mutator`.
+- **scan + assist**: continue to use
+  `_check_paid_endpoint_quota_async` (single-write semantics
+  — no fold target).
+
+Net DB-write count per successful call:
+
+| Endpoint | Before | After |
+|---|---|---|
+| phase-5 | 2 (quota + persist) | 1 (combined) |
+| complete | 3 (quota + flip + final) | 2 (combined flip + final) |
+| scan | 1 (quota) | 1 |
+| assist | 1 (quota) | 1 |
+
+9 new regression tests in
+`tests/test_wizard_quota_write_folding.py`.
+
+396 of 396 tests passing.
+
+---
+
 ## 0.1.0a465 — May 4 2026 — Phase-5/complete/assist had per-minute caps but no daily quota — slow-burn BYOK drain still possible. Per-endpoint daily quotas added in parity with scan (BRAIN-96)
 
 ### Bug fix (BRAIN-96, cost-governance parity)

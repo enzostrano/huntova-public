@@ -588,6 +588,66 @@ async def _check_scan_daily_quota_async(user_id: int) -> bool:
 # settings root so a wizard reset (BRAIN-80) doesn't refund
 # the daily cap. Per Huntova engineering review on
 # cost-governance parity for paid endpoints.
+# a466 (BRAIN-97): read-only + inplace quota helpers to fold
+# the increment into a caller's existing merge_settings write.
+# Per Huntova engineering review on SQLite write
+# amplification: the standalone async helper adds an extra
+# durable write per request, which is wasteful when the
+# endpoint already writes (phase-5 persists the question
+# schema, complete writes the pending-flip + final merge).
+# This pair separates the check (cheap read) from the
+# increment (folded into the caller's existing mutator).
+async def _read_paid_quota_async(
+    user_id: int, bucket_name: str, daily_max: int
+) -> tuple[bool, int]:
+    """Read-only quota check. Returns `(blocked, current_count)`.
+    No durable write — caller folds the increment into their
+    own merge mutator via `_paid_quota_inplace`. Used by
+    phase-5 + complete (which already write); standalone
+    `_check_paid_endpoint_quota_async` stays the path for
+    scan + assist (no fold target)."""
+    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    try:
+        s = await db.get_settings(int(user_id))
+    except Exception as _e:
+        # Fail-open on infra blips — same posture as the
+        # check-and-consume helper.
+        return False, 0
+    quotas = ((s or {}).get("_quotas") or {})
+    bucket = (quotas.get(bucket_name) or {})
+    if bucket.get("date") != today:
+        return False, 0  # fresh window
+    cur_count = int(bucket.get("count", 0) or 0)
+    return cur_count >= daily_max, cur_count
+
+
+def _paid_quota_inplace(
+    cur_quotas: dict, bucket_name: str, daily_max: int, today: str
+) -> tuple[dict, tuple[bool, int]]:
+    """Synchronous in-mutator quota increment.
+
+    Caller passes the current `_quotas` sub-dict (or `{}` if
+    absent), the bucket name + cap, and today's UTC date
+    string. Returns `(updated_quotas, (blocked, new_count))`.
+    Use this inside a `merge_settings` mutator so the quota
+    increment lands in the same atomic txn as the rest of
+    the endpoint's work — no extra durable write.
+
+    The blocked path leaves `count` unchanged at the cap
+    (does not increment past it).
+    """
+    quotas = dict(cur_quotas or {})
+    bucket = dict(quotas.get(bucket_name) or {})
+    if bucket.get("date") != today:
+        bucket = {"date": today, "count": 0}
+    if bucket["count"] >= daily_max:
+        quotas[bucket_name] = bucket
+        return quotas, (True, bucket["count"])
+    bucket["count"] = bucket["count"] + 1
+    quotas[bucket_name] = bucket
+    return quotas, (False, bucket["count"])
+
+
 async def _check_paid_endpoint_quota_async(
     user_id: int, bucket_name: str, daily_max: int
 ) -> bool:
@@ -8547,7 +8607,13 @@ async def api_wizard_complete(request: Request, user: dict = Depends(require_use
         return JSONResponse({"error": "Too many requests. Wait a moment."}, status_code=429)
     # a465 fix (BRAIN-96): durable daily quota on complete to
     # cap slow-burn BYOK drain (parity with BRAIN-93 scan).
-    if await _check_paid_endpoint_quota_async(user["id"], "wizard_complete", _COMPLETE_DAILY_MAX):
+    # a466 fix (BRAIN-97): use read-only check here; the
+    # actual increment folds into the BRAIN-88 pending-flip
+    # mutator below to avoid an extra DB write per call.
+    _complete_blocked, _complete_count = await _read_paid_quota_async(
+        user["id"], "wizard_complete", _COMPLETE_DAILY_MAX
+    )
+    if _complete_blocked:
         return JSONResponse(
             {
                 "error": (
@@ -8813,6 +8879,17 @@ async def api_wizard_complete(request: Request, user: dict = Depends(require_use
         w.pop("_dna_error", None)
         w.pop("_dna_failed_at", None)
         cur["wizard"] = w
+        # a466 fix (BRAIN-97): fold the BRAIN-96 quota
+        # increment into this same mutator. Saves one DB
+        # write per call vs the standalone async helper.
+        _today_complete = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        _new_quotas, _ = _paid_quota_inplace(
+            cur.get("_quotas") or {},
+            "wizard_complete",
+            _COMPLETE_DAILY_MAX,
+            _today_complete,
+        )
+        cur["_quotas"] = _new_quotas
         return cur
 
     await db.merge_settings(user["id"], _pending_flip_mutator)
@@ -9501,7 +9578,13 @@ async def api_wizard_generate_phase5(request: Request, user: dict = Depends(requ
         return JSONResponse({"error": "Too many requests. Wait a moment."}, status_code=429)
     # a465 fix (BRAIN-96): durable daily quota on phase-5 to
     # cap slow-burn BYOK drain (parity with BRAIN-93 scan).
-    if await _check_paid_endpoint_quota_async(user["id"], "wizard_phase5", _PHASE5_DAILY_MAX):
+    # a466 fix (BRAIN-97): use read-only check here; the
+    # actual increment folds into _persist_phase5's merge
+    # mutator below to avoid an extra DB write.
+    _phase5_blocked, _phase5_count = await _read_paid_quota_async(
+        user["id"], "wizard_phase5", _PHASE5_DAILY_MAX
+    )
+    if _phase5_blocked:
         return JSONResponse(
             {
                 "error": (
@@ -9740,11 +9823,23 @@ NO markdown. NO commentary. JSON array only."""
                     # state-persistence. A wizard reset wipes this
                     # along with everything else (BRAIN-80 full-wipe
                     # already covers it).
+                    # a466 fix (BRAIN-97): fold the BRAIN-96
+                    # quota increment into the same mutator as
+                    # the schema persist. Saves one DB write
+                    # per call vs the standalone async helper.
+                    _today_phase5 = datetime.now(timezone.utc).strftime("%Y-%m-%d")
                     def _persist_phase5(cur: dict) -> dict:
                         cur = {**DEFAULT_SETTINGS, **(cur or {})}
                         _w = dict(cur.get("wizard", {}))
                         _w["_phase5_questions"] = cleaned
                         cur["wizard"] = _w
+                        _new_quotas, _ = _paid_quota_inplace(
+                            cur.get("_quotas") or {},
+                            "wizard_phase5",
+                            _PHASE5_DAILY_MAX,
+                            _today_phase5,
+                        )
+                        cur["_quotas"] = _new_quotas
                         return cur
                     try:
                         await db.merge_settings(user["id"], _persist_phase5)
