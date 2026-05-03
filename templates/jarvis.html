@@ -4382,9 +4382,20 @@ body.hv-has-update-banner{padding-top:var(--hv-update-banner-h, 38px)}
             // a363's Skip fix) then bump qi after a short delay so the
             // user briefly sees the success message before advancing.
             try {
+              // BRAIN-84: forward revision + epoch tokens like the
+              // Continue handler does (BRAIN-68 + BRAIN-83). Without
+              // these, a stale tab whose sibling reset the wizard
+              // would silently resurrect its prefilled scan answers.
+              const _scanBody = { answers: _brainState.answers, phase: q.phase };
+              if (typeof _brainState.revision === 'number') {
+                _scanBody.expected_revision = _brainState.revision;
+              }
+              if (typeof _brainState.epoch === 'number') {
+                _scanBody.expected_epoch = _brainState.epoch;
+              }
               await fetch('/api/wizard/save-progress', {
                 method: 'POST', headers: {'Content-Type':'application/json'},
-                body: JSON.stringify({ answers: _brainState.answers, phase: q.phase }),
+                body: JSON.stringify(_scanBody),
               });
             } catch (_e) {
               // Non-blocking: scan already succeeded client-side. If
@@ -4711,11 +4722,37 @@ body.hv-has-update-banner{padding-top:var(--hv-update-banner-h, 38px)}
       // anyway since Skip is explicitly user-initiated; we don't want
       // to trap them at a stale question if the network blips.
       try {
+        // BRAIN-84: forward revision + epoch tokens. A Skip-without-
+        // tokens write would slip past the BRAIN-68 + BRAIN-81 guards
+        // and let a stale tab resurrect a phase advance into a wizard
+        // that was reset elsewhere.
+        const _skipBody = { answers: _brainState.answers, phase: q.phase };
+        if (typeof _brainState.revision === 'number') {
+          _skipBody.expected_revision = _brainState.revision;
+        }
+        if (typeof _brainState.epoch === 'number') {
+          _skipBody.expected_epoch = _brainState.epoch;
+        }
         const _r = await fetch('/api/wizard/save-progress', {
           method: 'POST', headers: {'Content-Type':'application/json'},
-          body: JSON.stringify({ answers: _brainState.answers, phase: q.phase }),
+          body: JSON.stringify(_skipBody),
         });
-        if (!_r.ok && typeof _toast === 'function') {
+        // Refresh local tokens from successful response so the next
+        // Continue/Skip stays aligned.
+        if (_r.ok) {
+          try {
+            const _d = await _r.json();
+            if (_d && typeof _d.revision === 'number') _brainState.revision = _d.revision;
+            if (_d && typeof _d.epoch === 'number') _brainState.epoch = _d.epoch;
+          } catch (_) {}
+        } else if (_r.status === 410) {
+          // Reset boundary detected — converge to the fresh wizard.
+          if (typeof _toast === 'function') {
+            _toast('Wizard was reset elsewhere. Reloading to start fresh.', 'err');
+          }
+          setTimeout(() => { try { location.reload(); } catch (_) {} }, 1500);
+          return;
+        } else if (typeof _toast === 'function') {
           _toast('Skip not synced — your progression may not survive reload.', 'warn');
         }
       } catch (_e) {

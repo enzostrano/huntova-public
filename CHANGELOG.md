@@ -6,6 +6,49 @@ Versioning: `0.1.0aNN` alpha increments. Public install path: `pipx install hunt
 
 ---
 
+## 0.1.0a453 — May 3 2026 — Skip handler + scan-success post-persist save-progress callsites bypassed BRAIN-83 epoch contract (BRAIN-84)
+
+### Bug fix (BRAIN-84, optimistic-concurrency end-to-end coverage gap)
+
+BRAIN-83 (a452) wired the wizard's Continue handler to forward
+`expected_revision` + `expected_epoch` on every save-progress
+fetch. But the wizard JS has THREE save-progress callsites,
+not one:
+
+1. Continue handler — covered by BRAIN-83.
+2. Scan-success post-persist — fires after URL scan prefills
+   answers; auto-advance writes the prefilled answers before
+   bumping `qi`.
+3. Skip handler — fires when the user clicks Skip without
+   filling the current question.
+
+Pre-fix, callsites 2 and 3 sent only `{answers, phase}` — no
+revision, no epoch. The BRAIN-68 stale-revision guard and the
+BRAIN-81 reset-epoch guard both skipped against those writes. A
+stale tab clicking Skip on a wizard that was reset elsewhere
+silently resurrected its pre-reset answers — exactly the
+failure BRAIN-83 fixed for Continue, but on a different click
+path.
+
+Fix in `templates/jarvis.html`:
+- Scan-success callsite: build the body with `_scanBody` and
+  conditionally include `expected_revision` + `expected_epoch`.
+- Skip callsite: same conditional token forwarding via
+  `_skipBody`. Also refreshes local `_brainState.revision` +
+  `_brainState.epoch` from the successful response. 410
+  response triggers the same auto-reload path as BRAIN-83 in
+  Continue (distinct from generic skip-failed warn toast).
+
+4 new regression tests in
+`tests/test_wizard_skip_and_scan_epoch_propagation.py`. The
+suite enumerates every save-progress callsite and asserts each
+forwards both tokens — so a future fourth callsite cannot
+silently regress the contract.
+
+312 of 312 tests passing.
+
+---
+
 ## 0.1.0a452 — May 3 2026 — Wizard JS captures `wizard_epoch` from `/api/settings` on load + Re-train + sends `expected_epoch` with every save-progress; 410 reset response triggers auto-reload (BRAIN-83)
 
 ### Bug fix (BRAIN-83, optimistic-concurrency end-to-end coverage)
