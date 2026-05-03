@@ -6,6 +6,42 @@ Versioning: `0.1.0aNN` alpha increments. Public install path: `pipx install hunt
 
 ---
 
+## 0.1.0a472 — May 4 2026 — `_phase5_questions` persist boundary trusted upstream cleaner cap; defense-in-depth length cap added (BRAIN-103)
+
+### Bug fix (BRAIN-103, output-validation defense-in-depth)
+
+`_persist_phase5` wrote `_w["_phase5_questions"] = cleaned`
+verbatim — trusting the BRAIN-69 cleaner's `[:5]` slice. The
+contract holds today, but the persist boundary is leaning on
+an upstream guarantee. A future change that loosens the
+cleaner, switches the AI prompt to request more items,
+refactors without preserving the slice, or hits a parser
+regression would silently persist a bloated array.
+
+LLM output handling best practice is defense in depth:
+constrain the model, validate the parsed structure, AND cap
+collection size BEFORE persistence.
+
+Fix:
+
+- New constant `_PHASE5_QUESTIONS_MAX = 5` (env-overridable
+  via `HV_WIZARD_PHASE5_QUESTIONS_MAX`).
+- `_persist_phase5` now writes
+  `_w["_phase5_questions"] = cleaned[:_PHASE5_QUESTIONS_MAX]`.
+- Head-slice preserves the cleaner's ranking — first items
+  are most relevant per AI output order.
+- Belt-and-suspenders: if the cleaner ever regresses to
+  returning >5 items, the persist boundary catches it.
+
+4 new regression tests in
+`tests/test_wizard_phase5_persist_length_cap.py` including a
+behavioral test that fires a 4×-cap oversized payload and
+verifies the persisted list never exceeds the cap.
+
+428 of 428 tests passing.
+
+---
+
 ## 0.1.0a471 — May 4 2026 — Wizard `_knowledge` audit list grew unbounded on every successful complete; 50-entry recent-N cap added (BRAIN-102)
 
 ### Bug fix (BRAIN-102, embedded-array growth)

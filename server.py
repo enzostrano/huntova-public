@@ -512,6 +512,14 @@ _COMPLETE_CACHE_TTL_SECONDS = int(os.environ.get("HV_WIZARD_COMPLETE_CACHE_TTL")
 # × ~2.5KB = ~125KB max bounded inflation per user — generous
 # context for retraining audits without unbounded growth.
 _KNOWLEDGE_LIST_MAX = int(os.environ.get("HV_WIZARD_KNOWLEDGE_LIST_MAX") or "50")
+# a472 (BRAIN-103): hard cap on the persisted phase-5 questions
+# array, defense-in-depth on top of the BRAIN-69 cleaner's
+# `[:5]` slice. Per Huntova engineering review on
+# output-validation: don't trust an upstream guarantee at the
+# persist boundary. 5 matches today's prompt; env-overridable
+# for future schemas. Head-slice preserves the cleaner's
+# ranking — first items are most relevant.
+_PHASE5_QUESTIONS_MAX = int(os.environ.get("HV_WIZARD_PHASE5_QUESTIONS_MAX") or "5")
 
 # State: {(user_id, utc_date_str): count}. The date suffix in
 # the key is the natural cleanup mechanism — yesterday's keys
@@ -9919,7 +9927,12 @@ NO markdown. NO commentary. JSON array only."""
                     def _persist_phase5(cur: dict) -> dict:
                         cur = {**DEFAULT_SETTINGS, **(cur or {})}
                         _w = dict(cur.get("wizard", {}))
-                        _w["_phase5_questions"] = cleaned
+                        # a472 (BRAIN-103): defense-in-depth
+                        # length cap. Head-slice preserves the
+                        # cleaner's ranking; future cleaner
+                        # regression that returns >cap items
+                        # can't bloat the persisted state.
+                        _w["_phase5_questions"] = cleaned[:_PHASE5_QUESTIONS_MAX]
                         cur["wizard"] = _w
                         _new_quotas, _ = _paid_quota_inplace(
                             cur.get("_quotas") or {},
