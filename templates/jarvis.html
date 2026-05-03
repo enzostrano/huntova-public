@@ -3734,6 +3734,11 @@ body.hv-has-update-banner{padding-top:var(--hv-update-banner-h, 38px)}
         if (typeof w._wizard_revision === 'number') {
           _brainState.revision = w._wizard_revision;
         }
+        // BRAIN-83: capture the wizard epoch ratchet so a sibling-tab
+        // reset is detectable. Mismatch on save-progress yields HTTP 410.
+        if (typeof w._wizard_epoch === 'number') {
+          _brainState.epoch = w._wizard_epoch;
+        }
       } catch (_) {}
     }
     $('brainReset').style.display = (Object.keys(_brainState.answers).length ? '' : 'none');
@@ -3787,6 +3792,10 @@ body.hv-has-update-banner{padding-top:var(--hv-update-banner-h, 38px)}
         // BRAIN-68: capture revision on Re-train entry too.
         if (typeof w._wizard_revision === 'number') {
           _brainState.revision = w._wizard_revision;
+        }
+        // BRAIN-83: capture epoch on Re-train entry too.
+        if (typeof w._wizard_epoch === 'number') {
+          _brainState.epoch = w._wizard_epoch;
         }
       } catch (_) {}
       _brainRenderQuestion(body);
@@ -4582,6 +4591,12 @@ body.hv-has-update-banner{padding-top:var(--hv-update-banner-h, 38px)}
         if (typeof _brainState.revision === 'number') {
           _bodyObj.expected_revision = _brainState.revision;
         }
+        // BRAIN-83: forward the wizard epoch so the server can
+        // detect a reset boundary (HTTP 410). Without this, the
+        // BRAIN-81 server-side enforcement is dead code.
+        if (typeof _brainState.epoch === 'number') {
+          _bodyObj.expected_epoch = _brainState.epoch;
+        }
         const _r = await fetch('/api/wizard/save-progress', {
           method: 'POST', headers: {'Content-Type':'application/json'},
           body: JSON.stringify(_bodyObj),
@@ -4593,16 +4608,30 @@ body.hv-has-update-banner{padding-top:var(--hv-update-banner-h, 38px)}
         _saveOk = _r.ok;
         // BRAIN-68: track the post-save revision so the next
         // save from this tab doesn't false-409 on its own write.
+        // BRAIN-83: also track post-save epoch so we stay aligned.
         if (_saveOk) {
           try {
             const _d = await _r.json();
             if (_d && typeof _d.revision === 'number') {
               _brainState.revision = _d.revision;
             }
+            if (_d && typeof _d.epoch === 'number') {
+              _brainState.epoch = _d.epoch;
+            }
           } catch (_) {}
         }
         if (!_saveOk) {
-          if (_r.status === 409) {
+          if (_r.status === 410) {
+            // BRAIN-83: wizard reset detected (epoch mismatch).
+            // Distinct from 409 stale-revision: local state is
+            // gone for good and we must reload to converge.
+            navStatus.textContent = '↻ Wizard was reset — reloading';
+            navStatus.className = 'row-status err';
+            if (typeof _toast === 'function') {
+              _toast('Wizard was reset elsewhere. Reloading to start fresh.', 'err');
+            }
+            setTimeout(() => { try { location.reload(); } catch (_) {} }, 1500);
+          } else if (_r.status === 409) {
             // BRAIN-68: distinct toast for the multi-tab race.
             // Generic "Save failed — Retry" would loop forever
             // because the stale revision keeps mismatching. The

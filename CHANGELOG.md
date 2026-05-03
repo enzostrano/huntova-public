@@ -6,6 +6,43 @@ Versioning: `0.1.0aNN` alpha increments. Public install path: `pipx install hunt
 
 ---
 
+## 0.1.0a452 — May 3 2026 — Wizard JS captures `wizard_epoch` from `/api/settings` on load + Re-train + sends `expected_epoch` with every save-progress; 410 reset response triggers auto-reload (BRAIN-83)
+
+### Bug fix (BRAIN-83, optimistic-concurrency end-to-end coverage)
+
+BRAIN-81 (a447) added `_wizard_epoch` server-side and made
+`/api/wizard/save-progress` accept `expected_epoch` with a
+distinct HTTP 410 + `error_kind: "wizard_reset"` mismatch
+response. But the client wizard JS only captured
+`_wizard_revision` — never `_wizard_epoch`. End-to-end
+optimistic concurrency requires the client to capture the
+token on every load, forward it on every write, and update
+from every successful response.
+
+Pre-fix: a stale tab whose sibling reset the wizard would
+post save-progress with a current revision but no epoch
+token. Server's epoch guard skipped (no `expected_epoch`
+provided), and the stale write landed against the freshly
+reset wizard — exactly the failure BRAIN-81 was meant to
+prevent.
+
+Fix in `templates/jarvis.html`:
+- Initial wizard load (`/api/settings`) now captures
+  `w._wizard_epoch` into `_brainState.epoch`.
+- Re-train entry path captures it too.
+- Continue handler's save-progress fetch body includes
+  `expected_epoch: _brainState.epoch` when known.
+- Successful response refreshes `_brainState.epoch` from
+  the returned `epoch` field.
+- 410 response triggers a distinct "Wizard was reset —
+  reloading" toast and auto-reload after 1.5s. Distinct
+  from the 409 stale-revision retry path.
+
+5 new regression tests in
+`tests/test_wizard_client_epoch_propagation.py`.
+
+---
+
 ## 0.1.0a451 — May 3 2026 — Chat dispatcher's `sequence_run` action with dry_run=False (live cold-email blast) trusted AI parse; prompt-injected lead notes / inbox replies could fire real follow-up sends without user intent
 
 ### Bug fix (CHAT-4, chat-dispatcher prompt-injection sweep — highest-stakes action)
