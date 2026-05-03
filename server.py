@@ -11758,7 +11758,24 @@ async def admin_clear_sessions(user_id: int, request: Request, user: dict = Depe
 
 @app.post("/api/ops/users/{user_id}/wizard/reset")
 async def admin_wizard_reset(user_id: int, request: Request, user: dict = Depends(require_admin)):
-    """Reset wizard/hunt profile. Does NOT touch leads, billing, or identity."""
+    """Reset wizard/hunt profile. Does NOT touch leads, billing, or identity.
+
+    a464 fix (BRAIN-95): parity with the user-facing
+    /api/wizard/reset (BRAIN-80 + BRAIN-81). Pre-fix:
+    - Used db.save_settings (non-atomic; raced with concurrent
+      agent thread / save-progress / DNA closure writers).
+    - Did NOT bump _wizard_epoch — stale tabs from before the
+      admin reset would keep their old epoch token, the
+      server's epoch never advanced, and stale-tab writes
+      could resurrect pre-reset answers (the exact scenario
+      BRAIN-81 fixed for the user reset).
+    Now: mirrors the user reset's mutator (full-wipe of the
+    wizard sub-object + epoch carry-and-bump) under
+    merge_settings. Stale tabs that send save-progress with
+    expected_epoch=E_old now correctly hit HTTP 410 with
+    error_kind: "wizard_reset" and reload.
+    Per Huntova engineering review on reset generation parity.
+    """
     if _check_admin_mutator_rate(user["id"]):
         return JSONResponse({"ok": False, "error": "rate_limited"}, status_code=429)
     body = await request.json()
@@ -11766,11 +11783,22 @@ async def admin_wizard_reset(user_id: int, request: Request, user: dict = Depend
     target = await db.get_user_by_id(user_id)
     if not target:
         return JSONResponse({"ok": False, "error": "User not found"}, status_code=404)
-    s = await db.get_settings(user_id)
-    old_wizard = s.get("wizard", {})
-    # Clear wizard training state
-    s["wizard"] = {}
-    await db.save_settings(user_id, s)
+    # Snapshot the prior wizard for the audit-log payload BEFORE
+    # the merge wipes it.
+    _pre_snap = await db.get_settings(user_id)
+    old_wizard = (_pre_snap or {}).get("wizard", {}) or {}
+
+    def _admin_reset_mutator(cur: dict) -> dict:
+        cur = {**DEFAULT_SETTINGS, **(cur or {})}
+        # Carry + bump _wizard_epoch across the full wipe so
+        # stale clients see a generation change. Same pattern
+        # as the user-facing reset's _reset_mutator (BRAIN-81).
+        _prior_w = cur.get("wizard") or {}
+        _prior_epoch = int(_prior_w.get("_wizard_epoch", 0) or 0)
+        cur["wizard"] = {"_wizard_epoch": _prior_epoch + 1}
+        return cur
+
+    await db.merge_settings(user_id, _admin_reset_mutator)
     await db.log_admin_action(user["id"], user_id, "wizard_reset", {
         "reason": reason,
         "had_brain": bool(old_wizard.get("normalized_hunt_profile")),

@@ -6,6 +6,62 @@ Versioning: `0.1.0aNN` alpha increments. Public install path: `pipx install hunt
 
 ---
 
+## 0.1.0a464 — May 4 2026 — Admin wizard reset didn't bump `_wizard_epoch` and used non-atomic save_settings; stale tabs survived admin resets and concurrent agent threads could race in stale state (BRAIN-95)
+
+### Bug fix (BRAIN-95, reset generation parity)
+
+The user-facing `/api/wizard/reset` (BRAIN-80 + BRAIN-81)
+did two things atomically: full-wipe the wizard sub-object
+AND bump `_wizard_epoch` (carried forward across the wipe).
+The epoch bump is what makes stale tabs from before the
+reset hit a clean HTTP 410 with `error_kind: "wizard_reset"`
+on their next save-progress.
+
+The admin reset (`/api/ops/users/{id}/wizard/reset`) was a
+parallel implementation that:
+
+1. Used `db.save_settings(...)` — non-atomic. Concurrent
+   writers (agent thread bumping `_last_trained` mid-hunt,
+   save-progress finishing late, DNA gen closure) could
+   race in stale state. Same bug class BRAIN-6 (a347)
+   migrated everything else away from, just on this code path.
+2. Did NOT bump `_wizard_epoch`. Stale tabs from before the
+   admin reset kept their `expected_epoch=E_old`, the
+   server's epoch hadn't moved, the BRAIN-81 guard skipped,
+   and stale-tab writes resurrected pre-reset answers into
+   the freshly-cleared wizard.
+
+Optimistic-concurrency invariant: every reset path must
+advance the same generation token, otherwise stale clients
+survive resets.
+
+Fix: refactor `admin_wizard_reset` to use a `_admin_reset_mutator`
+that mirrors the user reset's mutator under `db.merge_settings`:
+
+```python
+def _admin_reset_mutator(cur):
+    cur = {**DEFAULT_SETTINGS, **(cur or {})}
+    _prior_w = cur.get("wizard") or {}
+    _prior_epoch = int(_prior_w.get("_wizard_epoch", 0) or 0)
+    cur["wizard"] = {"_wizard_epoch": _prior_epoch + 1}
+    return cur
+
+await db.merge_settings(user_id, _admin_reset_mutator)
+```
+
+Identical to the user reset's epoch carry-and-bump pattern.
+Audit-log preserves the `reason` + pre-reset `had_brain` /
+`had_dossier` / `archetype_was` payload (snapshotted BEFORE
+the merge wipes the wizard). Operator accountability
+unchanged.
+
+5 new regression tests in
+`tests/test_admin_wizard_reset_epoch.py`.
+
+377 of 377 tests passing.
+
+---
+
 ## 0.1.0a463 — May 4 2026 — Behavioral race-safety regression guards on the BRAIN-93 durable scan quota; verified atomic check-and-increment under 20-way concurrency (BRAIN-94)
 
 ### Bug fix (BRAIN-94, regression-prevention guards on quota concurrency)
