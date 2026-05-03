@@ -6,6 +6,68 @@ Versioning: `0.1.0aNN` alpha increments. Public install path: `pipx install hunt
 
 ---
 
+## 0.1.0a460 — May 4 2026 — Wizard endpoints shared one user-scoped rate bucket; fast typists self-DoS'd their own assist + scan calls. Per-route buckets restore fairness (BRAIN-91)
+
+### Bug fix (BRAIN-91, rate-limiter fairness)
+
+Pre-fix, every wizard endpoint shared `_check_ai_rate(user_id)`
+— one user-scoped bucket capped at 20 calls / 60s. The
+endpoints have wildly heterogeneous costs:
+
+- `/api/wizard/save-progress` is cheap (DB write) but fires
+  on every Continue / Skip / Back click.
+- `/api/wizard/scan` runs a 200-page crawl + ~$0.05 of AI.
+- `/api/wizard/generate-phase5` spends real BYOK on AI
+  question generation.
+- `/api/wizard/assist` is medium-cost AI chat.
+- `/api/wizard/complete` is rare but expensive (brain +
+  dossier + DNA).
+- `/api/wizard/reset` is cheap.
+
+A user typing fast through the wizard could fire 20+
+save-progress writes in a minute (Continue every 1.5s) and
+hit the cap, then be denied a single subsequent assist or
+scan request — self-DoS by the same protection mechanism
+meant to prevent abuse.
+
+Standard fix per token-bucket guidance: per-route buckets
+isolate cost classes. The protection mechanism stays effective
+against actual abuse without degrading normal use.
+
+Fix:
+
+- `_check_ai_rate(user_id, bucket="ai")` now accepts a bucket
+  argument. Default is "ai" (60s / 20 calls) so non-wizard
+  callsites preserve their pre-BRAIN-91 behavior.
+- New `_RATE_BUCKETS` config:
+  - `wizard_save_progress`: 60s / 90 (high-frequency,
+    low-cost — generous so normal navigation never
+    self-throttles).
+  - `wizard_scan`: 60s / 8 (expensive crawl + AI).
+  - `wizard_phase5`: 60s / 8 (expensive AI generation).
+  - `wizard_complete`: 60s / 6 (expensive brain build).
+  - `wizard_assist`: 60s / 30 (medium AI chat).
+  - `wizard_reset`: 60s / 10 (cheap one-shot).
+  - `wizard_status`: 60s / 120 (cheap one-shot).
+- All six wizard endpoints (`scan`, `complete`, `reset`,
+  `save-progress`, `generate-phase5`, `assist`) now pass
+  their named bucket.
+- Per-bucket cleanup loop replaces the old single-dict
+  cleanup; preserves the BRAIN-40 lock to keep
+  thread-pool-dispatched handlers safe.
+- Backward-compat: bare `_ai_rate` reads/writes still work
+  via a thin view class pointing at the legacy bucket.
+
+9 new regression tests in
+`tests/test_wizard_per_endpoint_rate_buckets.py` — including
+behavioral isolation tests (exhaust scan; assert
+save-progress + assist still pass) and source-level checks
+that each endpoint passes its bucket name.
+
+357 of 357 tests passing.
+
+---
+
 ## 0.1.0a459 — May 4 2026 — Phase-5 dynamic question schema lived only in client memory; reload orphaned `p5_*` answers — values without prompts (BRAIN-90)
 
 ### Bug fix (BRAIN-90, dynamic-form state-persistence)

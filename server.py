@@ -384,36 +384,91 @@ app.add_middleware(CSRFMiddleware)
 
 
 # ── AI endpoint rate limiter (separate from auth rate limiter) ──
-_ai_rate: dict[int, list] = {}  # user_id -> [timestamp, ...]
-AI_RATE_WINDOW = 60   # 1 minute
-AI_RATE_MAX = 20      # max 20 AI calls per minute per user
-_ai_rate_cleanup = 0.0
+# a460 (BRAIN-91): per-route buckets per Huntova engineering
+# review on rate-limiter fairness. Pre-fix, a single shared
+# user-scoped bucket caused self-DoS — a fast typist clicking
+# Continue 20 times in a minute starved out their own
+# subsequent /api/wizard/scan or /api/wizard/assist calls.
+# Cheap high-frequency endpoints get generous caps; expensive
+# ones get strict caps that protect the user's BYOK wallet.
+AI_RATE_WINDOW = 60   # legacy default (1 minute)
+AI_RATE_MAX = 20      # legacy default (20 calls / window)
+
+# Bucket configs: {bucket_name: (window_seconds, max_calls)}.
+# Default ("ai") matches the pre-BRAIN-91 limit so non-wizard
+# callsites keep their existing behavior.
+_RATE_BUCKETS = {
+    "ai": (60, 20),                     # legacy default
+    "wizard_save_progress": (60, 90),   # high-frequency, low-cost
+    "wizard_scan": (60, 8),             # 200-page crawl + AI summary
+    "wizard_phase5": (60, 8),           # AI question generation
+    "wizard_complete": (60, 6),         # brain + dossier + DNA
+    "wizard_assist": (60, 30),          # AI chat refinement
+    "wizard_reset": (60, 10),           # cheap one-shot
+    "wizard_status": (60, 120),         # cheap one-shot
+}
+
+_rate_state: dict[str, dict[int, list]] = {}  # bucket -> user_id -> [timestamps]
+_rate_state_cleanup = 0.0
 # a401 fix (BRAIN-40): lock for the rate-limiter dict. FastAPI dispatches
 # sync handlers via a threadpool — concurrent AI requests from different
-# users would race on _ai_rate.items() iteration during the periodic
-# cleanup, occasionally raising `RuntimeError: dictionary changed size
-# during iteration`. Per Huntova review on shared-state contamination.
+# users would race on dict iteration during the periodic cleanup,
+# occasionally raising `RuntimeError: dictionary changed size during
+# iteration`. Per Huntova review on shared-state contamination.
 _ai_rate_lock = threading.Lock()
 
-def _check_ai_rate(user_id: int) -> bool:
-    """Returns True if AI request should be blocked."""
-    global _ai_rate_cleanup
+
+def _check_ai_rate(user_id: int, bucket: str = "ai") -> bool:
+    """Returns True if the request should be blocked.
+
+    BRAIN-91: per-route buckets. Each bucket has its own
+    (window, cap) and isolated per-user counter — heavy
+    scan/phase-5 traffic doesn't starve lightweight assist /
+    save-progress flows. Backward-compatible: callers without a
+    bucket arg get the legacy "ai" bucket (60s / 20 calls).
+    """
+    global _rate_state_cleanup
     now = time.time()
+    window, max_calls = _RATE_BUCKETS.get(bucket) or (AI_RATE_WINDOW, AI_RATE_MAX)
     with _ai_rate_lock:
-        # Periodic cleanup to prevent memory leak (every 5 minutes)
-        if now - _ai_rate_cleanup > 300:
-            _ai_rate_cleanup = now
-            stale = [k for k, v in _ai_rate.items() if not v or (now - v[-1]) > AI_RATE_WINDOW]
-            for k in stale:
-                _ai_rate.pop(k, None)
-        attempts = _ai_rate.get(user_id, [])
-        attempts = [t for t in attempts if now - t < AI_RATE_WINDOW]
-        if len(attempts) >= AI_RATE_MAX:
-            _ai_rate[user_id] = attempts
+        if now - _rate_state_cleanup > 300:
+            _rate_state_cleanup = now
+            for _b_name, _b_state in list(_rate_state.items()):
+                _b_window = (_RATE_BUCKETS.get(_b_name) or (AI_RATE_WINDOW, AI_RATE_MAX))[0]
+                stale = [
+                    k for k, v in _b_state.items()
+                    if not v or (now - v[-1]) > _b_window
+                ]
+                for k in stale:
+                    _b_state.pop(k, None)
+        bucket_state = _rate_state.setdefault(bucket, {})
+        attempts = bucket_state.get(user_id, [])
+        attempts = [t for t in attempts if now - t < window]
+        if len(attempts) >= max_calls:
+            bucket_state[user_id] = attempts
             return True
         attempts.append(now)
-        _ai_rate[user_id] = attempts
+        bucket_state[user_id] = attempts
         return False
+
+
+# Backward-compat: pre-BRAIN-91 callsites or tests may reference
+# the bare `_ai_rate` dict. View it as the legacy bucket state so
+# external readers don't break.
+class _AiRateLegacyView:
+    def __getitem__(self, k):
+        return _rate_state.setdefault("ai", {}).get(k, [])
+    def __setitem__(self, k, v):
+        _rate_state.setdefault("ai", {})[k] = v
+    def get(self, k, default=None):
+        return _rate_state.setdefault("ai", {}).get(k, default if default is not None else [])
+    def items(self):
+        return _rate_state.setdefault("ai", {}).items()
+    def pop(self, k, default=None):
+        return _rate_state.setdefault("ai", {}).pop(k, default)
+
+
+_ai_rate = _AiRateLegacyView()
 
 
 # Mount static files
@@ -8204,7 +8259,7 @@ def _is_safe_url(url: str) -> bool:
 
 @app.post("/api/wizard/scan")
 async def api_wizard_scan(request: Request, user: dict = Depends(require_user)):
-    if _check_ai_rate(user["id"]):
+    if _check_ai_rate(user["id"], bucket="wizard_scan"):
         return JSONResponse({"error": "Too many scan requests. Wait a moment."}, status_code=429)
     body = await request.json()
     url = (body.get("url") or "").strip()
@@ -8313,7 +8368,7 @@ async def api_wizard_complete(request: Request, user: dict = Depends(require_use
     # double-click on the Complete-training button fired all of that
     # twice, costing 2× spend and racing the DNA write. Per Huntova engineering
     # engineering review on idempotency.
-    if _check_ai_rate(user["id"]):
+    if _check_ai_rate(user["id"], bucket="wizard_complete"):
         return JSONResponse({"error": "Too many requests. Wait a moment."}, status_code=429)
     body = await request.json()
     raw_profile = body.get("profile", {}) or {}
@@ -9008,7 +9063,7 @@ async def api_wizard_reset(request: Request, user: dict = Depends(require_user))
     (agent thread, save-progress, DNA gen closure) can't race
     in stale state.
     """
-    if _check_ai_rate(user["id"]):
+    if _check_ai_rate(user["id"], bucket="wizard_reset"):
         return JSONResponse({"ok": False, "error": "Too many requests. Wait a moment."}, status_code=429)
 
     def _reset_mutator(cur: dict) -> dict:
@@ -9049,7 +9104,7 @@ async def api_wizard_save_progress(request: Request, user: dict = Depends(requir
     # this, a chatty client (or bot) can hammer the wizard JSON column
     # with rapid writes, ballooning the user_settings row + thrashing
     # SQLite's WAL.
-    if _check_ai_rate(user["id"]):
+    if _check_ai_rate(user["id"], bucket="wizard_save_progress"):
         return JSONResponse({"error": "Too many saves. Wait a moment."}, status_code=429)
     body = await request.json()
     answers = body.get("answers", {})
@@ -9253,7 +9308,7 @@ async def api_wizard_generate_phase5(request: Request, user: dict = Depends(requ
     # overlooked, so a double-click on the "Generate phase 5" button or
     # any chatty client could fire duplicate AI calls — each costs the
     # user real spend on their BYOK key. Same 2-line guard pattern.
-    if _check_ai_rate(user["id"]):
+    if _check_ai_rate(user["id"], bucket="wizard_phase5"):
         return JSONResponse({"error": "Too many requests. Wait a moment."}, status_code=429)
     body = await request.json()
     answers = body.get("answers", {}) or {}
@@ -9505,7 +9560,7 @@ NO markdown. NO commentary. JSON array only."""
 @app.post("/api/wizard/assist")
 async def api_wizard_assist(request: Request, user: dict = Depends(require_user)):
     """AI assistant for the wizard — helps users craft better, more specific answers."""
-    if _check_ai_rate(user["id"]):
+    if _check_ai_rate(user["id"], bucket="wizard_assist"):
         return JSONResponse({"error": "Too many requests. Wait a moment."}, status_code=429)
     body = await request.json()
     message = (body.get("message") or "").strip()
