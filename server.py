@@ -9471,6 +9471,31 @@ NO markdown. NO commentary. JSON array only."""
                 # response with a broken wizard. Fail closed if too
                 # many items got dropped.
                 if len(cleaned) >= 3:
+                    # a459 fix (BRAIN-90): persist the cleaned schema
+                    # alongside the wizard state. Without this, the
+                    # questions live only in the client's
+                    # `_BRAIN_QUESTIONS` array — reload re-renders
+                    # the 9 base questions, the p5_* answers from
+                    # _wizard_answers orphan, and brain build /
+                    # dossier / assist see values without prompts.
+                    # Per Huntova engineering review on dynamic-form
+                    # state-persistence. A wizard reset wipes this
+                    # along with everything else (BRAIN-80 full-wipe
+                    # already covers it).
+                    def _persist_phase5(cur: dict) -> dict:
+                        cur = {**DEFAULT_SETTINGS, **(cur or {})}
+                        _w = dict(cur.get("wizard", {}))
+                        _w["_phase5_questions"] = cleaned
+                        cur["wizard"] = _w
+                        return cur
+                    try:
+                        await db.merge_settings(user["id"], _persist_phase5)
+                    except Exception as _ms_err:
+                        # Non-fatal: the questions still ship to the
+                        # client in this response, so the immediate
+                        # session works. Reload-survival is the only
+                        # thing degraded.
+                        print(f"[WIZARD] phase-5 schema persist failed (non-fatal): {_ms_err}")
                     return {"ok": True, "questions": cleaned}
         return JSONResponse({"ok": False, "error": "Could not generate questions"}, status_code=500)
     except Exception:
@@ -9851,6 +9876,12 @@ async def api_wizard_status(user: dict = Depends(require_user)):
         # uses this on reload so backward navigation survives.
         # Falls back to phase for legacy state without cursor.
         "wizard_cursor": int(w.get("_wizard_cursor", w.get("_wizard_phase", 0)) or 0),
+        # a459 (BRAIN-90): persisted phase-5 dynamic question
+        # schema so the client can rehydrate `_BRAIN_QUESTIONS`
+        # on reload without re-spending on a fresh
+        # generate-phase5 call. Empty list for users who never
+        # reached phase-5 or whose wizard was reset.
+        "phase5_questions": w.get("_phase5_questions") if isinstance(w.get("_phase5_questions"), list) else [],
     }
 
 

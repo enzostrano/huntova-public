@@ -3745,6 +3745,31 @@ body.hv-has-update-banner{padding-top:var(--hv-update-banner-h, 38px)}
         if (typeof w._wizard_epoch === 'number') {
           _brainState.epoch = w._wizard_epoch;
         }
+        // BRAIN-90: rehydrate persisted phase-5 dynamic questions so
+        // p5_* answers don't orphan on reload. Server-stored schema
+        // is the source of truth; client array is rebuilt from it
+        // (after trimming any leftover phase-5 from a prior render).
+        if (Array.isArray(w._phase5_questions) && w._phase5_questions.length) {
+          if (_BRAIN_QUESTIONS.length > _BRAIN_QUESTIONS_BASE_LEN) {
+            _BRAIN_QUESTIONS.length = _BRAIN_QUESTIONS_BASE_LEN;
+          }
+          _brainState.phase5Tried = true;
+          for (let _i = 0; _i < w._phase5_questions.length; _i++) {
+            const _ai = w._phase5_questions[_i] || {};
+            const _id = 'p5_' + (_BRAIN_QUESTIONS.length + 1);
+            const _isMulti = _ai.type === 'multi_select';
+            const _isSingle = _ai.type === 'single_select';
+            _BRAIN_QUESTIONS.push({
+              id: _id,
+              phase: 9,
+              type: _isMulti ? 'chips' : (_isSingle ? 'select' : 'textarea'),
+              options: Array.isArray(_ai.options) ? _ai.options.map(o => _isSingle ? [o, o] : o) : null,
+              placeholder: _ai.placeholder || '',
+              required: false,
+              label: _ai.question || 'AI deep-dive',
+            });
+          }
+        }
       } catch (_) {}
     }
     $('brainReset').style.display = (Object.keys(_brainState.answers).length ? '' : 'none');

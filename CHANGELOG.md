@@ -6,6 +6,52 @@ Versioning: `0.1.0aNN` alpha increments. Public install path: `pipx install hunt
 
 ---
 
+## 0.1.0a459 — May 4 2026 — Phase-5 dynamic question schema lived only in client memory; reload orphaned `p5_*` answers — values without prompts (BRAIN-90)
+
+### Bug fix (BRAIN-90, dynamic-form state-persistence)
+
+`/api/wizard/generate-phase5` returned the cleaned question
+schema in the HTTP response only. The wizard JS pushed the
+items into the in-memory `_BRAIN_QUESTIONS` array; the user
+answered them; save-progress wrote the answers under `p5_*`
+keys to `_wizard_answers`.
+
+On reload, `_BRAIN_QUESTIONS` reset to the 9 base questions.
+The server returned `_wizard_answers` containing `p5_1`,
+`p5_2`, … but the wizard never re-fetched generate-phase5 (AI
+costs money + would generate different questions). The user
+saw their wizard advance through the 9 base questions while
+the `p5_*` answers existed in storage with no associated
+prompts. Brain build, dossier, and assist all interpolated
+the values without their questions — ambiguous semantics.
+
+Fix: persist the cleaned phase-5 schema server-side so the
+client can rehydrate `_BRAIN_QUESTIONS` on reload.
+
+- `/api/wizard/generate-phase5` now calls `merge_settings`
+  with a `_persist_phase5` mutator that writes
+  `_phase5_questions = cleaned` to the wizard blob (atomic).
+  Persist failure is logged + non-fatal — the immediate
+  session works; only reload-survival degrades.
+- `/api/wizard/status` exposes `phase5_questions` (empty list
+  when absent or invalid shape).
+- Client load path (initial wizard entry) reads
+  `w._phase5_questions`, trims any leftover phase-5 entries
+  from a prior render, sets `_brainState.phase5Tried = true`,
+  and rebuilds `_BRAIN_QUESTIONS` from the persisted schema —
+  same shape as the live render path so prefills, multi/
+  single select rendering, and answer wiring all match.
+
+A wizard reset (BRAIN-80) clears `_phase5_questions` along
+with everything else via the existing full-wipe semantics.
+
+5 new regression tests in
+`tests/test_wizard_phase5_persisted.py`.
+
+348 of 348 tests passing.
+
+---
+
 ## 0.1.0a458 — May 4 2026 — BRAIN-85 idempotency fingerprint could short-circuit when derived artifacts (brain/dossier) were missing; defense-in-depth at both read + write boundary (BRAIN-89)
 
 ### Bug fix (BRAIN-89, idempotency-key atomicity)
