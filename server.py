@@ -8225,6 +8225,22 @@ def _coerce_wizard_answer(key: str, value):
     """Validate + coerce a single wizard answer to its schema-
     declared shape. Returns the cleaned value, or `_WIZARD_DROP`
     sentinel meaning the field must be dropped from the merge."""
+    # a468 fix (BRAIN-99): underscore-prefixed keys are the
+    # SERVER-OWNED namespace — never client-bindable. Per
+    # Huntova engineering review on OWASP mass-assignment /
+    # Object Property Manipulation. The schema does declare
+    # several `_*` keys (`_wizard_phase`, `_wizard_revision`,
+    # `_wizard_epoch`, `_wizard_cursor`, `_train_count`, etc.)
+    # because the SERVER's own mutator code writes them via
+    # direct assignment in the merge txn. But this helper is
+    # only called for CLIENT-supplied keys flowing through
+    # save-progress — those must never bind underscore fields.
+    # Allowlist semantics, not blocklist: a future server-owned
+    # field added with a leading underscore is automatically
+    # un-bindable from save-progress, no _PROTECTED_KEYS list
+    # to maintain.
+    if key.startswith("_"):
+        return _WIZARD_DROP
     # Phase-5 dynamic keys: AI-generated p5_1, p5_2 etc. are
     # always treated as scalar strings (or list-of-string for
     # multi_select). Default to str.

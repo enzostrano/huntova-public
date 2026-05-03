@@ -6,6 +6,82 @@ Versioning: `0.1.0aNN` alpha increments. Public install path: `pipx install hunt
 
 ---
 
+## 0.1.0a468 — May 4 2026 — Client save-progress could mass-assign server-owned underscore-prefixed control fields; allowlist enforcement closes the OWASP Object Property Manipulation hole (BRAIN-99)
+
+### Bug fix (BRAIN-99, mass-assignment / Object Property Manipulation)
+
+The BRAIN-73 `_WIZARD_FIELD_SCHEMA` declared several
+underscore-prefixed control fields with type entries
+(`_wizard_phase`, `_wizard_revision`, `_wizard_epoch`,
+`_wizard_cursor`, `_wizard_confidence`, `_train_count`,
+`_last_trained`, etc.). Those entries existed because the
+SERVER'S OWN mutator code writes them via direct assignment
+in atomic merge transactions.
+
+But `_coerce_wizard_answer` is also called for CLIENT-supplied
+keys flowing through `_merge_wizard_answers` from
+`/api/wizard/save-progress`. So a sloppy or malicious payload
+like:
+
+```json
+{"answers": {
+  "_wizard_phase": 999,
+  "_wizard_revision": 0,
+  "_wizard_epoch": 0,
+  "_wizard_cursor": -1,
+  "_train_count": 0,
+  "_last_complete_fingerprint": "attacker-controlled",
+  "_dna_state": "ready"
+}}
+```
+
+would bind through. The integer-typed schema entries
+coerce successfully. The fields land in `_wizard_answers`,
+poisoning:
+
+- BRAIN-85 idempotency cache (fingerprint poison → next
+  submit short-circuits with attacker's value).
+- BRAIN-78 DNA state machine (`_dna_state` flipped to
+  "ready" without a real DNA build).
+- BRAIN-81 reset epoch (un-bumped → reset boundary
+  detection broken).
+- BRAIN-87 cursor (negative or out-of-range view position).
+- BRAIN-14 revision token (collide with real save races).
+- `_train_count` audit counter (zeroed → audit trail erased).
+
+OWASP Object Property Manipulation guidance: allowlist
+client-bindable fields, don't blocklist protected ones.
+Blocklists drift — new server-owned fields added by future
+patches need to remember to update `_PROTECTED_KEYS`.
+Allowlists fail-closed by default.
+
+Fix: `_coerce_wizard_answer` now rejects ANY key starting
+with `_` regardless of schema entry. Underscore-prefix is the
+server-owned namespace — every future control field added
+with a leading underscore is automatically un-bindable from
+client paths, no `_PROTECTED_KEYS` list to maintain.
+
+```python
+if key.startswith("_"):
+    return _WIZARD_DROP
+```
+
+The 5-character guard at the top of the helper closes the
+mass-assignment hole. The schema's underscore entries stay
+(they're consumed by the schema's other downstream readers).
+The server's own mutator code keeps writing those fields
+directly — that path doesn't go through `_coerce_wizard_answer`.
+
+Phase-5 dynamic keys (`p5_*`) are letter-prefixed and
+unaffected.
+
+5 new regression tests in
+`tests/test_wizard_underscore_fields_unbindable.py`.
+
+407 of 407 tests passing.
+
+---
+
 ## 0.1.0a467 — May 4 2026 — `_wizard_answers` had per-field caps but no aggregate key-count cap — many-small-fields payloads bloated the row + slowed every downstream consumer (BRAIN-98)
 
 ### Bug fix (BRAIN-98, aggregate payload bounding)
