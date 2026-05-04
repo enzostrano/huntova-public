@@ -16,6 +16,7 @@ import threading
 import time
 import csv
 import io
+import unicodedata
 from datetime import datetime, timezone, timedelta
 from urllib.parse import urlparse, parse_qsl
 
@@ -9510,6 +9511,52 @@ _CANONICAL_UNORDERED_LIST_FIELDS = frozenset({
 })
 
 
+# a512 (BRAIN-137): invisible-Unicode strip set for the canonicalizer.
+# BRAIN-86 already collapsed whitespace + sorted unordered lists, but
+# BOM (U+FEFF), zero-width spaces (U+200B-U+200D), word joiner
+# (U+2060), bidi direction marks (U+200E/U+200F/U+202A-U+202E/
+# U+2066-U+2069), line/paragraph separators (U+2028/U+2029), and
+# ASCII control chars all survive `str.split()`. Two payloads
+# semantically identical except for a stray BOM at byte zero — or a
+# zero-width space some terminal helpfully inserted — would hash to
+# different fingerprints, defeating the BRAIN-85 idempotent
+# short-circuit and re-spending the user's BYOK allowance on a
+# duplicate request. We strip rather than space-replace because these
+# code points are ALL semantically null (invisible / zero-width).
+# \t/\n/\r are intentionally NOT stripped: `str.split()` treats them
+# as whitespace and collapses them naturally.
+_INVISIBLE_UNICODE_RE = re.compile(
+    "["
+    "\u0000-\u0008"   # NUL through BS
+    "\u000b\u000c"    # VT, FF (skips TAB \t, LF \n, CR \r)
+    "\u000e-\u001f"   # SO through US
+    "\u007f"           # DEL
+    "\u200b-\u200f"   # ZWSP, ZWNJ, ZWJ, LRM, RLM
+    "\u2028\u2029"    # LINE / PARAGRAPH SEPARATOR
+    "\u202a-\u202e"   # LRE, RLE, PDF, LRO, RLO (bidi overrides)
+    "\u2060-\u2064"   # WJ, function application, invisible times/sep/plus
+    "\u2066-\u2069"   # LRI, RLI, FSI, PDI (isolate bidi)
+    "\ufeff"           # BOM / zero-width no-break space
+    "]"
+)
+
+
+def _normalize_invisible_unicode(s: str) -> str:
+    """a512 (BRAIN-137): strip invisible-Unicode then NFC-normalize.
+
+    Two semantically-equivalent strings ("Acme" vs BOM-prefixed
+    "Acme", NFD "Café" vs NFC "Cafeé") must hash
+    identically so BRAIN-85's idempotent short-circuit fires on a
+    retry. Strip BEFORE NFC: NFC composition can pull a stripped
+    combining mark back into a base character; strip-after would
+    leave decomposed forms with their marks scrubbed and the base
+    char un-recomposed.
+    """
+    if not s:
+        return s
+    return unicodedata.normalize("NFC", _INVISIBLE_UNICODE_RE.sub("", s))
+
+
 def _canonicalize_complete_payload(profile, history):
     """Canonical post-validation form for /api/wizard/complete's
     fingerprint cache (BRAIN-85 / BRAIN-86).
@@ -9523,6 +9570,11 @@ def _canonicalize_complete_payload(profile, history):
     Normalizations:
     - Each string value `.strip()`-ed and internal whitespace
       runs collapsed to a single space.
+    - a512 (BRAIN-137): invisible-Unicode (BOM, zero-width
+      spaces, bidi direction marks, line/paragraph separators,
+      ASCII control chars) stripped, then NFC-normalized — so
+      composed/decomposed Unicode forms and stray BOMs hash
+      identically.
     - List elements (where order is semantically irrelevant per
       `_CANONICAL_UNORDERED_LIST_FIELDS`) sorted.
     - Empty strings, empty lists, and `None` values dropped.
@@ -9535,6 +9587,12 @@ def _canonicalize_complete_payload(profile, history):
     def _norm_string(s):
         if not isinstance(s, str):
             s = str(s)
+        # a512 (BRAIN-137): strip invisible Unicode (BOM,
+        # zero-width, bidi marks, controls) + NFC normalize BEFORE
+        # whitespace collapse. Otherwise a NFD `é` (e + combining
+        # acute) and an NFC `é` produce different bytes; a BOM at
+        # byte zero defeats the BRAIN-85 fingerprint cache.
+        s = _normalize_invisible_unicode(s)
         return " ".join(s.split())  # strip + collapse runs
 
     def _norm_value(key, value):
@@ -12206,25 +12264,38 @@ async def api_memory_archive(memory_id: int, user: dict = Depends(require_user))
 # ═══════════════════════════════════════════════════════════════
 
 async def _team_brain_for(user_id: int) -> dict:
-    """Pull the user's hunt-brain seed (services / industries / buyer
-    roles / geography) for prompt-addendum templating. Empty dict on
-    fresh installs — seeder still writes the rows, just with blank
-    addendums that the user can fill manually."""
+    """Pull the user's hunt-brain seed for prompt-addendum templating.
+    Empty dict on fresh installs — seeder still writes the rows, just
+    with blank addendums that the user can fill manually.
+
+    a517 (BRAIN-PROD-4): now returns the FULL wizard payload merged
+    with normalized_hunt_profile so `_build_team_prompt_addendum` can
+    pull rich paragraph fields (business_description, target_clients,
+    outreach_tone, value_propositions, differentiators,
+    pain_points_addressed, example_good_clients, exclusions) in
+    addition to the structured lists. Previously this returned only
+    the lists, which is why each seeded role's prompt was a one-liner.
+    Each role's prompt is now ~30× the descriptive surface area,
+    fully personalised to the user's wizard answers."""
     try:
         s = await db.get_settings(user_id)
     except Exception:
         s = {}
     w = (s or {}).get("wizard", {}) or {}
     brain = w.get("normalized_hunt_profile") or {}
-    if not brain:
-        # fall back to raw wizard fields for users mid-onboarding
-        brain = {
-            "services": w.get("services", []),
-            "industries": w.get("preferred_industries", []),
-            "buyer_roles": w.get("buyer_roles", []),
-            "geographies": w.get("geographies", []) or w.get("countries", []),
-        }
-    return brain
+    # Start from the raw wizard (paragraph fields like
+    # business_description, target_clients, outreach_tone live here).
+    merged = dict(w)
+    # Layer the normalized brain on top — its services_clean /
+    # buyer_roles_clean / preferred_industries are the canonical lists
+    # the addendum builder prefers.
+    for k, v in (brain or {}).items():
+        if v:
+            merged[k] = v
+    # Backwards-compat: keep legacy keys working too.
+    if "geographies" not in merged and "countries" in merged:
+        merged["geographies"] = merged.get("countries") or []
+    return merged
 
 
 @app.get("/api/team")

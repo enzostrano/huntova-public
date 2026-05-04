@@ -6,6 +6,123 @@ Versioning: `0.1.0aNN` alpha increments. Public install path: `pipx install hunt
 
 ---
 
+
+## 0.1.0a516 — May 4 2026 — BRAIN-86 second-order: the `_canonicalize_complete_payload` helper added in a455 collapsed whitespace and sorted unordered list fields, but two semantically-identical payloads differing only by invisible Unicode (BOM, zero-width spaces, bidi direction marks, line/paragraph separators, ASCII control chars) — or by Unicode normalization form (NFC vs NFD `Café`) — still hashed to different fingerprints, defeating BRAIN-85's idempotent short-circuit and re-spending the user's BYOK allowance on a duplicate `/api/wizard/complete`; canonicalizer now strips the invisible-Unicode set + applies NFC normalization on every string field walked, locked in by 14 regression tests covering BOM, ZWSP/ZWJ/ZWNJ, bidi direction marks, line separators, word joiner, control chars, NFC/NFD parity, and combined poisoning across scalars + list elements + history Q/A pairs (BRAIN-137)
+
+### Bug fix (BRAIN-137, second-order canonicalization gap)
+
+`_canonicalize_complete_payload` (a455 / BRAIN-86) was
+the BRAIN-85 fingerprint-cache's defence against
+client-side serialization drift. It collapsed
+whitespace, sorted unordered list fields, dropped
+empty values. Good — but two more invisible classes
+still produced different fingerprints for
+semantically identical content:
+
+1. **Invisible Unicode**: BOM (U+FEFF), zero-width
+   spaces (U+200B-U+200D), word joiner (U+2060),
+   bidi direction marks (U+200E/U+200F /
+   U+202A-U+202E / U+2066-U+2069), line and
+   paragraph separators (U+2028/U+2029), and ASCII
+   control characters all survive `str.split()`. A
+   buggy client serializing `"Acme"` versus a
+   BOM-prefixed `"﻿Acme"` hashed to different
+   fingerprints even though no human can see the
+   difference.
+2. **Unicode normalization form**: `"Café"`
+   (NFD: `e` + combining acute) versus
+   `"Café"` (NFC: precomposed `é`) render
+   identically but hash to different bytes. iOS and
+   macOS keyboards default to NFD; most other
+   platforms emit NFC. A user who pasted accented
+   text from a different device on a retry would
+   miss the cache.
+
+Both classes are realistic — terminals helpfully
+insert ZWSPs, copy-paste from RTL apps drags
+direction marks, JSON parsers handle U+2028 / U+2029
+inconsistently, BOMs sneak in from Word and Notepad.
+
+Each near-miss re-runs the entire BRAIN-72 brain
+build + DNA generation pipeline. The user pays BYOK
+for the duplicate.
+
+Per Huntova engineering review on idempotency-key
+canonicalization (second-order): the cache key must
+be computed from a TRULY canonical form. Whitespace
+collapse and list ordering are necessary but not
+sufficient — invisible-Unicode strip and Unicode
+NFC normalization close the gap.
+
+The deliverable closes the second-order gap:
+
+- **`_normalize_invisible_unicode(s)` helper**: a
+  module-level function on `server` that strips the
+  invisible-Unicode set (regex character class
+  covering ASCII controls, bidi marks, zero-width
+  family, line/paragraph separators, BOM, word
+  joiner) then applies NFC normalization. Strip
+  BEFORE NFC is the safe ordering — NFC composition
+  can pull a stripped combining mark back into a
+  base character; strip-after would leave decomposed
+  forms with marks scrubbed and base chars
+  un-recomposed.
+- **Canonicalizer wired**: `_norm_string` (the
+  inner helper that walks every string field — top
+  level, list elements, and history Q/A pairs) now
+  calls `_normalize_invisible_unicode` before
+  whitespace collapse. The shape contract for the
+  output is unchanged.
+- **`\t` / `\n` / `\r` deliberately NOT stripped**:
+  they're whitespace per `str.split()` and collapse
+  naturally to a single space, matching BRAIN-86's
+  existing behaviour.
+
+The 14 regression tests in
+`tests/test_wizard_canonicalize_unicode.py` lock
+the contract:
+
+- `test_normalize_invisible_unicode_helper_exists` —
+  the helper is exposed on `server`.
+- `test_canonicalizer_calls_invisible_unicode_helper` —
+  source-level check that `_canonicalize_complete_payload`
+  invokes the helper (or `unicodedata.normalize`
+  directly).
+- `test_bom_drift_produces_same_fingerprint` —
+  leading and trailing BOMs hash identically.
+- `test_nfc_nfd_drift_produces_same_fingerprint` —
+  NFC and NFD `Café` hash identically.
+- `test_zero_width_space_inside_string_stripped` —
+  ZWSP inside a string is stripped.
+- `test_zero_width_joiner_and_non_joiner_stripped` —
+  ZWJ + ZWNJ stripped.
+- `test_bidi_direction_marks_stripped` — LRM, RLM,
+  RLO, FSI all stripped.
+- `test_line_and_paragraph_separators_stripped` —
+  U+2028 + U+2029 stripped.
+- `test_word_joiner_stripped` — U+2060 stripped.
+- `test_ascii_control_chars_stripped` — non-tab /
+  non-newline / non-CR control bytes stripped.
+- `test_invisible_unicode_inside_list_elements_stripped` —
+  strip applies to list elements too.
+- `test_invisible_unicode_inside_history_qa_stripped` —
+  strip applies to history Q/A pairs too.
+- `test_multiple_invisible_classes_combined` —
+  end-to-end: BOM + ZWSP + RLM + NFD all in the
+  same payload still hash to the plain ASCII
+  version.
+- `test_tab_newline_cr_still_collapse_as_whitespace` —
+  the existing BRAIN-86 whitespace-collapse contract
+  is preserved.
+
+702 tests total (was 688), all pass. No source
+changes outside the canonicalizer. The fingerprint
+shape contract (`(profile_dict, history_list)` with
+`json.dumps(..., sort_keys=True)` → SHA256) is
+unchanged; the cache hit rate strictly improves.
+
+---
+
 ## 0.1.0a513 — May 4 2026 — HTTP-method discipline lockdown extended to admin/ops mutating routes; current router state is correct (all use `@app.post`), but operator routes amplify blast radius (credit injection, user suspension, session clearing, wizard wipe), so the regression-test lockdown is even more important here than on the wizard surface — codified via FastAPI route-method assertions + behavioral TestClient GET-rejection checks (BRAIN-138)
 
 ### Bug fix (BRAIN-138, HTTP-method discipline on operator surface)
