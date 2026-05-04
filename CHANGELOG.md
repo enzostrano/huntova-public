@@ -6,6 +6,86 @@ Versioning: `0.1.0aNN` alpha increments. Public install path: `pipx install hunt
 
 ---
 
+## 0.1.0a494 — May 4 2026 — BRAIN-124 fixed silent-discard on dna_in_flight 409 but the SIBLING wizard_reset 410 + stale_revision 409 branches still had the same lost-update class wearing different status codes; conflict-response contract parity restored — all three rejections now carry `answers_applied: false` + reconciliation tokens + explicit "not saved" copy (BRAIN-125)
+
+### Bug fix (BRAIN-125, conflict-response contract parity)
+
+BRAIN-124 (a493) fixed the silent-discard bug on the
+`dna_in_flight` 409 branch in `/api/wizard/complete`'s
+flip-mutator path. Two SIBLING rejection branches in
+the same path still had the old silent-discard
+contract:
+
+- **`stale_revision` 409**: a sibling tab edited the
+  wizard between this tab's load and submit. The flip
+  mutator sees `_cur_rev != _captured_revision` and
+  short-circuits. Pre-fix copy: "Your wizard answers
+  changed during training. Refresh and click Complete
+  training again." — same lost-update class as
+  dna_in_flight, but no `answers_applied: false`
+  flag and no reconciliation tokens.
+- **`wizard_reset` 410**: a sibling tab clicked Reset,
+  bumping `_wizard_epoch`. Pre-fix copy: "Wizard was
+  reset elsewhere. Reload to start fresh." — again
+  same class, again no explicit contract.
+
+Per Huntova engineering review on conflict-response
+contract parity (companion to BRAIN-124): every
+wizard write rejection caused by concurrent state
+change must explicitly state whether submitted
+answers were applied AND provide reconciliation
+tokens. 409, 410, and stale-write branches should
+share the same core conflict contract — clients
+shouldn't have to infer data-loss semantics from
+HTTP-status-code folklore.
+
+Fix: extend the BRAIN-124 contract to both sibling
+branches.
+
+1. **State capture**. The flip mutator's
+   `wizard_reset` and `stale_revision` short-circuit
+   branches now set `_flip_stale["current_revision"]`
+   and `_flip_stale["current_epoch"]` (parity with
+   the BRAIN-124 dna_in_flight branch). No second DB
+   round-trip — the row state is in scope.
+2. **`wizard_reset` 410 response**: `answers_applied:
+   false` flag, `wizard_revision` + `wizard_epoch`
+   reconciliation tokens, updated copy explicitly
+   stating the user's answers were not saved AND
+   that a fresh wizard epoch started.
+3. **`stale_revision` 409 response**: same flag,
+   same tokens, updated copy stating the user's
+   answers were not saved AND giving reconciliation
+   guidance (reload to merge sibling edits, then
+   click Complete again).
+
+Result: any client receiving a 4xx from
+`/api/wizard/complete` due to concurrent state
+change can branch deterministically on
+`answers_applied: false` AND get current revision +
+epoch for reconciliation, regardless of which
+specific conflict class fired.
+
+8 new regression tests in
+`test_wizard_conflict_response_parity.py`:
+- `wizard_reset` 410 carries `answers_applied: false`,
+  `wizard_revision`, `wizard_epoch`, and explicit
+  "not saved" message.
+- `stale_revision` 409 carries the same triple.
+- Source-level: both flip-mutator branches capture
+  current state into `_flip_stale` so the responses
+  can return reconciliation tokens without a second
+  DB read.
+
+590 / 590 tests passing.
+
+### Files
+
+- `server.py`: `_pending_flip_mutator`'s `wizard_reset` and `stale_revision` branches now capture `current_revision` + `current_epoch` into `_flip_stale`. `api_wizard_complete`'s 410 (`wizard_reset`) and 409 (`stale_revision`) JSONResponse bodies now match the BRAIN-124 conflict contract.
+- `tests/test_wizard_conflict_response_parity.py`: new — 8 tests guarding the conflict-response parity invariant across all three rejection branches.
+
+---
+
 ## 0.1.0a493 — May 4 2026 — BRAIN-110's 409 dna_in_flight response told the losing tab "wait for it to finish, or reload to follow its progress" — silently discarding the user's submitted answers without saying so; the response now includes `answers_applied: false`, the live `wizard_revision` + `wizard_epoch` for client reconciliation, and an explicit "your answers were not saved" message (BRAIN-124)
 
 ### Bug fix (BRAIN-124, conflict messaging on dna_in_flight)

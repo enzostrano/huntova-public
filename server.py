@@ -9554,10 +9554,21 @@ async def api_wizard_complete(request: Request, response: Response, user: dict =
         if _cur_epoch != _captured_epoch:
             _flip_stale["value"] = True
             _flip_stale["kind"] = "wizard_reset"
+            # a494 (BRAIN-125): capture live state for the
+            # 410 response so the losing tab can reconcile
+            # to the new epoch / revision without a second
+            # DB read.
+            _flip_stale["current_revision"] = _cur_rev
+            _flip_stale["current_epoch"] = _cur_epoch
             return cur
         if _cur_rev != _captured_revision:
             _flip_stale["value"] = True
             _flip_stale["kind"] = "stale_revision"
+            # a494 (BRAIN-125): capture live state for the
+            # 409 response — the client compares its
+            # captured revision to this one.
+            _flip_stale["current_revision"] = _cur_rev
+            _flip_stale["current_epoch"] = _cur_epoch
             return cur
         # a479 fix (BRAIN-110): atomic claim. If `_dna_state`
         # is already "pending" at mutator entry, a sibling
@@ -9635,11 +9646,31 @@ async def api_wizard_complete(request: Request, response: Response, user: dict =
         # have failed the BRAIN-14 guard inside the final merge
         # anyway; bailing here saves the BYOK spend.
         if _flip_stale["kind"] == "wizard_reset":
+            # a494 (BRAIN-125): conflict-response parity
+            # with the BRAIN-124 dna_in_flight branch. The
+            # losing tab's submitted answers were rejected
+            # by the BRAIN-81 epoch ratchet — they never
+            # reached the row. Tell the user so explicitly,
+            # and return the new epoch + revision so the
+            # client can reconcile rather than infer from
+            # status-code folklore.
             return JSONResponse(
                 {
                     "ok": False,
-                    "error": "Wizard was reset elsewhere. Reload to start fresh.",
+                    "answers_applied": False,
+                    "error": (
+                        "Your answers were not saved. The wizard "
+                        "was reset in another tab — that reset "
+                        "started a fresh wizard epoch. Reload to "
+                        "start over."
+                    ),
                     "error_kind": "wizard_reset",
+                    "wizard_revision": int(
+                        _flip_stale.get("current_revision") or 0
+                    ),
+                    "wizard_epoch": int(
+                        _flip_stale.get("current_epoch") or 0
+                    ),
                 },
                 status_code=410,
             )
@@ -9696,12 +9727,32 @@ async def api_wizard_complete(request: Request, response: Response, user: dict =
                 },
                 status_code=409,
             )
+        # a494 (BRAIN-125): conflict-response parity. The
+        # stale_revision branch fires when a sibling tab
+        # bumped the wizard revision (e.g. they typed an
+        # answer) between this tab's load and submit. The
+        # loser's answers were rejected by the BRAIN-14
+        # guard. Tell the user explicitly + return live
+        # tokens for client-side reconciliation.
         return JSONResponse(
             {
                 "ok": False,
                 "stale": True,
-                "error": "Your wizard answers changed during training. Refresh and click Complete training again.",
+                "answers_applied": False,
+                "error": (
+                    "Your answers were not saved. Another tab "
+                    "edited the wizard between when you loaded "
+                    "and when you clicked Complete. Reload to "
+                    "merge their edits, then click Complete "
+                    "training again to apply yours."
+                ),
                 "error_kind": "stale_revision",
+                "wizard_revision": int(
+                    _flip_stale.get("current_revision") or 0
+                ),
+                "wizard_epoch": int(
+                    _flip_stale.get("current_epoch") or 0
+                ),
             },
             status_code=409,
         )
