@@ -6,6 +6,26 @@ Versioning: `0.1.0aNN` alpha increments. Public install path: `pipx install hunt
 
 ---
 
+## 0.1.0a564 — May 4 2026 — Env-override naming-convention audit — every `os.environ.get(...)` key in server.py module-scope must follow the `HV_*` prefix (or be a documented standard env var); critical knobs (HV_WIZARD_*, HV_DNA_*) explicitly enumerated; legacy `HUNTOVA_*` prefix forbidden; `int(os.environ.get(K))` without default fallback flagged (BRAIN-153)
+
+### Lockdown (BRAIN-153, env-override convention)
+
+A typo in env-var name silently disables override — operator sets `HV_WIZARD_BODY_BYTES_MAX`, server reads `HUNTOVA_WIZARD_BODY_BYTES_MAX`, no override.
+
+Audit:
+- Every HV_-conventional env-var read in server.py is HV_*-prefixed (with documented standard-env exclusions: PORT, XDG_CONFIG_HOME, DATABASE_URL etc).
+- Critical HV_ knobs (HV_WIZARD_BODY_BYTES_MAX, HV_DNA_PENDING_STALE_SEC, ...) still referenced.
+- No legacy HUNTOVA_* prefix.
+- No bare `int(os.environ.get(K))` without default fallback (would crash on None).
+
+4 new tests in `tests/test_env_overrides_audit.py`. No source changes.
+
+### Files
+- `tests/test_env_overrides_audit.py`: new — 4 tests.
+- `cli.py` + `pyproject.toml` + `CHANGELOG.md`.
+
+---
+
 ## 0.1.0a563 — May 4 2026 — Daily-quota constants integrity audit (parallel to BRAIN-151) — `_SCAN_DAILY_MAX` / `_PHASE5_DAILY_MAX` / `_COMPLETE_DAILY_MAX` / `_ASSIST_DAILY_MAX` plus BRAIN-132 idempotency cache constants + BRAIN-117/127 byte-cap constants all blanket-audited for sane bounds (BRAIN-152)
 
 ### Lockdown (BRAIN-152, blanket numeric-config integrity)
