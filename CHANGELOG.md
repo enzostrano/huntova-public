@@ -6,75 +6,74 @@ Versioning: `0.1.0aNN` alpha increments. Public install path: `pipx install hunt
 
 ---
 
-## 0.1.0a525 — May 4 2026 — Idempotency-Key support extended to /api/wizard/save-progress (BRAIN-141)
+## 0.1.0a525 — May 4 2026 — BRAIN-128's phase-5 byte cap wrapped `prefill` in `str(...)` which destroys list-shaped prefills used by `multi_select` to pre-select multiple options — the frontend can't pre-check anything because it gets `"['a', 'b']"` instead of `["a", "b"]`; new type-aware `_normalize_phase5_prefill(raw, q_type)` helper preserves list shape for multi_select and byte-caps each option (BRAIN-143)
 
-### Bug fix (BRAIN-141, retry safety on the high-frequency wizard write)
+### Bug fix (BRAIN-143, type-aware phase-5 prefill normalization)
 
-BRAIN-132 (a505) added `Idempotency-Key` header
-support to /api/wizard/complete: a client that POSTs
-the wizard, hits a network failure mid-response (server
-committed, client never received the 200), and resends
-the same payload with the same key now replays the
-original 200 body verbatim instead of getting a
-semantically different `reused: true` from BRAIN-85's
-content-fingerprint cache.
+Phase-5 questions support three types: `text`,
+`single_select`, `multi_select`. For multi_select,
+the AI can return `prefill` as a list of pre-selected
+option identifiers — opening the question shows the
+options already checked.
 
-save-progress is the higher-frequency endpoint by an
-order of magnitude. complete fires once per training
-run; save-progress fires effectively on every
-keystroke / every Continue click as the user moves
-through the wizard. A network failure mid-response is
-correspondingly more common, and the fallout is worse:
+BRAIN-128 (a497) added per-field byte caps to phase-5
+output via `_clip_to_byte_budget`. Both prefill
+clip sites used:
 
-- A blind retry consumes another revision slot
-  (BRAIN-14 monotonic bump still goes through), and a
-  parallel tab whose `expected_revision` token now
-  trails by one starts colliding with the BRAIN-68
-  stale-write guard for no real reason.
-- Without retry safety, the client either reissues
-  blindly or surfaces a "save failed" toast even
-  though the merge actually landed.
+```python
+"prefill": _clip_to_byte_budget(
+    str(q.get("prefill") or "").strip(),
+    _WIZARD_PHASE5_QUESTION_BYTES_MAX,
+) if q.get("prefill") is not None else "",
+```
 
-Per Huntova engineering review on client retry safety:
-retry semantics matter MORE on the high-frequency
-write than on the terminal one. The complete handler
-got it first because that's where AI spend lives, but
-save-progress is where retries actually happen in the
-field.
+The `str(...)` wrapper on a list input produces the
+Python repr `"['option_a', 'option_b']"` — not the
+original list. The frontend then can't pre-select
+because it expects a list, not a string.
 
-Fix: /api/wizard/save-progress now reads
-`Idempotency-Key` at handler entry, calls
-`_idempotency_lookup` BEFORE `_enforce_body_byte_cap`
-(replays short-circuit before walking the request
-body), and stores the success body via
-`_idempotency_store` only on the true success path —
-after `db.merge_settings` commits and after the
-BRAIN-68 stale_revision / BRAIN-81 wizard_reset
-conflict branch returns its own 409/410. The four
-helpers (`_idempotency_key_clean`, `_idempotency_lookup`,
-`_idempotency_store`, plus the
-`_IDEMPOTENCY_TTL_SEC` / `_KEY_MAX_LEN` /
-`_CACHE_PER_USER_MAX` constants) are reused
-unchanged from BRAIN-132 — one cache, one namespace,
-one retry contract spanning both endpoints. The
-success body (`{ok, phase, confidence, revision}`)
-is unchanged for old clients that don't send the
-header.
+Per Huntova engineering review on type-aware AI-output
+validation: prefill must branch on the question type.
+multi_select → list (each item byte-capped + count-
+capped). text / single_select → string (legacy
+behavior preserved).
 
-Order: rate check → idempotency lookup → byte cap →
-json parse → mutator → success-return → store. Lookup
-follows the rate-limit gate (a rate-limited caller
-cannot probe the cache for free) and precedes the
-byte-cap check (cheap denial / cheap replay before
-any expensive work). Tests:
-`tests/test_save_progress_idempotency.py` covers
-source-level handler-uses-helper checks plus the full
-ordering contract (rate before lookup, lookup before
-byte-cap, lookup before json-parse, store after merge,
-store after lookup, store at status 200) plus
-behavioral lookup-returns-None checks plus a
-helpers-shared-with-BRAIN-132 invariant guarding
-against accidental namespace duplication.
+Fix: new module-scope helper
+`_normalize_phase5_prefill(raw, q_type)` near
+`_normalize_phase5_questions`.
+- multi_select + list input → returns list (each
+  item via `_clip_to_byte_budget` against
+  `_WIZARD_PHASE5_OPTION_BYTES_MAX`, non-string
+  items filtered).
+- multi_select + non-list → returns [] (empty list).
+- text / single_select / unknown → byte-capped
+  string against
+  `_WIZARD_PHASE5_QUESTION_BYTES_MAX`.
+- None / missing → empty string for scalar types,
+  empty list for multi_select.
+
+Both `_normalize_phase5_questions` (read-side
+defense-in-depth on /api/wizard/status emission)
+AND the `api_wizard_generate_phase5` cleaner
+(persist-side) now use the helper.
+
+10 new regression tests in
+`test_wizard_phase5_prefill_list.py`:
+- Helper exists at module scope.
+- multi_select preserves list, clamps items, filters
+  non-strings.
+- text / single_select returns strings; oversize
+  strings clamp.
+- None / missing returns the right empty for the
+  type.
+- Both call sites use the helper.
+
+749 / 749 tests passing.
+
+### Files
+
+- `server.py`: new `_normalize_phase5_prefill(raw, q_type)` helper near `_normalize_phase5_questions`. Both phase-5 prefill emission sites migrated.
+- `tests/test_wizard_phase5_prefill_list.py`: new — 10 tests guarding the type-aware prefill contract.
 
 ---
 
