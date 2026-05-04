@@ -6,6 +6,93 @@ Versioning: `0.1.0aNN` alpha increments. Public install path: `pipx install hunt
 
 ---
 
+## 0.1.0a488 — May 4 2026 — `_wizard_phase` and `_wizard_cursor` are state-machine coordinates that drive transitions, but the BRAIN-3 monotonic guard had no upper bound (a corrupted persisted 999999 won `max(999999, anything)` forever, locking the wizard); status emitted `phase` raw; cursor-clamp capture used the crashy `int(... or 0)` pattern; new `_WIZARD_PHASE_MAX` + `_normalize_wizard_phase` helper plus `_monotonic_phase` upper-bound clamp (BRAIN-119)
+
+### Bug fix (BRAIN-119, state-machine coordinate validation)
+
+`_wizard_phase` and `_wizard_cursor` are not display
+fields — they're persisted state-machine coordinates
+that drive transitions in save-progress, the cursor-
+clamp logic, the BRAIN-87 cursor render contract, and
+`/api/wizard/status`. Real wizards have ≤ ~20 phases
+(14 base questions + up to 5 phase-5 questions); a
+persisted phase >> ~100 always indicates corruption.
+
+Pre-fix gaps:
+
+1. **`_monotonic_phase` had no upper bound.** A
+   corrupted persisted `_wizard_phase=999999` hit
+   `max(999999, incoming) → 999999` for every
+   subsequent call. The BRAIN-3 monotonic guard
+   (which prevents stale tabs from regressing phase)
+   then locked the wizard at 999999 permanently —
+   every legitimate write was silently dropped because
+   it was less-than-prev. The wizard "stuck at
+   phase 999999"; the front-end bounds-checks against
+   `_BRAIN_QUESTIONS` length, falls through to the
+   empty/end state, user thinks the wizard is broken.
+
+2. **Cursor-clamp capture used crashy `int(... or 0)`.**
+   Save-progress reads `_max_unlocked = int(w.get
+   ("_wizard_phase", 0) or 0)` to clamp the cursor
+   write into `[0, max_unlocked]`. Same BRAIN-115/116
+   failure mode: a non-numeric persisted phase
+   (`"banana"`, list, dict) raises `ValueError` and
+   500s save-progress on every keystroke.
+
+3. **Status emitted `phase` raw.** Adjacent counters
+   got `_safe_nonneg_int` in BRAIN-115 but `phase` was
+   missed; a corrupted persisted phase leaks straight
+   to the client (or 500s when the JSON encoder hits
+   an unsupported type).
+
+Per Huntova engineering review on persisted-workflow-
+state validation: invalid state-machine coordinates
+must not silently become legal execution inputs. A
+monotonic guarantee built atop a corrupted starting
+value is a permanent lock, not a defense.
+
+Fix: three module-scope additions near the wizard
+config.
+
+- `_WIZARD_PHASE_MAX` (default 100, env-overridable
+  via `HV_WIZARD_PHASE_MAX`). Generous enough that
+  legitimate growth fits, tight enough that a
+  corrupted 999999 fails closed.
+- `_normalize_wizard_phase(raw, default=0)` returns an
+  int in `[0, _WIZARD_PHASE_MAX]`. Type-safe (delegates
+  to `_safe_nonneg_int`) AND bound-clamped.
+- `_monotonic_phase` clamps the result to
+  `[0, _WIZARD_PHASE_MAX]`. Out-of-range persisted
+  values self-repair on the next monotonic write.
+
+Plus two callsite migrations:
+- save-progress cursor-clamp `_max_unlocked` capture
+  uses the new helper instead of `int(... or 0)`.
+- `/api/wizard/status` emits `phase` via the helper
+  (`confidence` migrated to `_safe_nonneg_int` for
+  parity since it's read alongside).
+
+10 new regression tests in
+`test_wizard_phase_cursor_state_machine_validation.py`:
+- Constant + helper exist with sane bounds.
+- Helper clamps oversized to max, negatives to 0,
+  passes clean values, handles corrupt strings.
+- `_monotonic_phase(999999, 5) <= cap` (the lock-fix).
+- `_monotonic_phase` preserves monotonicity within
+  bounds.
+- Source-level: cursor-clamp + status `phase` use the
+  helper.
+
+554 / 554 tests passing.
+
+### Files
+
+- `server.py`: new `_WIZARD_PHASE_MAX` constant + `_normalize_wizard_phase(raw)` helper near `_WIZARD_BODY_BYTES_MAX`. `_monotonic_phase` clamps result to `[0, _WIZARD_PHASE_MAX]`. `api_wizard_save_progress` cursor-clamp + `api_wizard_status` `phase`/`confidence` emissions use the safe helpers.
+- `tests/test_wizard_phase_cursor_state_machine_validation.py`: new — 10 tests guarding the state-machine-coordinate contract.
+
+---
+
 ## 0.1.0a487 — May 4 2026 — BRAIN-117 capped save-progress + complete but `/api/wizard/assist` (free-text chat refinement, highest-risk paste path), `/api/wizard/scan`, `/api/wizard/generate-phase5` were still uncapped; inconsistent endpoint posture meant the easiest oversized-paste vector remained open; all three now invoke `_enforce_body_byte_cap` before `request.json()` (BRAIN-118)
 
 ### Bug fix (BRAIN-118, byte-cap parity across wizard mutating endpoints)

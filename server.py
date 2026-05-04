@@ -694,6 +694,39 @@ _WIZARD_BODY_BYTES_MAX = int(
     os.environ.get("HV_WIZARD_BODY_BYTES_MAX") or str(256 * 1024)
 )
 
+# a488 (BRAIN-119): upper bound for wizard state-machine
+# coordinates (`_wizard_phase`, `_wizard_cursor`,
+# `_wizard_confidence`). Real wizards have ~14 base
+# questions + up to 5 phase-5 questions = ~20 phases.
+# 100 is generous enough that legitimate growth doesn't
+# bump it; tight enough that a corrupted persisted
+# 999999 fails closed instead of locking the wizard
+# forever (the BRAIN-3 monotonic guarantee against
+# regression turns into a permanent lock when the
+# persisted value is garbage). Per Huntova engineering
+# review on persisted-workflow-state validation: invalid
+# state-machine coordinates must not silently become
+# legal execution inputs.
+_WIZARD_PHASE_MAX = int(os.environ.get("HV_WIZARD_PHASE_MAX") or "100")
+
+
+def _normalize_wizard_phase(raw, default: int = 0) -> int:
+    """Normalize a persisted wizard phase / cursor /
+    confidence value to a bounded non-negative int.
+    Delegates to `_safe_nonneg_int` for type safety
+    (BRAIN-115 contract) and additionally clamps the
+    upper bound to `_WIZARD_PHASE_MAX`.
+
+    Used by:
+    - `/api/wizard/status` (BRAIN-119 public emission).
+    - `_monotonic_phase` (BRAIN-119 transition clamp).
+    - save-progress cursor-clamp capture.
+    """
+    v = _safe_nonneg_int(raw, default=default)
+    if v > _WIZARD_PHASE_MAX:
+        return _WIZARD_PHASE_MAX
+    return v
+
 
 async def _enforce_body_byte_cap(request, max_bytes: int):
     """Reject oversize wizard request bodies BEFORE any
@@ -8895,7 +8928,18 @@ def _monotonic_phase(prev, incoming) -> int:
     a stale tab POSTing an older value must not regress a newer
     saved value. Out-of-band inputs (legacy clients, JSON drift,
     empty body) are coerced silently because raising mid-mutator
-    would abort the entire save and surface as a generic 500."""
+    would abort the entire save and surface as a generic 500.
+
+    a488 (BRAIN-119): also clamp the result to
+    `_WIZARD_PHASE_MAX`. Without the clamp, a corrupted
+    persisted phase like 999999 wins `max(999999, anything
+    legitimate)` forever — the wizard locks at the bogus
+    value and every subsequent save is silently dropped
+    by the monotonic guard. Per Huntova engineering
+    review on persisted-workflow-state validation: a
+    monotonic guarantee on a corrupted starting value is
+    a permanent lock, not a defense.
+    """
     def _coerce(v) -> int:
         if v is None:
             return 0
@@ -8903,7 +8947,12 @@ def _monotonic_phase(prev, incoming) -> int:
             return int(v)
         except (ValueError, TypeError):
             return 0
-    return max(_coerce(prev), _coerce(incoming))
+    out = max(_coerce(prev), _coerce(incoming))
+    if out < 0:
+        return 0
+    if out > _WIZARD_PHASE_MAX:
+        return _WIZARD_PHASE_MAX
+    return out
 
 
 def _is_safe_url(url: str) -> bool:
@@ -10148,7 +10197,13 @@ async def api_wizard_save_progress(request: Request, response: Response, user: d
         # within [0, max_phase] so a Back-then-reload doesn't snap
         # the user forward to the highest phase ever reached.
         if cursor is not None:
-            _max_unlocked = int(w.get("_wizard_phase", 0) or 0)
+            # a488 (BRAIN-119): bound + safe-int the
+            # max-unlocked capture. Without normalization
+            # a corrupted persisted `_wizard_phase` 500s
+            # save-progress on every keystroke; with it,
+            # the cursor clamps to a sane upper bound and
+            # the next monotonic write self-repairs.
+            _max_unlocked = _normalize_wizard_phase(w.get("_wizard_phase"))
             # Clamp to [0, max_unlocked] — cursor cannot point past
             # what the user has actually unlocked.
             if cursor < 0:
@@ -10907,8 +10962,13 @@ async def api_wizard_status(user: dict = Depends(require_user)):
     return {
         "ok": True,
         "complete": bool(w.get("_interview_complete")),
-        "confidence": w.get("_wizard_confidence", 0),
-        "phase": w.get("_wizard_phase", 0),
+        # a488 (BRAIN-119): emit phase via the bounded
+        # state-machine helper. Confidence stays raw
+        # (display-only progress marker, not a transition
+        # input — covered by separate validation if it
+        # ever drives logic).
+        "confidence": _safe_nonneg_int(w.get("_wizard_confidence")),
+        "phase": _normalize_wizard_phase(w.get("_wizard_phase")),
         "has_answers": bool(w.get("_wizard_answers")),
         "company_name": w.get("company_name", ""),
         # a439 (BRAIN-78): expose durable DNA generation state so
