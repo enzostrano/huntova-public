@@ -7,6 +7,70 @@ Versioning: `0.1.0aNN` alpha increments. Public install path: `pipx install hunt
 ---
 
 
+## 0.1.0a520 — May 4 2026 — Team-of-agents specialist prompts were one-liner stubs that ignored most of the wizard answers; user reported "Team of agents in settings should be prefilled with what he understood from wizard and accordingly prefilled it 30x current text to train the agents perfectly" — `_build_team_prompt_addendum` now produces 200-300 word persona-style briefs per role that interpolate the FULL wizard payload (business_description, target_clients, services, industries, buyer_roles, geographies, outreach_tone, value_propositions, differentiators, pain_points_addressed, example_good_clients, exclusions); `_team_brain_for` was widened to surface the rich paragraph fields (not just the structured lists); the `prompt_addendum` DB cap was raised from 4000 to 8000 chars to fit the new richer text; the existing "Reseed from brain" button on the Team tab regenerates every role's prompt from the latest wizard answers on demand (BRAIN-PROD-4)
+
+### Feature (BRAIN-PROD-4, team specialists pre-filled from wizard)
+
+The eight team specialists (Prospector, Qualifier, Researcher,
+Contact Finder, Outreach Drafter, Inbox Triager, Sequence Operator,
+Pulse Reporter) shipped in a280 with `prompt_addendum` defaults that
+were one-liner stubs. The Prospector got "Services we sell: X.
+Target industries: Y. Buyer roles: Z. Prefer companies showing
+recent buying signals." — the full set of rich wizard answers
+(`business_description` paragraph, `target_clients` paragraph,
+`outreach_tone`, `value_propositions` list, `differentiators` list,
+`pain_points_addressed` list, `example_good_clients` paragraph,
+`exclusions` paragraph) was collected by the wizard but never fed
+into the team's seeded prompts. The user's report: the team should
+be pre-filled with everything understood from the wizard, ~30x the
+prior surface area, so each specialist trains itself on the user's
+business without manual editing.
+
+Fix: rewrote `_build_team_prompt_addendum` in `db.py:3096` to
+produce a 200-300 word persona-style brief per role that combines
+(a) a shared OUR BUSINESS / WHO WE SELL TO / GEOGRAPHIES / VALUE
+WE DELIVER / PAIN POINTS WE FIX / DIFFERENTIATORS / REFERENCE
+CLIENTS / DO NOT TARGET context block built from the full wizard
+payload, with (b) a role-specific body covering responsibilities,
+priorities, hard-rejects, and output format. The drafter, sequence
+operator, and inbox triager are tone-aware: they read
+`outreach_tone` and adjust their style guides accordingly.
+`_team_brain_for` in `server.py:12265` now merges the raw wizard
+fields (paragraph values like `business_description`) with the
+`normalized_hunt_profile` (canonical lists like `services_clean`)
+so both shapes reach the addendum builder. The `prompt_addendum`
+cap in `update_team_member` was widened from 4000 to 8000 chars
+to fit the new richer text. The existing "Reseed from brain"
+button on the Team tab (`templates/jarvis.html:1365`) regenerates
+every role's prompt from the latest wizard answers on demand —
+the description copy was updated to highlight the full breadth
+of fields it pulls from.
+
+Regression coverage: `tests/test_team_prefill_from_wizard.py`
+ships 13 tests asserting (1) every role's seeded prompt is at
+least 200 words on a fully-populated wizard, (2) every role
+inherits `business_description` / `target_clients` / `exclusions`
+context, (3) the drafter / sequence-op / triager respect
+`outreach_tone`, (4) seeded prompts fit within the 8000-char DB
+cap, (5) empty-wizard / unknown-slot / legacy-shape inputs all
+return safely without raising, (6) the end-to-end seed pipeline
+through `_team_brain_for` -> `seed_team_defaults` -> `list_team`
+writes the rich text into the DB rows. Suite is at 715 tests
+total (702 prior + 13 new) and stays green.
+
+Files: `db.py:3096` (expanded role prompts), `db.py:3515`
+(prompt_addendum cap 4000 -> 8000), `server.py:12265`
+(`_team_brain_for` merged shape), `templates/jarvis.html:1369`
+(updated team-tab description copy),
+`tests/test_team_prefill_from_wizard.py` (13 new tests).
+
+Deferred: the user also asked for "adjustable via chat". The
+existing `/api/team/{slot}` PATCH endpoint already exposes the
+mutable fields; wiring a chat intent that calls it from natural
+language ("@team make the drafter warmer") is a follow-up release.
+
+---
+
 ## 0.1.0a516 — May 4 2026 — BRAIN-86 second-order: the `_canonicalize_complete_payload` helper added in a455 collapsed whitespace and sorted unordered list fields, but two semantically-identical payloads differing only by invisible Unicode (BOM, zero-width spaces, bidi direction marks, line/paragraph separators, ASCII control chars) — or by Unicode normalization form (NFC vs NFD `Café`) — still hashed to different fingerprints, defeating BRAIN-85's idempotent short-circuit and re-spending the user's BYOK allowance on a duplicate `/api/wizard/complete`; canonicalizer now strips the invisible-Unicode set + applies NFC normalization on every string field walked, locked in by 14 regression tests covering BOM, ZWSP/ZWJ/ZWNJ, bidi direction marks, line separators, word joiner, control chars, NFC/NFD parity, and combined poisoning across scalars + list elements + history Q/A pairs (BRAIN-137)
 
 ### Bug fix (BRAIN-137, second-order canonicalization gap)

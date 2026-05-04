@@ -12268,7 +12268,7 @@ async def _team_brain_for(user_id: int) -> dict:
     Empty dict on fresh installs — seeder still writes the rows, just
     with blank addendums that the user can fill manually.
 
-    a517 (BRAIN-PROD-4): now returns the FULL wizard payload merged
+    a520 (BRAIN-PROD-4): now returns the FULL wizard payload merged
     with normalized_hunt_profile so `_build_team_prompt_addendum` can
     pull rich paragraph fields (business_description, target_clients,
     outreach_tone, value_propositions, differentiators,
