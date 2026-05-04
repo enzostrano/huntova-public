@@ -57,6 +57,12 @@ def test_agent_control_validates_dna_state_against_enum():
         or '{"pending", "ready", "failed", "unset"}' in src
         or "_DNA_STATE_ALLOWED" in src
         or '_VALID_DNA_STATES' in src
+        # a478 (BRAIN-109): enum was lifted to module scope
+        # and is consulted via the shared helper. Calling
+        # the helper still satisfies the BRAIN-108 invariant
+        # (agent_control must consult the allowed enum
+        # before deciding to proceed).
+        or "_normalize_dna_state(" in src
     )
     assert has_enum, (
         "BRAIN-108 regression: agent_control must reference "

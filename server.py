@@ -493,6 +493,43 @@ _SCAN_DAILY_MAX = int(os.environ.get("HV_WIZARD_SCAN_DAILY_MAX") or "50")
 _PHASE5_DAILY_MAX = int(os.environ.get("HV_WIZARD_PHASE5_DAILY_MAX") or "50")
 _COMPLETE_DAILY_MAX = int(os.environ.get("HV_WIZARD_COMPLETE_DAILY_MAX") or "30")
 _ASSIST_DAILY_MAX = int(os.environ.get("HV_WIZARD_ASSIST_DAILY_MAX") or "200")
+
+# a478 (BRAIN-109): single source of truth for the wizard
+# DNA state-machine enum. BRAIN-108 introduced this set
+# locally inside agent_control to guard the BRAIN-79 agent
+# gate, but every PUBLIC read path that exposes _dna_state
+# (the /api/wizard/status JSON contract, future debug
+# routes, etc.) must apply the same normalization or a
+# corrupted persisted value leaks raw to clients. Per
+# Huntova engineering review on response-enum contracts:
+# every public read site must validate before emitting.
+_DNA_STATE_ALLOWED = ("pending", "ready", "failed", "unset")
+
+
+def _normalize_dna_state(raw):
+    """Normalize a persisted ``_dna_state`` value for any
+    public read path.
+
+    Returns one of ``{"pending", "ready", "failed",
+    "unset", "invalid"}``. ``None`` and missing values
+    legacy-compat to ``"unset"`` (the documented default).
+    Anything outside the enum — including non-strings,
+    case-mangled, or typo'd — collapses to the literal
+    string ``"invalid"`` so downstream consumers (UI,
+    monitoring, agent gates) can branch on a single,
+    well-known sentinel instead of seeing arbitrary
+    corrupted strings.
+
+    Used by:
+    - ``api_wizard_status`` (BRAIN-109): public response
+    - ``agent_control`` (BRAIN-108): blocks corrupted state
+      from reaching the agent loop
+    """
+    if raw is None:
+        return "unset"
+    if isinstance(raw, str) and raw in _DNA_STATE_ALLOWED:
+        return raw
+    return "invalid"
 # a470 (BRAIN-101): freshness window for the BRAIN-85
 # idempotent fingerprint cache. Without a TTL, a wizard
 # completed months ago short-circuits the pipeline against
@@ -10383,7 +10420,13 @@ async def api_wizard_status(user: dict = Depends(require_user)):
         # long-running-LLM-workflow audit. States: pending /
         # ready / failed / unset (no DNA generation has been
         # kicked off yet — fresh user pre-complete).
-        "dna_state": w.get("_dna_state", "unset"),
+        # a478 (BRAIN-109): public read path must validate
+        # the persisted enum so a corrupted value
+        # ("banana", "pendng",...) cannot leak raw to clients.
+        # Maps unknown values to "invalid" via the shared
+        # _normalize_dna_state helper (same contract as the
+        # BRAIN-108 agent gate).
+        "dna_state": _normalize_dna_state(w.get("_dna_state")),
         "dna_started_at": w.get("_dna_started_at", ""),
         "dna_completed_at": w.get("_dna_completed_at", ""),
         "dna_error": w.get("_dna_error", ""),
@@ -11201,16 +11244,15 @@ async def agent_control(request: Request, user: dict = Depends(require_user)):
             # numbers, dicts, etc. A future bug or operator
             # UPDATE could persist a malformed value and
             # silently bypass the BRAIN-79 gate.
-            _DNA_STATE_ALLOWED = {"pending", "ready", "failed", "unset"}
-            # `None` (field absent on legacy pre-BRAIN-78
-            # installs) maps to "unset" so legacy users keep
-            # working.
-            _dna_state_normalized = (
-                "unset" if _dna_state is None
-                else _dna_state if _dna_state in _DNA_STATE_ALLOWED
-                else None  # sentinel: outside enum
-            )
-            if _dna_state_normalized is None:
+            # a478 (BRAIN-109): use the shared
+            # _normalize_dna_state helper so the agent gate
+            # and the public /api/wizard/status response apply
+            # the same enum contract. `None` (field absent on
+            # legacy pre-BRAIN-78 installs) maps to "unset" so
+            # legacy users keep working; out-of-enum values
+            # collapse to "invalid" and fail closed below.
+            _dna_state_normalized = _normalize_dna_state(_dna_state)
+            if _dna_state_normalized == "invalid":
                 # Out-of-enum value. Fail closed: don't proceed
                 # silently. Surface to the operator with the
                 # offending value so they can investigate the

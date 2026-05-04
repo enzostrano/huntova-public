@@ -6,6 +6,68 @@ Versioning: `0.1.0aNN` alpha increments. Public install path: `pipx install hunt
 
 ---
 
+## 0.1.0a478 — May 4 2026 — `/api/wizard/status` exposed raw `_dna_state` value to clients without validation, leaking corrupted persisted strings ("banana", "pendng") through the public response contract; shared `_normalize_dna_state` helper now uniformly maps unknown values to "invalid" across every public read site (BRAIN-109)
+
+### Bug fix (BRAIN-109, public-API enum contract uniformity)
+
+BRAIN-108 (a477) added enum validation to the BRAIN-79
+agent-control gate so a corrupted `_dna_state` value
+couldn't silently bypass the safety check before starting
+the agent loop. But the gate was only one of two read
+sites: `/api/wizard/status` still exposed the raw
+persisted value directly to clients —
+
+```python
+"dna_state": w.get("_dna_state", "unset"),
+```
+
+— which meant a value like `"pendng"` (typo) or
+`"banana"` (corruption) flowed through to the wizard UI
+and any downstream consumer as part of the official
+response contract. The client's `if (state === 'pending')`
+branches all fall through, so the consumer either
+"trusts" the bad value as if it were ready, or
+re-implements corruption handling that the server should
+have applied centrally.
+
+Per Huntova engineering review on response-enum
+contracts: **every public read path that exposes a state
+value must validate before emitting.** Internal
+"shouldn't happen" assumptions don't hold once a value
+becomes public API — the surface contract has to defend
+itself.
+
+Fix: extract `_DNA_STATE_ALLOWED` to module scope and add
+a shared `_normalize_dna_state(raw) -> str` helper that
+returns one of `{"pending", "ready", "failed", "unset",
+"invalid"}`. `None` and missing values legacy-compat to
+`"unset"`; anything else collapses to `"invalid"` so
+downstream consumers can branch on a single
+well-known sentinel. Both call sites now use it:
+
+- `/api/wizard/status` (the public read path) — `dna_state`
+  is normalized before emission.
+- `agent_control` (the BRAIN-108 gate) — refactored to
+  call the helper instead of duplicating the enum
+  literal, so a future state-machine extension only has
+  to update one place.
+
+7 new regression tests in `test_wizard_status_dna_state_validation.py`
+cover the helper contract (None→unset, valid→passthrough,
+unknown→invalid, non-string→invalid), the module-scope
+hoist of `_DNA_STATE_ALLOWED`, and source-level proof
+that both call sites consult the shared helper.
+
+460 / 460 tests passing.
+
+### Files
+
+- `server.py`: module-scope `_DNA_STATE_ALLOWED` + `_normalize_dna_state` helper near the wizard daily-quota constants; `/api/wizard/status` JSON now emits `_normalize_dna_state(w.get("_dna_state"))`; `agent_control` BRAIN-79 gate uses the helper instead of an inline enum + sentinel.
+- `tests/test_wizard_status_dna_state_validation.py`: new — 7 tests guarding the public-API enum contract.
+- `tests/test_agent_start_dna_state_enum.py`: BRAIN-108 source-level test now also accepts the shared-helper call as proof of enum consultation.
+
+---
+
 ## 0.1.0a477 — May 4 2026 — BRAIN-79 agent gate fell through silently on malformed `_dna_state` values (typos, case mangling, null, non-strings); enum validation closes the silent-bypass hole (BRAIN-108)
 
 ### Bug fix (BRAIN-108, state-machine read-side enum validation)
