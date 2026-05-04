@@ -6,6 +6,77 @@ Versioning: `0.1.0aNN` alpha increments. Public install path: `pipx install hunt
 
 ---
 
+## 0.1.0a490 — May 4 2026 — BRAIN-79's gate was on `agent_control`'s `start` action only; `resume` re-activated the agent without consulting the same precondition, so a sibling-tab DNA wipe/corruption during pause could be silently bypassed when resuming; the BRAIN-120 helper now also gates `resume` for shared-precondition parity (BRAIN-121)
+
+### Bug fix (BRAIN-121, shared-precondition consistency)
+
+BRAIN-120 (a489) extracted the dna-state gate into the
+shared `_dna_state_gate_response` helper. Only
+`agent_control`'s `start` action used it. The other
+agent_control actions:
+
+- `stop` / `pause` — abort-class. Correctly skipped
+  the gate (a user must always be able to stop a
+  misbehaving agent regardless of DNA state).
+- `resume` — RE-ACTIVATES the agent. Same precondition
+  class as `start`. Did NOT consult the gate.
+
+Failure scenario:
+
+1. User clicks Start → DNA was "ready" → agent runs.
+2. User clicks Pause → agent pauses.
+3. In a sibling tab, user clicks Re-train → BRAIN-88
+   flips `_dna_state` to "pending".
+4. Original tab clicks Resume → agent re-engages
+   against `_dna_state="pending"`. Operator dashboard
+   shows contradictory information; if the agent
+   thread crashes and restarts, it picks up the new
+   pending DNA mid-generation, producing incoherent
+   hunt results.
+
+Or:
+
+1. Operator runs an SQL UPDATE that corrupts
+   `_dna_state` while the agent is paused.
+2. User clicks Resume → no controlled fail-closed.
+
+Per Huntova engineering review on shared-precondition
+consistency: any action that re-activates a billable /
+state-mutating path must consult the same gate as the
+initial activation. Centralized validation only pays
+off when every re-activation entry point uses it.
+
+Fix: the `resume` branch now reads settings, calls
+`_dna_state_gate_response`, and returns the blocking
+response when state is invalid / pending / failed —
+the same pattern as the `start` branch. The gate call
+appears BEFORE `agent_runner.resume_agent(...)`, so a
+blocked state never reaches the side effect (BRAIN-120
+ordering invariant preserved).
+
+`stop` and `pause` remain ungated by design — abort-
+class actions must always work.
+
+4 new regression tests in
+`test_agent_resume_dna_gate.py`:
+- agent_control invokes the gate helper at least
+  twice (start + resume).
+- Inside the resume branch, the gate call appears
+  before `agent_runner.resume_agent(`.
+- Resume reads settings via `db.get_settings` (same
+  pattern as start).
+- `stop` and `pause` branches do NOT call the gate
+  (abort-class invariant preserved).
+
+567 / 567 tests passing.
+
+### Files
+
+- `server.py`: agent_control's resume branch now consults `_dna_state_gate_response` before `agent_runner.resume_agent`. Same try/except + fail-open pattern as the start branch — transient DB errors during the gate check fall through.
+- `tests/test_agent_resume_dna_gate.py`: new — 4 tests guarding the resume-side precondition + the abort-class invariant for stop/pause.
+
+---
+
 ## 0.1.0a489 — May 4 2026 — BRAIN-79's `_dna_state` precondition gate was inline in `agent_control`, leaving the precondition-before-billable ordering invariant unprotected (a future PR adding rate-limiting or quota accounting could insert state mutation before the gate without anything to catch it); extracted the gate to `_dna_state_gate_response(wizard_blob)` helper and added regression tests that codify the ordering at the source level (BRAIN-120)
 
 ### Bug fix (BRAIN-120, fail-fast precondition ordering)

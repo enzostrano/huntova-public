@@ -11915,6 +11915,33 @@ async def agent_control(request: Request, user: dict = Depends(require_user)):
         agent_runner.pause_agent(user["id"])
         return {"ok": True, "action": "pause"}
     elif action == "resume":
+        # a490 fix (BRAIN-121): consult the shared
+        # `_dna_state_gate_response` helper before
+        # re-activating. Resume is the same precondition
+        # class as start: it re-engages a billable /
+        # state-mutating path. A sibling tab may have
+        # corrupted/wiped/re-flipped `_dna_state` while
+        # the agent was paused; resuming against a
+        # pending / failed / invalid state produces
+        # incoherent hunt results. Per Huntova engineering
+        # review on shared-precondition consistency:
+        # centralized validation only pays off when every
+        # re-activation entry point uses it.
+        try:
+            _settings_for_dna = await db.get_settings(user["id"])
+            _w_for_dna = (_settings_for_dna or {}).get("wizard", {}) or {}
+            _gate_block = _dna_state_gate_response(_w_for_dna)
+            if _gate_block is not None:
+                _kind = _gate_block.get("blocked", "?")
+                _shown = _gate_block.get("dna_state", "?")
+                print(f"[AGENT] user={user['id']} resume blocked: {_kind} (state={_shown!r})")
+                return _gate_block
+        except Exception as _dna_check_err:
+            # Same fail-open semantic as the start branch:
+            # transient DB errors during the gate check
+            # fall through. The agent thread itself
+            # surfaces failure via SSE.
+            print(f"[AGENT] user={user['id']} resume dna_state check failed (non-fatal): {_dna_check_err}")
         agent_runner.resume_agent(user["id"])
         return {"ok": True, "action": "resume"}
     else:
