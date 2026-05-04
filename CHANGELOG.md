@@ -6,6 +6,28 @@ Versioning: `0.1.0aNN` alpha increments. Public install path: `pipx install hunt
 
 ---
 
+## v0.1.0a2007 — May 4 2026 — Test-only audit sweep on AgentRunner state-tracker + db_driver path resolution
+
+### What we audited
+- `agent_runner.AgentRunner` state-tracker — running-count, is_running, queue_position. Complements wave-1 BRAIN-PROD-7 (a620) concurrency / DNA-replay fix; this audit pins the state-tracker contract itself.
+- `db_driver._local_db_path` — SQLite path resolver respecting `HUNTOVA_DB_PATH` override + `XDG_DATA_HOME` + `~` expansion.
+
+### Tests added
+- `tests/test_agent_runner_state_audit.py` — 10 tests pinning fresh-instance running_count zero; is_running unknown-user False + ghost-thread self-clean (dead-but-still-tracked thread is detected and removed); is_running True for alive thread; queue_position 0 for running, 1-indexed for queued, None for unknown; running takes priority over queued; lock primitive is acquire/release-shaped.
+- `tests/test_db_driver_path_audit.py` — 8 tests pinning HUNTOVA_DB_PATH override wins; `~` expands to home; XDG_DATA_HOME used when no override; default falls back to `~/.local/share/huntova`; parent dir auto-created; path ends with `db.sqlite`; returns Path object; relative override accepted as-is.
+
+### What this protects
+- AgentRunner ghost-thread cleanup — without this, an OS-killed agent thread leaves a permanent ghost entry in `_running` and the user can never start another hunt (concurrency cap at 1 per user). Pin the self-clean.
+- DB path resolution — a regression here either ignores `HUNTOVA_DB_PATH` (Docker / sandbox installs that need a custom path) or fails to auto-create the parent dir on first run (silently crashes the SQLite open).
+
+### Backwards compat
+- None. Test-only release — zero source changes.
+
+### Migration
+- None. `pipx upgrade huntova`.
+
+---
+
 ## v0.1.0a2006 — May 4 2026 — Test-only audit sweep on settings defaults + Stripe products catalog
 
 ### What we audited
