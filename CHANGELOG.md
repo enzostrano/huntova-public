@@ -6,6 +6,27 @@ Versioning: `0.1.0aNN` alpha increments. Public install path: `pipx install hunt
 
 ---
 
+## v0.1.0a2008 — May 4 2026 — Test-only audit sweep on `_safe_nonneg_int` defensive coercer + wizard phase/confidence clamps
+
+### What we audited
+- `server._safe_nonneg_int` — the BRAIN-115 (a484) defensive coercer used at every public emission of optimistic-concurrency tokens (`_wizard_revision`, `_wizard_epoch`, `_wizard_cursor`) and audit counters (`_train_count`, `_train_attempts`).
+- `server._normalize_wizard_phase` — clamps to `_WIZARD_PHASE_MAX` (default 100). BRAIN-119 / BRAIN-135.
+- `server._normalize_wizard_confidence` — clamps to `_WIZARD_CONFIDENCE_MAX`. BRAIN-135 (a504).
+
+### Tests added
+- `tests/test_safe_nonneg_int_audit.py` (18 tests) — pin all 6 input-class branches: None → default; bool subclass-of-int rejected as corruption (return default); positive int passes; negative int clamped to 0 when default ≥ 0; float truncates via int(); negative float clamped; numeric strings parse; unparseable strings → default; list / dict / weird types → default; `float('inf')` / `float('nan')` → default. Plus phase / confidence upper-clamp at the documented MAX + garbage → default behaviour.
+
+### What this protects
+- The pre-fix pattern `int(w.get(KEY, 0) or 0)` had three failure modes: (1) string / list / dict raw → `int()` raises → status-request 500s → entire wizard UI breaks; (2) negative int raw flows through as -3 corrupting the client's optimistic-concurrency baseline; (3) bool / float silently coerce, masking data corruption upstream. `_safe_nonneg_int` neutralises all three, but only as long as its bool-rejection / float-truncate / list-rejection branches stay correct — a regression here re-opens the entire BRAIN-115 vulnerability class.
+
+### Backwards compat
+- None. Test-only release — zero source changes.
+
+### Migration
+- None. `pipx upgrade huntova`.
+
+---
+
 ## v0.1.0a2007 — May 4 2026 — Test-only audit sweep on AgentRunner state-tracker + db_driver path resolution
 
 ### What we audited
