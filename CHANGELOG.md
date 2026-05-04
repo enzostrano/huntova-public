@@ -6,6 +6,88 @@ Versioning: `0.1.0aNN` alpha increments. Public install path: `pipx install hunt
 
 ---
 
+## 0.1.0a499 — May 4 2026 — `/api/wizard/start-retrain` rewound wizard state without consulting the BRAIN-120 dna gate, allowing a sibling-tab Re-train to flip `_interview_complete=False` mid-generation while DNA was still in flight; gate now consulted, but only honors the `dna_pending` block (failed/invalid pass through since start-retrain IS the recovery path for those) (BRAIN-130)
+
+### Bug fix (BRAIN-130, start-retrain shared-gate consistency)
+
+BRAIN-120 (a489) extracted the dna gate into the
+shared `_dna_state_gate_response` helper. BRAIN-121
+(a490) extended it to `agent_control`'s resume
+action. `/api/wizard/start-retrain` flips
+`_interview_complete=False` and clears
+`_wizard_phase` to send the user back through the
+wizard. It never consulted the gate.
+
+Failure scenario:
+
+1. User clicks Complete → DNA goes pending with
+   started_at = T0 (fresh).
+2. In a sibling tab, user clicks Re-train. The
+   start-retrain endpoint flips
+   `_interview_complete=False` while DNA is still
+   in flight.
+3. Now the row is incoherent: DNA pipeline still
+   generating (will eventually write back ready /
+   failed via BRAIN-78 mutators) AND the wizard
+   reopened mid-generation. The subsequent
+   writeback may land on a reset wizard, the new
+   wizard run collides with the in-flight one when
+   the user clicks Complete again, etc.
+
+But the gate's blocking semantic for `failed` and
+`invalid` doesn't fit start-retrain: those states
+say "click Re-train to recover" — and start-retrain
+IS the Re-train action. Blocking on `failed` would
+trap the user behind the very state they're trying
+to recover from.
+
+Per Huntova engineering review on shared-precondition
+consistency: any endpoint that reopens, rewinds, or
+reinitializes wizard/brain state must call the same
+helper before changing persisted state. The endpoint
+chooses which gate kinds to honor.
+
+Fix: start-retrain reads settings, calls
+`_dna_state_gate_response(wizard_blob)`, and only
+returns early when the response's `blocked` is
+`"dna_pending"`. `failed` and `invalid` pass through
+to the existing merge_settings flow (the recovery
+path). Stale pending is automatically reclaimed by
+BRAIN-123's lease-coherence — the helper returns
+None, and start-retrain proceeds normally.
+
+Behavior matrix:
+- `_dna_state` = ready / unset / stale-pending →
+  helper returns None → start-retrain proceeds.
+- `_dna_state` = failed / invalid → helper returns
+  blocking dict, but `blocked != "dna_pending"` → 
+  start-retrain proceeds (recovery path).
+- `_dna_state` = fresh-pending → helper returns
+  `dna_pending` block → start-retrain returns 503-
+  class with the same `_dna_state_gate_response`
+  payload as agent_control.
+
+5 new regression tests in
+`test_wizard_start_retrain_dna_gate.py`:
+- Source-level: handler calls the gate helper.
+- Source-level: gate call precedes
+  `db.merge_settings`.
+- Source-level: handler filters on `dna_pending`
+  (not unconditional return).
+- Source-level: failed/invalid pass through (the
+  filter pattern explicitly checks blocked kind).
+- Source-level: settings read precedes the gate
+  call.
+
+628 / 628 tests passing.
+
+### Files
+
+- `server.py`: `api_wizard_start_retrain` now reads settings + calls `_dna_state_gate_response`. Only returns the gate block when `blocked == "dna_pending"`. Failed/invalid pass through to the existing merge_settings flow with the same fail-open semantic on transient DB errors as `agent_control`.
+- `tests/test_wizard_start_retrain_dna_gate.py`: new — 5 tests guarding the start-retrain shared-gate consistency invariant.
+
+---
+
 ## 0.1.0a498 — May 4 2026 — `_validate_scan_output` enforced 50K char cap per field but no byte cap; one verbose crawl field × 4 bytes/UTF-8 char = ~200 KB per field, and across the ~30-field schema the persisted scan output could theoretically reach 6 MB; new `_SCAN_FIELD_BYTES_MAX` + `_clip_to_byte_budget` integration closes the third large-text ingress (after BRAIN-127 user-input + BRAIN-128 phase-5 AI-output) (BRAIN-129)
 
 ### Bug fix (BRAIN-129, scan-output byte cap)

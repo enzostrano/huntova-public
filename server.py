@@ -11290,6 +11290,36 @@ async def api_wizard_start_retrain(user: dict = Depends(require_user)):
     broken. Now the button calls this endpoint server-side so the
     wizard genuinely reopens.
     """
+    # a499 (BRAIN-130): consult the shared dna gate
+    # before mutating wizard state. Per Huntova
+    # engineering review on shared-precondition
+    # consistency: any endpoint that reopens, rewinds,
+    # or reinitializes wizard/brain state must call the
+    # same `_dna_state_gate_response` helper before
+    # changing persisted state.
+    #
+    # BUT: only honor the `dna_pending` block. start-
+    # retrain IS the recovery action for `failed` /
+    # `invalid` states — blocking on those would trap
+    # the user behind the very state they're trying to
+    # recover from. Stale pending is reclaimed by the
+    # helper itself (BRAIN-123) so it returns None and
+    # we proceed.
+    try:
+        _settings_for_dna = await db.get_settings(user["id"])
+        _w_for_dna = (_settings_for_dna or {}).get("wizard", {}) or {}
+        _gate_block = _dna_state_gate_response(_w_for_dna)
+        if _gate_block is not None and _gate_block.get("blocked") == "dna_pending":
+            print(
+                f"[WIZARD] user={user['id']} start-retrain blocked: "
+                f"dna_pending (sibling tab is mid-generation)"
+            )
+            return _gate_block
+    except Exception as _dna_check_err:
+        # Same fail-open semantic as agent_control's
+        # gate consult: transient DB errors during the
+        # check fall through to the existing flow.
+        print(f"[WIZARD] user={user['id']} start-retrain dna_state check failed (non-fatal): {_dna_check_err}")
     # a362: migrate to atomic merge_settings — same race class as
     # /api/wizard/complete (a360). The user can click Re-train while
     # an active hunt is writing scoring_rules / archetype / dossier
