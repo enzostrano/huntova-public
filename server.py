@@ -4063,26 +4063,43 @@ async def api_chat(request: Request, response: Response, user: dict = Depends(re
     # placeholder note so the AI knows an attachment was sent.
     _attachment_rows = []
     _attachment_payloads = []  # provider-shaped {type, source/image_url}
+    # a610: count attachments that the client claimed to send but we
+    # had to drop (null id, missing on disk, oversize, etc.). Pre-fix
+    # the loop silently `continue`d on every failure mode so the user
+    # got an AI reply that ignored the image with zero indication.
+    # Now we surface `_attachments_dropped` in the response envelope so
+    # the dashboard can warn ("1 of 2 images failed to attach — retry").
     _att_ids_raw = body.get("attachments") or []
+    _att_claimed_count = 0
+    _att_drop_reasons: list[str] = []
     if isinstance(_att_ids_raw, list) and _att_ids_raw:
         import base64 as _b64
         from pathlib import Path as _Path
         for _a in _att_ids_raw[:_MAX_ATTACHMENTS_PER_MESSAGE]:
+            _att_claimed_count += 1
             try:
                 _aid = int(_a.get("id") if isinstance(_a, dict) else _a)
             except (TypeError, ValueError):
+                # a610 fix: this is the silent-skip path that lost
+                # images when send() raced an in-flight upload (id=null).
+                # Frontend now awaits uploads, but log + count for
+                # observability if a future client regresses.
+                _att_drop_reasons.append("invalid_id")
                 continue
             row = await db.get_attachment(user["id"], _aid)
             if not row or not row.get("storage_path"):
+                _att_drop_reasons.append("not_found")
                 continue
             try:
                 p = _Path(row["storage_path"])
                 if not p.is_file():
+                    _att_drop_reasons.append("file_missing")
                     continue
                 # Re-cap at read time too — defensive against on-disk
                 # tampering after upload + future format changes.
                 blob = p.read_bytes()
                 if len(blob) > _MAX_ATTACHMENT_BYTES:
+                    _att_drop_reasons.append("oversize")
                     continue
                 _attachment_rows.append(row)
                 _attachment_payloads.append({
@@ -4092,11 +4109,13 @@ async def api_chat(request: Request, response: Response, user: dict = Depends(re
                 })
             except Exception as _ae:
                 print(f"[chat] attachment read failed for id={_aid}: {_ae}")
+                _att_drop_reasons.append("read_error")
                 continue
             try:
                 await db.mark_attachment_consumed(user["id"], _aid)
             except Exception:
                 pass
+    _attachments_dropped = max(0, _att_claimed_count - len(_attachment_payloads))
     # Build the user-message in provider-appropriate shape.
     _vision_supported = provider_name in ("anthropic", "openai", "gemini", "openrouter")
     if _attachment_payloads and _vision_supported:
@@ -4177,6 +4196,17 @@ async def api_chat(request: Request, response: Response, user: dict = Depends(re
         "tps": round(_tok_out / _dt, 1) if _dt > 0 else 0,
         "approx": _approx_flag,
     }
+    # a610: surface attachment-drop accounting so the dashboard can
+    # warn ("1 of 2 images dropped — retry"). Pre-fix the dispatcher
+    # silently swallowed every drop reason, so a user whose image was
+    # lost to a TypeError on `int(None)` (race against in-flight upload)
+    # got a vision-blind reply with no signal that the model never saw
+    # the image. See _attachments_dropped accounting above.
+    if _attachments_dropped > 0:
+        _chat_meta["attachments_dropped"] = _attachments_dropped
+        _chat_meta["attachments_drop_reasons"] = _att_drop_reasons[:5]
+        _chat_meta["attachments_claimed"] = _att_claimed_count
+        _chat_meta["attachments_kept"] = len(_attachment_payloads)
 
     if is_anthropic and raw and not raw.lstrip().startswith("{"):
         raw = "{" + raw

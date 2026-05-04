@@ -555,6 +555,17 @@ body.hv-reduced-motion .bg-orbs span{animation:none !important;display:none}
   transition:color .12s;
 }
 .hv-attach-chip-x:hover{color:var(--hv-cyan)}
+/* a610: in-flight upload state. Faded chip + pulsing border so the
+   user sees at a glance that send is gated on this upload finishing. */
+.hv-attach-chip-loading{
+  opacity:0.78;
+  border-color:rgba(0,229,204,0.45);
+  animation:hv-attach-pulse 1.4s ease-in-out infinite;
+}
+@keyframes hv-attach-pulse{
+  0%,100%{ box-shadow:0 0 0 0 rgba(0,229,204,0.18); }
+  50%   { box-shadow:0 0 0 4px rgba(0,229,204,0.04); }
+}
 
 .dock-attach{
   background:transparent; border:0; cursor:pointer;
@@ -2412,10 +2423,17 @@ body.hv-has-update-banner{padding-top:var(--hv-update-banner-h, 38px)}
     wrap.style.display = '';
     _pendingAttachments.forEach((a, idx) => {
       const chip = document.createElement('div');
-      chip.className = 'hv-attach-chip';
+      chip.className = 'hv-attach-chip' + (a.uploading ? ' hv-attach-chip-loading' : '');
+      // a610: surface the in-flight upload state. Pre-fix a fast user
+      // could hit Send while uploads were still in-flight, drop their
+      // image silently, and the AI would respond as if no image was
+      // attached. Now the chip clearly says "uploading…".
+      const _label = a.uploading
+        ? (a.filename || 'image') + ' · uploading…'
+        : (a.filename || 'image');
       chip.innerHTML =
         '<img class="hv-attach-chip-thumb" alt="" src="' + _esc(a.preview || '') + '">' +
-        '<span class="hv-attach-chip-name">' + _esc(a.filename || 'image') + '</span>' +
+        '<span class="hv-attach-chip-name">' + _esc(_label) + '</span>' +
         '<button type="button" class="hv-attach-chip-x" aria-label="Remove">×</button>';
       chip.querySelector('.hv-attach-chip-x').addEventListener('click', () => {
         if (a.preview && a.preview.startsWith('blob:')) {
@@ -2443,30 +2461,48 @@ body.hv-has-update-banner{padding-top:var(--hv-update-banner-h, 38px)}
     // Synthetic preview chip while upload is in-flight so the user
     // gets immediate feedback for big files.
     const localPreview = URL.createObjectURL(file);
+    // a610 fix: store the in-flight upload promise on the placeholder
+    // itself so `send()` can `await` it. Pre-fix: send() ran while
+    // upload was still in flight, took a snapshot of the placeholder
+    // with `id: null`, server's `int(_a.get("id"))` raised TypeError on
+    // None, the per-attachment try/except silently `continue`d, the
+    // user saw "(attached 1 image)" in the feed but the AI got the
+    // text-only message (no vision) and answered as if blind.
+    // Fix: send() awaits all `uploadPromise`s before snapshotting, then
+    // filters out any that failed (id still null).
     const placeholder = {id: null, filename: file.name, mime: file.type,
-                         preview: localPreview, uploading: true};
+                         preview: localPreview, uploading: true,
+                         uploadPromise: null};
     _pendingAttachments.push(placeholder);
     _renderAttachChips();
-    try {
-      const r = await fetch('/api/chat/attach', {method: 'POST', body: fd, credentials: 'include'});
-      const d = await r.json();
-      if (d && d.ok) {
-        placeholder.id = d.id;
-        placeholder.uploading = false;
-      } else {
-        // Remove placeholder + alert.
+    placeholder.uploadPromise = (async () => {
+      try {
+        const r = await fetch('/api/chat/attach', {method: 'POST', body: fd, credentials: 'include'});
+        const d = await r.json();
+        if (d && d.ok) {
+          placeholder.id = d.id;
+          placeholder.uploading = false;
+          _renderAttachChips();
+          return true;
+        } else {
+          // Remove placeholder + alert.
+          const i = _pendingAttachments.indexOf(placeholder);
+          if (i >= 0) _pendingAttachments.splice(i, 1);
+          try { URL.revokeObjectURL(localPreview); } catch (_) {}
+          _toast('Upload failed: ' + (d && d.error || 'unknown'), 'err');
+          _renderAttachChips();
+          return false;
+        }
+      } catch (e) {
         const i = _pendingAttachments.indexOf(placeholder);
         if (i >= 0) _pendingAttachments.splice(i, 1);
         try { URL.revokeObjectURL(localPreview); } catch (_) {}
-        _toast('Upload failed: ' + (d && d.error || 'unknown'), 'err');
+        _toast('Upload failed: ' + e, 'err');
+        _renderAttachChips();
+        return false;
       }
-    } catch (e) {
-      const i = _pendingAttachments.indexOf(placeholder);
-      if (i >= 0) _pendingAttachments.splice(i, 1);
-      try { URL.revokeObjectURL(localPreview); } catch (_) {}
-      _toast('Upload failed: ' + e, 'err');
-    }
-    _renderAttachChips();
+    })();
+    return placeholder.uploadPromise;
   }
   (function _wireAttach(){
     const btn = $('attachBtn'); const input = $('attachInput');
@@ -2530,13 +2566,39 @@ body.hv-has-update-banner{padding-top:var(--hv-update-banner-h, 38px)}
     // a286: a message is sendable if there's text OR at least one
     // attachment (vision-only prompts like "describe this" work).
     if (!text && !_pendingAttachments.length) return;
+    // a610 fix: await any in-flight attachment uploads BEFORE we
+    // snapshot the list. Pre-fix: a fast user who hit Send right after
+    // dropping a 5MB image — while the multipart upload was still
+    // in-flight — would post `attachments: [{id: null}]` to /api/chat.
+    // Server caught the TypeError on `int(None)` and silently
+    // `continue`d, so the AI saw text only and answered as if blind.
+    // Fix: gate send on all pending upload promises. Mark _busy
+    // immediately so the user can't double-tap during the await.
+    _busy = true; $('sendBtn').disabled = true;
+    if (_pendingAttachments.some(a => a && a.uploading)) {
+      try {
+        const promises = _pendingAttachments
+          .filter(a => a && a.uploadPromise)
+          .map(a => a.uploadPromise);
+        await Promise.all(promises);
+      } catch (_) { /* individual upload failures already toasted */ }
+      // Re-check: if every attachment failed and there's no text,
+      // bail out — nothing useful to send.
+      if (!text && !_pendingAttachments.length) {
+        _busy = false; $('sendBtn').disabled = false; ta.focus();
+        return;
+      }
+    }
     ta.value = ''; autoSize();
     // Render the user message + attachment chip thumbnails inline.
-    const userText = text || (_pendingAttachments.length
-      ? '(attached ' + _pendingAttachments.length + ' image' + (_pendingAttachments.length > 1 ? 's' : '') + ')'
+    // a610 fix: only count attachments that actually have a server-side
+    // id (upload completed). Failed/dropped ones must not inflate the
+    // "(attached N image)" placeholder shown in the feed.
+    const _readyAttachments = _pendingAttachments.filter(a => a && a.id != null);
+    const userText = text || (_readyAttachments.length
+      ? '(attached ' + _readyAttachments.length + ' image' + (_readyAttachments.length > 1 ? 's' : '') + ')'
       : '');
     appendMsg('user', userText, _now());
-    _busy = true; $('sendBtn').disabled = true;
     const thinking = thinkingNode();
     let result = null;
     // a314: wrap the entire post-send pipeline in try/finally so that
@@ -2574,7 +2636,13 @@ body.hv-has-update-banner{padding-top:var(--hv-update-banner-h, 38px)}
           message: text,
           provider,
           conversation_id: _currentConversationId,
-          attachments: _attachSnapshot.map(a => ({id: a.id})),
+          // a610 fix: filter out any attachment without a real
+          // server-side id. Belt-and-braces — send() already awaited
+          // pending uploads, but a future code path that pushes a
+          // synthetic placeholder must not poison the chat dispatcher.
+          attachments: _attachSnapshot
+            .filter(a => a && a.id != null)
+            .map(a => ({id: a.id})),
         }), credentials: 'include',
       });
       result = await r.json();
@@ -2609,6 +2677,19 @@ body.hv-has-update-banner{padding-top:var(--hv-update-banner-h, 38px)}
       }, 30);
     }
     appendBotPrefixed(desc.prefix, desc.text, _now(), meta, extras);
+    // a610: warn the user when the server dropped attachments. Pre-fix
+    // every drop reason was silent — the AI replied as if blind and
+    // the user never knew their image hadn't reached the model.
+    if (meta && meta.attachments_dropped) {
+      const _kept = meta.attachments_kept || 0;
+      const _claimed = meta.attachments_claimed || (meta.attachments_dropped + _kept);
+      const _reasons = (meta.attachments_drop_reasons || []).join(', ') || 'unknown';
+      appendBotPrefixed(
+        '⚠',
+        `${meta.attachments_dropped} of ${_claimed} image${_claimed === 1 ? '' : 's'} didn't reach the model (${_reasons}). Re-attach and resend if the reply doesn't reflect what's in the image.`,
+        _now(), null,
+      );
+    }
     // a287 fix: spawn_agents was a dead claim — chat returned the
     // action label but neither frontend nor server actually invoked
     // /api/subagents/spawn for any of the listed agents. Wire the

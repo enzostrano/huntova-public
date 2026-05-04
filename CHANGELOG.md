@@ -6,6 +6,38 @@ Versioning: `0.1.0aNN` alpha increments. Public install path: `pipx install hunt
 
 ---
 
+## 0.1.0a610 — May 4 2026 — Chat attachment race: image upload-vs-send race silently dropped attachments; AI replied as if blind with zero user-visible signal (BRAIN-CHAT-1)
+
+### Bug fix (BRAIN-CHAT-1, chat surface stability — image attachment race condition)
+
+Drop a 5MB screenshot into the chat dock, type a question, press Enter before the multipart upload finishes — Huntova showed "(attached 1 image)" in the feed, posted `attachments: [{id: null}]` to `/api/chat`, and the server's per-attachment loop caught the `int(None)` `TypeError`, silently `continue`d, and ran the chat dispatcher as if the image was never attached. The AI answered text-only as if blind. Zero indication to the user that their image hadn't reached the model — they'd just see a reply that didn't address what was in the screenshot and assume the AI was confused.
+
+Two-layer fix.
+
+1. **Frontend (`templates/jarvis.html`)**:
+   - `_uploadAttachment` now stashes the in-flight upload Promise on the chip placeholder. `send()` detects any chips still in `uploading: true` and `Promise.all`'s every pending upload before snapshotting.
+   - The chip applies a `hv-attach-chip-loading` class with a pulsing border + the literal text "uploading…" appended to the filename so the in-flight state is unambiguous.
+   - The chat-body construction filters `id != null` belt-and-braces — even if a future code path leaks a synthetic placeholder past the promise gate, the body never carries `{id: null}`.
+   - When the server stamps `attachments_dropped > 0` into the meta, the frontend renders a `⚠ N of M images didn't reach the model (reasons)` warning row in the chat feed so the user knows to re-attach.
+
+2. **Server (`server.py`)**:
+   - The attachment loop now records a drop reason (`invalid_id`, `not_found`, `file_missing`, `oversize`, `read_error`) for each skipped attachment instead of silently `continue`ing.
+   - The dispatcher computes `_attachments_dropped = claimed - kept` and stamps `attachments_dropped` + `attachments_drop_reasons` + `attachments_claimed` + `attachments_kept` into the response meta envelope — the frontend uses all four to render the warning row.
+   - The TypeError on `int(None)` is still caught (no regression to a 500), but the drop is now observable.
+
+10 new tests in `tests/test_chat_attachment_race.py` lock down both halves: dispatcher claimed/kept/dropped accounting + drop-reason recording + meta envelope + invalid-id catch path; frontend send() promise gating + null-id body filter + chip uploading-state surface + dropped-attachment warning + idempotency replay positioned before attachment processing. 859 tests total pass.
+
+### Files
+
+- `server.py:4063-4124` (api_chat dispatcher attachment loop + meta envelope)
+- `templates/jarvis.html:540-557` (chip CSS — pulsing loading state)
+- `templates/jarvis.html:2408-2470` (chip render + uploading label)
+- `templates/jarvis.html:2490-2525` (`_uploadAttachment` returns the stashed promise)
+- `templates/jarvis.html:2547-2615` (`send()` awaits pending uploads + filters null ids + warns on dropped)
+- `tests/test_chat_attachment_race.py` (10 new regression tests, 869 total)
+
+---
+
 ## 0.1.0a586 — May 4 2026 — Update button still erroring after a511; root cause: cookie `Secure` flag set on plain HTTP local mode silently dropped by Firefox/Safari/Brave; fix gates Secure on runtime mode + adds frontend HTTP-status surface + server-side stderr logging (BRAIN-PROD-5)
 
 ### Bug fix (BRAIN-PROD-5, in-browser update flow — second half of the CSRF parity fix)
