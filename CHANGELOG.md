@@ -6,6 +6,74 @@ Versioning: `0.1.0aNN` alpha increments. Public install path: `pipx install hunt
 
 ---
 
+## 0.1.0a477 — May 4 2026 — BRAIN-79 agent gate fell through silently on malformed `_dna_state` values (typos, case mangling, null, non-strings); enum validation closes the silent-bypass hole (BRAIN-108)
+
+### Bug fix (BRAIN-108, state-machine read-side enum validation)
+
+The BRAIN-79 (a440) gate matched two specific blocked
+states:
+
+```python
+if _dna_state == "pending":  return blocked-pending
+if _dna_state == "failed":   return blocked-failed
+# anything else falls through to proceed
+```
+
+The fall-through bucket lumped three semantically-different
+cases:
+
+- `"ready"`: legitimate green-light.
+- `"unset"`: pre-BRAIN-78 install with no DNA field
+  (legacy compat).
+- Anything malformed — `"pendng"`, `"READY"`, `"failedd"`,
+  `None`, `42`, `{}` — silently treated as green-light.
+
+A future bug, operator UPDATE, partial migration, or legacy
+row could persist a malformed value. The gate would proceed
+with whatever derived state existed (potentially stale or
+absent), bypassing the BRAIN-79 protection silently.
+
+State-machine guidance: invalid states must be handled
+explicitly and fail closed.
+
+Fix:
+
+```python
+_DNA_STATE_ALLOWED = {"pending", "ready", "failed", "unset"}
+_dna_state_normalized = (
+    "unset" if _dna_state is None
+    else _dna_state if _dna_state in _DNA_STATE_ALLOWED
+    else None  # sentinel: outside enum
+)
+if _dna_state_normalized is None:
+    return {
+        "ok": False,
+        "blocked": "dna_invalid_state",
+        "error": "Wizard DNA state is corrupted. Open the "
+                 "Brain wizard and click Re-train to recover.",
+        "dna_state": str(_dna_state)[:80],
+        "retry_action": "wizard_retrain",
+    }
+```
+
+`None` (legacy pre-BRAIN-78 install) maps to `"unset"` and
+proceeds. Any value outside the enum gets a distinct
+`blocked: "dna_invalid_state"` response with the offending
+value (truncated to 80 chars for safety). Operator can
+read the response, find the bad row, and recover via
+Re-train.
+
+`ready` and `unset` continue to proceed. The BRAIN-79
+pending/failed branches now dispatch on the normalized
+value, so case-mangled typos no longer slip past.
+
+6 new regression tests in
+`tests/test_agent_start_dna_state_enum.py`.
+
+453 of 453 tests passing.
+
+---
+
 ## 0.1.0a476 — May 4 2026 — Skip phase-boundary state-isolation regression guards; current code is correct, tests pin the invariant against future refactors (BRAIN-107)
 
 ### Bug fix (BRAIN-107, multistep-form state-machine isolation)

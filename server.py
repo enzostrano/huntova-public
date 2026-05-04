@@ -11191,7 +11191,43 @@ async def agent_control(request: Request, user: dict = Depends(require_user)):
             _settings_for_dna = await db.get_settings(user["id"])
             _w_for_dna = (_settings_for_dna or {}).get("wizard", {}) or {}
             _dna_state = _w_for_dna.get("_dna_state")
-            if _dna_state == "pending":
+            # a477 fix (BRAIN-108): enum validation on read.
+            # Per Huntova engineering review on state-machine
+            # read-side validation: invalid states must be
+            # handled explicitly and fail closed. Pre-fix, any
+            # value other than "pending"/"failed" fell through
+            # to the proceed path — including typos
+            # ("pendng"), case-mangled values ("READY"), null,
+            # numbers, dicts, etc. A future bug or operator
+            # UPDATE could persist a malformed value and
+            # silently bypass the BRAIN-79 gate.
+            _DNA_STATE_ALLOWED = {"pending", "ready", "failed", "unset"}
+            # `None` (field absent on legacy pre-BRAIN-78
+            # installs) maps to "unset" so legacy users keep
+            # working.
+            _dna_state_normalized = (
+                "unset" if _dna_state is None
+                else _dna_state if _dna_state in _DNA_STATE_ALLOWED
+                else None  # sentinel: outside enum
+            )
+            if _dna_state_normalized is None:
+                # Out-of-enum value. Fail closed: don't proceed
+                # silently. Surface to the operator with the
+                # offending value so they can investigate the
+                # corrupted row.
+                _bad_str = str(_dna_state)[:80]
+                print(f"[AGENT] user={user['id']} start blocked: dna_state outside enum (got={_bad_str!r})")
+                return {
+                    "ok": False,
+                    "blocked": "dna_invalid_state",
+                    "error": (
+                        "Wizard DNA state is corrupted. Open the Brain "
+                        "wizard and click Re-train to recover."
+                    ),
+                    "dna_state": _bad_str,
+                    "retry_action": "wizard_retrain",
+                }
+            if _dna_state_normalized == "pending":
                 print(f"[AGENT] user={user['id']} start blocked: dna_state=pending")
                 return {
                     "ok": False,
@@ -11203,7 +11239,7 @@ async def agent_control(request: Request, user: dict = Depends(require_user)):
                     "dna_state": "pending",
                     "dna_started_at": _w_for_dna.get("_dna_started_at", ""),
                 }
-            if _dna_state == "failed":
+            if _dna_state_normalized == "failed":
                 _err = _w_for_dna.get("_dna_error", "")
                 print(f"[AGENT] user={user['id']} start blocked: dna_state=failed err={_err[:80]}")
                 return {
