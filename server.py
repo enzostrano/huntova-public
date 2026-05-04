@@ -8950,6 +8950,13 @@ async def api_wizard_scan(request: Request, response: Response, user: dict = Dep
             ),
             "daily_quota_exceeded",
         )
+    # a487 (BRAIN-118): byte-cap BEFORE json parse.
+    # The expected scan payload is just `{url}` but
+    # request.json parses the full body before url
+    # extraction; consistent endpoint posture.
+    _body_bytes, _too_large = await _enforce_body_byte_cap(request, _WIZARD_BODY_BYTES_MAX)
+    if _too_large is not None:
+        return _too_large
     body = await request.json()
     url = (body.get("url") or "").strip()
     if not url:
@@ -10258,6 +10265,13 @@ async def api_wizard_generate_phase5(request: Request, response: Response, user:
             ),
             "phase5_daily_quota_exceeded",
         )
+    # a487 (BRAIN-118): byte-cap BEFORE json parse.
+    # phase5 accepts `scanData` (full scan_report)
+    # which can be large; cap before it hits the AI
+    # provider.
+    _body_bytes, _too_large = await _enforce_body_byte_cap(request, _WIZARD_BODY_BYTES_MAX)
+    if _too_large is not None:
+        return _too_large
     body = await request.json()
     answers = body.get("answers", {}) or {}
     scan_data = body.get("scanData") or {}
@@ -10540,6 +10554,14 @@ async def api_wizard_assist(request: Request, response: Response, user: dict = D
             ),
             "assist_daily_quota_exceeded",
         )
+    # a487 (BRAIN-118): byte-cap BEFORE json parse.
+    # assist is the highest-risk wizard endpoint for
+    # oversized pastes — free-text message + history
+    # + current_answer can all carry arbitrary text.
+    # OWASP API4:2023 unrestricted resource consumption.
+    _body_bytes, _too_large = await _enforce_body_byte_cap(request, _WIZARD_BODY_BYTES_MAX)
+    if _too_large is not None:
+        return _too_large
     body = await request.json()
     message = (body.get("message") or "").strip()
     # a374 fix (BRAIN-13): clip user-supplied prompt fields. message,

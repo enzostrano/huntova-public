@@ -6,6 +6,67 @@ Versioning: `0.1.0aNN` alpha increments. Public install path: `pipx install hunt
 
 ---
 
+## 0.1.0a487 — May 4 2026 — BRAIN-117 capped save-progress + complete but `/api/wizard/assist` (free-text chat refinement, highest-risk paste path), `/api/wizard/scan`, `/api/wizard/generate-phase5` were still uncapped; inconsistent endpoint posture meant the easiest oversized-paste vector remained open; all three now invoke `_enforce_body_byte_cap` before `request.json()` (BRAIN-118)
+
+### Bug fix (BRAIN-118, byte-cap parity across wizard mutating endpoints)
+
+BRAIN-117 (a486) capped `/api/wizard/save-progress`
+and `/api/wizard/complete`. The other three wizard
+mutating endpoints still accepted arbitrary-sized
+bodies before parse:
+
+- `/api/wizard/assist` — chat refinement endpoint.
+  Accepts free-text `message`, `question_context`,
+  `current_answer`, plus a `history` list. The most
+  obvious oversized-paste vector in the wizard surface
+  — users paste transcripts, blog posts, marketing
+  copy directly into the textarea.
+- `/api/wizard/scan` — accepts `url` field (small).
+  But `request.json()` parses the entire body before
+  the URL extraction; a malicious client can still
+  attach arbitrary other top-level keys.
+- `/api/wizard/generate-phase5` — accepts `answers`
+  + `scanData` (the raw scan_report from the prior
+  scan step). scanData can be substantial.
+
+All three trigger BYOK spend on the AI provider for
+each accepted call. Inconsistent posture across the
+wizard surface — some endpoints capped, others not —
+means the easiest oversized-paste vector (assist) was
+also the highest-risk one.
+
+Per Huntova engineering review on endpoint-specific
+request-size limits (companion to BRAIN-117): every
+wizard endpoint accepting free-text or user-supplied
+JSON that can trigger model work must enforce the
+byte cap before parsing.
+
+Fix: each of the three remaining wizard mutating
+endpoints now calls
+`_enforce_body_byte_cap(request, _WIZARD_BODY_BYTES_MAX)`
+before `request.json()`. Order preserved: rate-check
+→ daily-quota check → byte-cap → json parse →
+expensive work. The BRAIN-117 ordering principle
+holds: cheap denials run first, byte-cap runs before
+parse cost.
+
+7 new regression tests in
+`test_wizard_payload_byte_cap_extended.py`:
+- assist / scan / phase5 each call the helper and the
+  call precedes `request.json()`.
+- All five wizard mutating endpoints reference the
+  shared `_WIZARD_BODY_BYTES_MAX` constant — operators
+  tuning the cap change one place.
+
+544 / 544 tests passing.
+
+### Files
+
+- `server.py`: byte-cap call inserted in `api_wizard_assist`, `api_wizard_scan`, `api_wizard_generate_phase5` directly before each handler's `request.json()`.
+- `tests/test_wizard_payload_byte_cap_extended.py`: new — 7 tests guarding the parity contract.
+
+---
+
 ## 0.1.0a486 — May 4 2026 — Wizard mutating endpoints had key-count + list-count caps but no top-level body byte cap; a single oversized field value (e.g. 10 MB string) passed every shape gate and forced parse + merge work; new `_WIZARD_BODY_BYTES_MAX` constant + `_enforce_body_byte_cap` helper reject 413 before any json/merge work on `/api/wizard/save-progress` and `/api/wizard/complete` (BRAIN-117)
 
 ### Bug fix (BRAIN-117, OWASP API4:2023 unrestricted resource consumption)
