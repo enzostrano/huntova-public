@@ -6,6 +6,81 @@ Versioning: `0.1.0aNN` alpha increments. Public install path: `pipx install hunt
 
 ---
 
+## 0.1.0a479 — May 4 2026 — Concurrent-tab `/api/wizard/complete` race could double-enqueue DNA generation jobs because the BRAIN-88 ready→pending flip didn't bind atomic claim semantics to `_dna_state`; pre-pending callers now short-circuit with 409 dna_in_flight (BRAIN-110)
+
+### Bug fix (BRAIN-110, atomic claim for DNA retrain)
+
+BRAIN-88 (a457) introduced an early ready→pending flip
+on `_dna_state` so `/api/wizard/status` would surface
+"in flight" the moment a retrain was accepted, instead
+of stale "ready" during the multi-second brain+dossier
+compute window. The flip honored BRAIN-14 (revision)
+and BRAIN-81 (epoch) guards to reject stale tabs.
+
+What it did NOT honor was the most basic
+idempotent-job-system invariant: the same atomic step
+that observes "ready" must transition to "pending" and
+grant the right to enqueue work. The flip mutator just
+wrote `_dna_state = "pending"` unconditionally
+(after the rev/epoch checks passed), with no read of
+the prior state.
+
+So if two tabs called `/api/wizard/complete` near-
+simultaneously with matching revision/epoch — both
+hitting the BRAIN-85 cache-miss branch:
+
+1. Tab A enters merge_settings → mutator sees
+   `_dna_state="ready"` → flips to `"pending"`,
+   commits, returns.
+2. Tab B enters merge_settings (now serialized after
+   A) → mutator sees `_dna_state="pending"` already.
+   Revision + epoch still match. Mutator re-writes
+   `_dna_state="pending"` (no-op visually) and the
+   function returns success.
+3. Both tabs proceed to brain+dossier compute and
+   call `_spawn_bg(_gen_dna())`. **Two DNA generation
+   jobs run in parallel for the same logical retrain.**
+   Double BYOK spend, race-condition writes on the
+   final merge, audit-log lies about retrain count.
+
+The classic check-then-act race. Per Huntova
+engineering review on idempotent job systems: bind
+uniqueness to persisted operation state, not timing
+luck.
+
+Fix: extend the BRAIN-88 flip mutator with a third
+short-circuit. If `_dna_state` is already `"pending"`
+at mutator entry, set the `_flip_stale` sentinel to
+`"dna_in_flight"` and return the row unchanged. The
+endpoint then returns HTTP 409 with
+`error_kind: "dna_in_flight"` and a copy that explains
+training is already running for this retrain in
+another tab. The client can poll `/api/wizard/status`
+to follow the in-flight job's progress instead of
+spawning a duplicate.
+
+5 new regression tests in `test_wizard_complete_dna_atomic_claim.py`:
+- Source-level: flip mutator reads `_dna_state` from the
+  current row before writing.
+- Source-level: claim-lost branch surfaces a documented
+  sentinel (`dna_in_flight`).
+- Source-level: claim-lost path returns 409.
+- Source-level: claim-lost branch `return`s before any
+  later `_spawn_bg(_gen_dna())` can run.
+- Behavioral: serial invocation of the flip-mutator
+  pattern: first call ready→pending succeeds, second
+  call against the now-pending row signals
+  `dna_in_flight`.
+
+465 / 465 tests passing.
+
+### Files
+
+- `server.py`: `_pending_flip_mutator` now short-circuits when `_dna_state == "pending"`, sets `_flip_stale = {"kind": "dna_in_flight"}`. `api_wizard_complete` adds a `dna_in_flight` branch that returns 409 with explicit copy.
+- `tests/test_wizard_complete_dna_atomic_claim.py`: new — 5 tests guarding the atomic-claim invariant.
+
+---
+
 ## 0.1.0a478 — May 4 2026 — `/api/wizard/status` exposed raw `_dna_state` value to clients without validation, leaking corrupted persisted strings ("banana", "pendng") through the public response contract; shared `_normalize_dna_state` helper now uniformly maps unknown values to "invalid" across every public read site (BRAIN-109)
 
 ### Bug fix (BRAIN-109, public-API enum contract uniformity)

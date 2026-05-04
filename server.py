@@ -9026,6 +9026,23 @@ async def api_wizard_complete(request: Request, user: dict = Depends(require_use
             _flip_stale["value"] = True
             _flip_stale["kind"] = "stale_revision"
             return cur
+        # a479 fix (BRAIN-110): atomic claim. If `_dna_state`
+        # is already "pending" at mutator entry, a sibling
+        # tab won the race for this retrain. Re-flipping is a
+        # no-op on the row but lets THIS request fall through
+        # to brain+dossier compute and enqueue a SECOND
+        # _gen_dna() background job for the same logical
+        # retrain. Idempotent-job-system invariant: the same
+        # atomic step that observes "ready" must transition
+        # to "pending" and grant the right to enqueue.
+        # Pre-pending callers must short-circuit here.
+        # Per Huntova engineering review on atomic claims:
+        # bind uniqueness to persisted operation state, not
+        # timing luck.
+        if w.get("_dna_state") == "pending":
+            _flip_stale["value"] = True
+            _flip_stale["kind"] = "dna_in_flight"
+            return cur
         # Atomic ready→pending. Clear all prior terminal-state
         # metadata so /api/wizard/status surfaces a clean "in
         # flight" view during regeneration.
@@ -9063,6 +9080,26 @@ async def api_wizard_complete(request: Request, user: dict = Depends(require_use
                     "error_kind": "wizard_reset",
                 },
                 status_code=410,
+            )
+        if _flip_stale["kind"] == "dna_in_flight":
+            # a479 (BRAIN-110): a sibling tab already won
+            # the atomic claim for this retrain. Surface
+            # 409 so this client can poll /api/wizard/status
+            # for the in-flight DNA job rather than triggering
+            # a duplicate brain+dossier compute + duplicate
+            # _gen_dna() spawn.
+            return JSONResponse(
+                {
+                    "ok": False,
+                    "in_flight": True,
+                    "error": (
+                        "Brain training is already running for this "
+                        "retrain in another tab. Wait for it to finish, "
+                        "or reload this tab to follow its progress."
+                    ),
+                    "error_kind": "dna_in_flight",
+                },
+                status_code=409,
             )
         return JSONResponse(
             {
