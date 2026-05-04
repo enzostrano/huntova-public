@@ -6,6 +6,73 @@ Versioning: `0.1.0aNN` alpha increments. Public install path: `pipx install hunt
 
 ---
 
+## 0.1.0a473 — May 4 2026 — `_knowledge.content` blunt `json.dumps(profile)[:2000]` truncation collapsed materially-different completes into byte-identical audit entries; structured fields + fingerprint added (BRAIN-104)
+
+### Bug fix (BRAIN-104, audit-log distinguishability)
+
+`_knowledge_entry["content"]` was just
+`json.dumps({"profile": profile, "qa_count": ...})[:2000]`.
+If the profile started with a long stable field
+(`business_description` ~1500 chars), the slice cut off the
+rest. Two completes that differed only in later-ranked
+fields (services list edits, region tweaks, phase-5
+answers) collapsed to byte-identical content. Audit reads
+showed:
+
+    Entry 1 (Jan 15): same first-2000-chars
+    Entry 2 (Feb 15): same first-2000-chars
+    Entry 3 (Mar 15): same first-2000-chars
+    ...
+
+Operator can't reconstruct what changed.
+
+Standard structured-logging guidance: bounded payloads
+must preserve identifying fields + a stable digest. Don't
+slice raw JSON at an arbitrary byte boundary.
+
+Fix — restructure the entry:
+
+```python
+_knowledge_entry = {
+    "date": _now_iso,
+    "type": "ai_interview",
+    "fingerprint": _complete_fingerprint,    # NEW: SHA256 from BRAIN-85
+    "qa_count": len(history),
+    "company_name": (profile.get("company_name") or "")[:200],
+    "target_clients": (profile.get("target_clients") or "")[:300],
+    "services_count": len(profile.get("services") or []),
+    "regions_count": len(profile.get("regions") or []),
+    "regions": [str(r)[:80] for r in profile.get("regions", [])[:6]],
+    "content": json.dumps(...)[:2000],     # KEPT for back-compat
+    "source": "wizard_v2",
+}
+```
+
+Now distinguishable:
+
+- **`fingerprint`**: reuses BRAIN-85's SHA256 of canonical
+  `(profile, history)`. Two materially-different completes
+  produce different hashes regardless of how long the
+  shared prefix is. No additional compute — the fingerprint
+  was already computed for the idempotency cache.
+- **`company_name`, `target_clients`, `regions_count`,
+  `services_count`, `regions[:6]`**: compact identifying
+  fields that survive the bounded payload. Operator can
+  scan the audit log column-by-column without parsing the
+  JSON content.
+- **`content`** stays for backwards-compat (existing
+  consumers reading older entries continue to work).
+
+5 new regression tests in
+`tests/test_wizard_knowledge_entry_distinguishable.py` —
+including a behavioral test that confirms the pre-fix
+truncation actually collides on two materially-different
+profiles, and that the new fingerprint distinguishes them.
+
+433 of 433 tests passing.
+
+---
+
 ## 0.1.0a472 — May 4 2026 — `_phase5_questions` persist boundary trusted upstream cleaner cap; defense-in-depth length cap added (BRAIN-103)
 
 ### Bug fix (BRAIN-103, output-validation defense-in-depth)

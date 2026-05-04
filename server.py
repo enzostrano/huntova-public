@@ -9109,9 +9109,28 @@ async def api_wizard_complete(request: Request, user: dict = Depends(require_use
 
     # 2. atomic merge — the mutator runs against the freshest row state.
     _now_iso = datetime.now().isoformat()
+    # a473 fix (BRAIN-104): structured-audit entry. The pre-fix
+    # `content: json.dumps(profile)[:2000]` blunt-truncated the
+    # JSON blob, so two completes whose profile started with the
+    # same long field collapsed to byte-identical content even
+    # though later fields differed. Per Huntova engineering
+    # review on audit-log distinguishability: bounded payloads
+    # must preserve identifying fields + a stable digest.
+    # Reuses the BRAIN-85 fingerprint already computed for the
+    # idempotency cache so two near-duplicate profiles still
+    # produce distinct audit entries.
+    _services_raw = profile.get("services") if isinstance(profile.get("services"), list) else []
+    _regions_raw = profile.get("regions") if isinstance(profile.get("regions"), list) else []
     _knowledge_entry = {
         "date": _now_iso,
         "type": "ai_interview",
+        "fingerprint": _complete_fingerprint,
+        "qa_count": len(history),
+        "company_name": (profile.get("company_name") or "")[:200],
+        "target_clients": (profile.get("target_clients") or "")[:300],
+        "services_count": len(_services_raw),
+        "regions_count": len(_regions_raw),
+        "regions": [str(r)[:80] for r in _regions_raw[:6]],
         "content": json.dumps({"profile": profile, "qa_count": len(history)})[:2000],
         "source": "wizard_v2",
     }
