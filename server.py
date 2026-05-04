@@ -8635,6 +8635,18 @@ Respond with ONLY valid JSON. Fill EVERY field. Be SPECIFIC, not generic.
 # constraints).
 _SCAN_STR_MAX = 50_000
 _SCAN_LIST_MAX = 30
+
+# a498 (BRAIN-129): per-field BYTE cap on scan-output
+# fields, complementing the existing char cap. Same
+# rationale as BRAIN-127 for user input + BRAIN-128 for
+# phase-5 AI output: 50K chars × up to 4 bytes/char =
+# ~200 KB per field is too generous; one verbose crawl
+# field can bloat the row, BRAIN-86 canonicalization,
+# and BRAIN-85 fingerprint hash. 16 KiB matches the
+# user-input + phase-5 budgets.
+_SCAN_FIELD_BYTES_MAX = int(
+    os.environ.get("HV_WIZARD_SCAN_FIELD_BYTES_MAX") or str(16 * 1024)
+)
 # Field type tags:
 #   "str"      — scalar string, capped at _SCAN_STR_MAX
 #   "list_str" — list of strings, capped at _SCAN_LIST_MAX × _SCAN_STR_MAX
@@ -8717,7 +8729,10 @@ def _validate_scan_output(analysis: dict) -> dict:
             s = str(value).strip()
             if not s:
                 continue
-            out[key] = s[:_SCAN_STR_MAX]
+            # a498 (BRAIN-129): byte cap after char cap.
+            out[key] = _clip_to_byte_budget(
+                s[:_SCAN_STR_MAX], _SCAN_FIELD_BYTES_MAX
+            )
             continue
         if kind == "list_str":
             if isinstance(value, str):
@@ -8725,7 +8740,9 @@ def _validate_scan_output(analysis: dict) -> dict:
                 # becomes [string]. Common AI output drift.
                 v = value.strip()
                 if v:
-                    out[key] = [v[:_SCAN_STR_MAX]]
+                    out[key] = [_clip_to_byte_budget(
+                        v[:_SCAN_STR_MAX], _SCAN_FIELD_BYTES_MAX
+                    )]
                 continue
             if not isinstance(value, list):
                 continue  # dict for list field — reject
@@ -8734,7 +8751,9 @@ def _validate_scan_output(analysis: dict) -> dict:
                 if isinstance(item, (str, int, float)) and not isinstance(item, bool):
                     s = str(item).strip()
                     if s:
-                        cleaned.append(s[:_SCAN_STR_MAX])
+                        cleaned.append(_clip_to_byte_budget(
+                            s[:_SCAN_STR_MAX], _SCAN_FIELD_BYTES_MAX
+                        ))
                 # dict/list/None/bool elements filtered out
             if cleaned:
                 out[key] = cleaned

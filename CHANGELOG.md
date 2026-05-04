@@ -6,6 +6,82 @@ Versioning: `0.1.0aNN` alpha increments. Public install path: `pipx install hunt
 
 ---
 
+## 0.1.0a498 — May 4 2026 — `_validate_scan_output` enforced 50K char cap per field but no byte cap; one verbose crawl field × 4 bytes/UTF-8 char = ~200 KB per field, and across the ~30-field schema the persisted scan output could theoretically reach 6 MB; new `_SCAN_FIELD_BYTES_MAX` + `_clip_to_byte_budget` integration closes the third large-text ingress (after BRAIN-127 user-input + BRAIN-128 phase-5 AI-output) (BRAIN-129)
+
+### Bug fix (BRAIN-129, scan-output byte cap)
+
+`_SCAN_OUTPUT_SCHEMA` defines ~30 fields produced by
+the crawl + AI summarization pipeline on
+`/api/wizard/scan`. The validator
+`_validate_scan_output` clipped each string at
+`_SCAN_STR_MAX = 50_000` chars — at up to 4 bytes
+per UTF-8 char, that's ~200 KB per field. With 30
+fields, the persisted scan output could
+theoretically be 6 MB.
+
+The body byte cap on the request (BRAIN-117) only
+gates the URL submission. The crawl response is
+constructed server-side from BeautifulSoup +
+trafilatura output, so a verbose blog homepage or a
+malformed extraction can produce one
+disproportionately large field that survives into
+the row. Then:
+
+- BRAIN-86 canonicalization sorts + JSON-dumps the
+  whole row including this oversized field on every
+  fingerprint check.
+- BRAIN-85 fingerprint cache lookups hash a multi-
+  megabyte payload.
+- Every status read / phase-5 generate / complete
+  carries that weight.
+
+User input (BRAIN-127) and phase-5 AI-output
+(BRAIN-128) are now bounded. The crawler's own
+persisted text was the third ingress, still
+unbounded at the byte level. Per Huntova engineering
+review on crawl + structured-output byte budgets:
+every persisted long-text field, including
+scan_report or equivalent crawl text, must be
+clipped to a fixed byte budget at UTF-8 boundaries
+before storage.
+
+Fix: one module-scope addition near `_SCAN_STR_MAX`.
+
+- `_SCAN_FIELD_BYTES_MAX` (default 16 KiB,
+  env-overridable via
+  `HV_WIZARD_SCAN_FIELD_BYTES_MAX`). Matches the
+  user-input + phase-5 budgets so wizard ingest
+  remains symmetric across all three ingress paths.
+
+`_validate_scan_output` applies the byte cap on
+both code paths:
+- `kind == "str"`: char-trim then byte-clip via
+  `_clip_to_byte_budget`.
+- `kind == "list_str"` (incl. tolerant
+  string-as-list coercion): each item char-trimmed
+  then byte-clipped.
+
+7 new regression tests in
+`test_wizard_scan_output_byte_cap.py`:
+- Constant exists with sane bounds (4-64 KiB).
+- Source-level: validator references the byte cap
+  helper.
+- Behavioral: 100 KB string field clamps; each
+  list_str item clamps; multibyte UTF-8 truncates
+  at code-point boundary; tolerant
+  string-as-list-coercion path also clamps.
+- Sanity: normal-sized payloads pass through
+  unchanged.
+
+623 / 623 tests passing.
+
+### Files
+
+- `server.py`: new `_SCAN_FIELD_BYTES_MAX` constant near `_SCAN_STR_MAX`. `_validate_scan_output` applies `_clip_to_byte_budget` after the existing char trim on both `str` and `list_str` paths (incl. the tolerant string-for-list coercion path).
+- `tests/test_wizard_scan_output_byte_cap.py`: new — 7 tests guarding the scan-output byte-cap contract.
+
+---
+
 ## 0.1.0a497 — May 4 2026 — BRAIN-103 capped phase-5 question count at 5 but each item could still be 50 KB; AI hallucinations are a separate ingress into the same row contract that BRAIN-127's user-side caps don't cover; new `_WIZARD_PHASE5_QUESTION_BYTES_MAX` + `_WIZARD_PHASE5_OPTION_BYTES_MAX` constants + `_normalize_phase5_questions` helper applied at persist + emit (BRAIN-128)
 
 ### Bug fix (BRAIN-128, AI-output byte cap on phase-5 questions)
