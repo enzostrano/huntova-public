@@ -6,6 +6,28 @@ Versioning: `0.1.0aNN` alpha increments. Public install path: `pipx install hunt
 
 ---
 
+## v0.1.0a2005 — May 4 2026 — Test-only audit sweep on team-prompt builder + db SQL-translation helpers
+
+### What we audited
+- `db._build_team_prompt_addendum` — the a520 (BRAIN-PROD-4) wizard→team-prompt persona builder. ~30× expansion that interpolates the full wizard payload into role-specific 200-300 word personas.
+- `db._is_sqlite` + `_xlate` + `_SqliteSerial` — backend-selection bridge helpers between SQLite (local mode) and Postgres (cloud mode).
+
+### Tests added
+- `tests/test_team_prompt_addendum_audit.py` — 15 tests pinning each known slot returns a non-empty string, None / empty brain handled defensively, long fields truncated (business_description / target_clients > 600 chars; example_good_clients > 400 chars), wizard-shape takes precedence over normalized_hunt_profile, output stays under 8000-char DB cap even with a fat brain, list fields capped at 6 items, role anchor present in body, geography surfacing.
+- `tests/test_db_helpers_audit.py` — 11 tests pinning `_is_sqlite` mode detection, `_xlate` SQL translation idempotency + multi-replacement chaining + GREATEST/LEAST / SERIAL / FOR UPDATE / %s placeholder translation; `_SqliteSerial` context manager acquires `_sqlite_lock` in SQLite mode, releases on exception (RLock re-entrancy works).
+
+### What this protects
+- Team-prompt addendum — a regression that drops a slot's body, doesn't truncate, or exceeds the 8000-char DB cap fails to load into the team_members table and the dashboard's Team tab shows blanks. The 8000-char cap test specifically pins this.
+- DB backend selection — `_xlate` is the seam between SQLite-local and Postgres-cloud. A regression here (e.g. dropping the GREATEST→MAX translation) re-introduces "no such function" SQLite crashes. The lock + RLock re-entrancy contract is what keeps SQLite singleton-connection mode from "bad parameter or other API misuse" errors under concurrent thread access.
+
+### Backwards compat
+- None. Test-only release — zero source changes.
+
+### Migration
+- None. `pipx upgrade huntova`.
+
+---
+
 ## v0.1.0a2004 — May 4 2026 — Test-only audit sweep on domain-fail counter + mega-corp blocklist
 
 ### What we audited
