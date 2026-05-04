@@ -852,9 +852,36 @@ async def get_user_by_id(user_id: int) -> dict | None:
     return await _afetchone("SELECT * FROM users WHERE id = %s", [user_id])
 
 
+# DB-AUDIT-1 (a1100): column-name allowlist for update_user.
+# `update_user(**fields)` interpolates column names directly into SQL
+# (`SET {sets}`). Today every caller passes hardcoded literals, but the
+# `**kwargs` API is one careless `await db.update_user(uid, **body)`
+# away from SQL injection — column names go straight into the query
+# string with no escaping. Lock down to a known-safe set so a future
+# refactor can't silently turn a JSON body into a SQL injection vector.
+# CLAUDE.md rule 3: "Always use parameterized SQL queries (`%s`) —
+# never string formatting."
+_UPDATE_USER_ALLOWED_COLS = frozenset({
+    "email", "password_hash", "display_name", "tier",
+    "credits_remaining", "credits_reset_date", "last_login",
+    "email_verified", "is_admin", "is_suspended", "role",
+    "google_id", "auth_provider", "avatar_url",
+    "stripe_customer_id", "stripe_subscription_id",
+    "verification_token", "reset_token", "reset_token_expires",
+    "trial_ends_at", "onboarded_at", "created_at",
+})
+
+
 async def update_user(user_id: int, **fields):
     if not fields:
         return
+    bad = [k for k in fields if k not in _UPDATE_USER_ALLOWED_COLS]
+    if bad:
+        raise ValueError(
+            f"update_user: refusing to set non-allowlisted columns {bad!r}. "
+            "Add the column to _UPDATE_USER_ALLOWED_COLS in db.py if it's "
+            "intentional — never interpolate caller-supplied keys into SQL."
+        )
     sets = ", ".join(f"{k} = %s" for k in fields)
     vals = list(fields.values()) + [user_id]
     await _aexec(f"UPDATE users SET {sets} WHERE id = %s", vals)
@@ -1104,6 +1131,18 @@ async def add_credit_ledger(user_id: int, amount: int, balance_after: int, reaso
         [user_id, amount, balance_after, reason, reference, now])
 
 
+# DB-AUDIT-3 (a1100): allowlist for the `gate` SQL fragment that
+# _apply_credit_delta_sync concatenates into the UPDATE. Today the only
+# caller passes "credits_remaining >= %s" (a hardcoded literal in
+# deduct_credit). The function shape — `gate` as a raw SQL fragment —
+# is fundamentally injectable if a future caller forwards a user value.
+# Hard-coded allowlist makes the contract explicit + fails closed.
+_CREDIT_DELTA_GATE_ALLOWED = frozenset({
+    "",
+    "credits_remaining >= %s",
+})
+
+
 def _apply_credit_delta_sync(user_id: int, delta: int, reason: str, reference: str,
                               gate: str = "") -> tuple[bool, int]:
     """Atomic credits_remaining adjustment + ledger insert in ONE transaction.
@@ -1122,6 +1161,12 @@ def _apply_credit_delta_sync(user_id: int, delta: int, reason: str, reference: s
     """
     if not _pool:
         raise RuntimeError("Database connection pool not available")
+    if gate not in _CREDIT_DELTA_GATE_ALLOWED:
+        raise ValueError(
+            f"_apply_credit_delta_sync: gate fragment {gate!r} is not on the "
+            "allowlist. Gate is concatenated into SQL — only hardcoded "
+            "literals are permitted. Add to _CREDIT_DELTA_GATE_ALLOWED."
+        )
     now = datetime.now(timezone.utc).isoformat()
     # a355 cosmetic / latent fix: route the SQL through `_xlate()` so
     # the `%s` placeholders translate to `?` for SQLite, matching the
@@ -2271,9 +2316,25 @@ async def create_agent_run(user_id: int) -> int:
         [user_id, now])
 
 
+# DB-AUDIT-2 (a1100): column-name allowlist for update_agent_run.
+# Same `**fields` SQL-interpolation hazard as update_user above.
+_UPDATE_AGENT_RUN_ALLOWED_COLS = frozenset({
+    "status", "leads_found", "ai_calls",
+    "queries_total", "queries_done",
+    "started_at", "ended_at",
+})
+
+
 async def update_agent_run(run_id: int, **fields):
     if not fields:
         return
+    bad = [k for k in fields if k not in _UPDATE_AGENT_RUN_ALLOWED_COLS]
+    if bad:
+        raise ValueError(
+            f"update_agent_run: refusing to set non-allowlisted columns {bad!r}. "
+            "Add the column to _UPDATE_AGENT_RUN_ALLOWED_COLS in db.py if it's "
+            "intentional — never interpolate caller-supplied keys into SQL."
+        )
     sets = ", ".join(f"{k} = %s" for k in fields)
     vals = list(fields.values()) + [run_id]
     await _aexec(f"UPDATE agent_runs SET {sets} WHERE id = %s", vals)

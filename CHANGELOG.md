@@ -6,6 +6,38 @@ Versioning: `0.1.0aNN` alpha increments. Public install path: `pipx install hunt
 
 ---
 
+## 0.1.0a1300 — May 4 2026 — db.py SQL-injection audit: column-name + gate-fragment allowlists (DB-AUDIT)
+
+### Bug fixes (DB-AUDIT-1, DB-AUDIT-2, DB-AUDIT-3)
+
+Audit pass over `db.py` (~1900 lines of raw psycopg2 SQL with `%s` placeholders) against CLAUDE.md rule 3: *"Always use parameterized SQL queries (`%s`) — never string formatting."* The 99% of db.py is clean — every value goes through `cur.execute(_xlate(sql), params)`. Three latent injection vectors found and closed:
+
+1. **`update_user(user_id, **fields)` interpolated column names directly into SQL with no allowlist.** `db.py:858` built `sets = ", ".join(f"{k} = %s" for k in fields)` then `f"UPDATE users SET {sets} WHERE id = %s"`. Today every caller (server.py, payments.py, auth.py — 11 callsites) passes hardcoded literal kwargs, so the column-name interpolation was safe-by-convention. But `**kwargs` is one careless `await db.update_user(uid, **request.json())` away from immediate SQL injection — column names go straight into the query string with no escaping. Fixed by adding `_UPDATE_USER_ALLOWED_COLS` frozenset (covers all 23 real columns); non-allowlisted keys raise ValueError.
+
+2. **`update_agent_run(run_id, **fields)` had the same shape.** `db.py:2277`. Same fix — `_UPDATE_AGENT_RUN_ALLOWED_COLS` frozenset covers status / leads_found / ai_calls / queries_total / queries_done / started_at / ended_at.
+
+3. **`_apply_credit_delta_sync(gate=...)` concatenated a SQL fragment into the UPDATE.** `db.py:1158` builds `"WHERE id = %s AND " + gate + " RETURNING credits_remaining"`. The only caller (`deduct_credit`) passes the literal `"credits_remaining >= %s"`, but the function shape is fundamentally injectable if a future caller forwards a user value. Fixed by adding `_CREDIT_DELTA_GATE_ALLOWED` frozenset; non-literal gates raise ValueError before any SQL runs.
+
+### Defensive static-analysis tests
+
+11 new regression tests in `tests/test_db_sql_injection_audit.py`:
+
+- Behavioural tests confirming `update_user` / `update_agent_run` / `_apply_credit_delta_sync` reject non-allowlisted inputs with ValueError instead of building SQL.
+- Allowlist-coverage tests asserting every key today's real callers pass is on the allowlist (so the lock-down doesn't break production).
+- Static-analysis sweep: regex over `db.py` source pinning the count of f-string SQL sites with interpolation (current: 12), banning `cur.execute(sql % var)` and `cur.execute(sql.format(...))` outright, capping the total raw `cur.execute(` count at 60 (currently 34).
+- Connection-pool balance check: `get_conn` count must be ≤ `put_conn` count, so a future edit forgetting a `finally: put_conn(conn)` block is caught at test time. CLAUDE.md rule 4.
+
+Test suite: 873 → 884 passing (+11).
+
+### Audit notes (no fix needed)
+
+- The 9 other f-string SQL sites in db.py (admin_audit_log, get_users_paginated, get_all_agent_runs, get_recipe_outcomes, update_team_member) interpolate values built exclusively from string-literal fragments (`"a.target_user_id = %s"`, `", ".join(["%s"] * N)`, hardcoded LEFT JOIN snippets) or allowlisted column names — all safe.
+- `_admin_apply_credit_change_sync` uses raw `cur.execute(...)` without `_xlate()` because it's hardcoded Postgres-only (uses `WITH ... AS (...)` CTEs, GREATEST). Documented in db.py — fine for cloud-only admin path, won't run in local SQLite.
+- All `get_conn()` callsites have matching `put_conn(conn)` in `finally` blocks. All SELECTs commit before returning to close implicit transactions (CLAUDE.md rule 5). All write paths have `_safe_rollback` on exception.
+- `update_team_member` already had a per-key allowlist via its `allowed` dict — no change needed.
+
+---
+
 ## 0.1.0a620 — May 4 2026 — Agent-runner concurrency + AGENT-DNA replay-safety hardening (BRAIN-PROD-7)
 
 ### Bug fixes (BRAIN-PROD-7, agent-runner restart-safety + DNA hot-load gating)
