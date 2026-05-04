@@ -6,6 +6,80 @@ Versioning: `0.1.0aNN` alpha increments. Public install path: `pipx install hunt
 
 ---
 
+## 0.1.0a507 — May 4 2026 — `_WIZARD_FIELD_SCHEMA` is closed (BRAIN-73) but had no version marker; older clients posting the old shape against a newer server had their data silently dropped/defaulted with no drift signal — neither side knew the user's intent was being lost; new `_WIZARD_SCHEMA_VERSION` constant + `_check_wizard_schema_compat` helper + `wizard_schema_version` emission on /api/wizard/status give clients an explicit compatibility contract (BRAIN-136)
+
+### Bug fix (BRAIN-136, explicit schema-version contract)
+
+`_WIZARD_FIELD_SCHEMA` (BRAIN-73 / a436) is closed:
+unknown keys drop silently. That's correct for
+hostile inputs but WRONG for legitimate version
+skew. An older client posting the old shape against
+a newer server had:
+
+- New required fields: missing from request → server
+  fell back to defaults silently.
+- New enum values: client didn't know they existed;
+  user couldn't pick them.
+- Field renames: old name dropped, new name empty.
+
+Without a version marker, neither side detected the
+drift. The user thought they answered everything; the
+server thought the answers were incomplete; the client
+had no signal to prompt a refresh.
+
+Per Huntova engineering review on API evolution +
+closed-schema drift: every versioned schema needs an
+explicit `schema_version` contract. Status responses
+include the current version; mutating requests can
+declare a `client_schema_version`; the server
+compares and surfaces an explicit
+`schema_mismatch` error when versions diverge.
+
+Fix: two module-scope additions near
+`_WIZARD_FIELD_SCHEMA`.
+
+- `_WIZARD_SCHEMA_VERSION` (default 1, env-overridable
+  via `HV_WIZARD_SCHEMA_VERSION`). Documented bump
+  rule: increment on backward-incompatible changes
+  (new required field, field rename, removed enum
+  value, semantic behavior change). Add-only changes
+  (new optional field, new enum option that defaults
+  sensibly) do NOT bump — the closed-schema drop
+  semantics handle those cleanly.
+- `_check_wizard_schema_compat(client_version)`
+  helper: returns None when compatible (matching
+  version, missing version legacy-compat). Returns a
+  blocking response dict (`schema_mismatch` kind,
+  with both client + server versions for client-side
+  reconciliation) when versions disagree.
+
+`/api/wizard/status` emits `wizard_schema_version` in
+every response so clients can pin the contract on
+load and detect drift before submitting.
+
+8 new regression tests in
+`test_wizard_schema_version.py`:
+- Constant + helper exist with sane defaults.
+- Status endpoint emits the version + references the
+  shared constant (no hardcoding).
+- Source-level: bump rule documented near the
+  constant.
+- Behavioral: matching / missing / 0 versions pass
+  through.
+- Behavioral: ahead + behind clients block with
+  `schema_mismatch`.
+- Behavioral: blocking response includes both
+  versions for client reconciliation.
+
+673 / 673 tests passing.
+
+### Files
+
+- `server.py`: new `_WIZARD_SCHEMA_VERSION` + `_check_wizard_schema_compat` near `_WIZARD_FIELD_SCHEMA`. `/api/wizard/status` emits `wizard_schema_version`.
+- `tests/test_wizard_schema_version.py`: new — 8 tests guarding the version contract.
+
+---
+
 ## 0.1.0a506 — May 4 2026 — Public-artifact sanitization sweep + version-drift fix: README.md credited Huntova authorship to a specific AI-tooling provider; docs/LAUNCH.md carried 19 internal-tooling tags throughout the playbook; templates/setup.html surfaced authorship credit in a product card; `cli.py` VERSION had drifted from the latest tag after the parallel-release race; all stripped + reconciled to Huntova-team voice (BRAIN-PROD-SANITIZE)
 
 ### Bug fix (BRAIN-PROD-SANITIZE, public-artifact sanitization)

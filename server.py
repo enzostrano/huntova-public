@@ -9139,6 +9139,79 @@ def _clip_to_byte_budget(text, max_bytes: int) -> str:
 # without enabling abuse.
 _WIZARD_ANSWERS_MAX_KEYS = 150
 _WIZARD_LIST_MAX = 200
+
+# a507 (BRAIN-136): explicit schema-version contract.
+# `_WIZARD_FIELD_SCHEMA` is closed (BRAIN-73 / a436) —
+# unknown keys drop silently. That's correct for
+# hostile inputs but WRONG for legitimate version
+# skew. An older client posting the old shape against
+# a newer server has its newer-shape data dropped /
+# defaulted silently — neither side detects the
+# drift, the user thinks they answered everything,
+# and the wizard ships incomplete training. Per
+# Huntova engineering review on API evolution +
+# closed-schema drift: every versioned schema needs
+# an explicit `schema_version` contract.
+#
+# Bump rule: increment whenever a backward-
+# incompatible change ships — new required field,
+# field rename, removed enum value, semantic
+# behavior change. Add-only changes (new optional
+# field, new enum option that defaults sensibly) do
+# NOT bump; the closed-schema drop semantics are
+# fine for those cases.
+_WIZARD_SCHEMA_VERSION = int(
+    os.environ.get("HV_WIZARD_SCHEMA_VERSION") or "1"
+)
+
+
+def _check_wizard_schema_compat(client_version):
+    """Compare a client-supplied wizard schema version
+    against `_WIZARD_SCHEMA_VERSION`. Returns None when
+    compatible; returns a blocking response dict
+    (`schema_mismatch` kind) when the versions disagree
+    in a semantically significant way.
+
+    None / 0 client_version means "legacy client that
+    didn't declare a version" — treated as compatible
+    so older clients keep working. Once a client opts
+    in by sending a version header, drift detection
+    activates.
+    """
+    if client_version is None:
+        return None
+    try:
+        cv = int(client_version)
+    except (ValueError, TypeError):
+        return None
+    if cv <= 0:
+        return None  # legacy / unset
+    if cv == _WIZARD_SCHEMA_VERSION:
+        return None
+    direction = "ahead_of_server" if cv > _WIZARD_SCHEMA_VERSION else "behind_server"
+    if direction == "ahead_of_server":
+        msg = (
+            "Your client's wizard schema is newer than "
+            "this server's. The server may need an "
+            "upgrade — try `pipx upgrade huntova`."
+        )
+    else:
+        msg = (
+            "Your client's wizard schema is older than "
+            "this server's. Reload the page to fetch the "
+            "latest UI before resubmitting."
+        )
+    return {
+        "ok": False,
+        "error_kind": "schema_mismatch",
+        "error": msg,
+        "client_schema_version": cv,
+        "server_schema_version": _WIZARD_SCHEMA_VERSION,
+        "schema_version": _WIZARD_SCHEMA_VERSION,
+        "direction": direction,
+    }
+
+
 _WIZARD_FIELD_SCHEMA: dict[str, str] = {
     # Scalar string fields
     "company_name": "str",
@@ -11701,6 +11774,13 @@ async def api_wizard_status(user: dict = Depends(require_user)):
         # added (or any future regression) gets clamped
         # here before reaching the client.
         "phase5_questions": _normalize_phase5_questions(w.get("_phase5_questions")),
+        # a507 (BRAIN-136): explicit schema-version
+        # contract. Every status response includes the
+        # server's current wizard schema version so a
+        # client can compare against the version it was
+        # built with and detect drift before silently
+        # losing user intent on save.
+        "wizard_schema_version": _WIZARD_SCHEMA_VERSION,
         # a474 (BRAIN-105): split audit counters. `train_count`
         # is executions (full-pipeline completes only).
         # `train_attempts` includes BRAIN-85 short-circuit
