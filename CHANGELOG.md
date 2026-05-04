@@ -6,6 +6,74 @@ Versioning: `0.1.0aNN` alpha increments. Public install path: `pipx install hunt
 
 ---
 
+## 0.1.0a500 — May 4 2026 — HTTP-method discipline lockdown on wizard + agent mutating routes; current router state is correct (all use `@app.post`), but one accidental `@app.get` swap on a future refactor would reopen CSRF/caching/prefetch attack surface; regression tests now codify the invariant — POST-only for mutators, GET-only for reads (BRAIN-131)
+
+### Bug fix (BRAIN-131, HTTP-method enforcement audit + lockdown)
+
+The pre-fix router state was already correct: every
+wizard mutating route uses `@app.post(...)`, the
+`/api/wizard/status` read route uses `@app.get(...)`,
+the `/agent/control` mutator uses POST, the
+`/agent/events` SSE stream uses GET. FastAPI returns
+405 Method Not Allowed when GET hits a POST-only
+route.
+
+But the controls live entirely in route decorators.
+One accidental swap on a future refactor —
+`@app.post` → `@app.get`, or `@app.api_route(methods=
+["GET", "POST"])` for "convenience" — silently
+reopens:
+
+- CSRF attacks via `<img>` / `<iframe>` / `<link
+  rel="prefetch">` that always issue GET (browsers
+  don't add the CSRF token).
+- Crawler / Slack / link-preview side effects that
+  fire on any tab paste of the URL.
+- Cached responses turning a one-time mutation into
+  a reusable URL.
+- Browser back/forward + reload accidentally
+  re-triggering state changes.
+
+Per Huntova engineering review on HTTP-method
+discipline + OWASP CSRF Cheat Sheet: every wizard
+endpoint that can mutate state, spend quota,
+trigger AI work, or reset/retrain anything must
+reject GET and accept only the intended unsafe
+method (POST). Read endpoints can stay GET. No
+mutating path gets to be "conveniently dual-method".
+
+The deliverable is regression-test lockdown — codify
+the invariant so a future PR weakening the methods
+gets caught at CI time, not in production.
+
+Tests inspect `app.routes` directly:
+- Mutating wizard routes (scan, complete, reset,
+  save-progress, generate-phase5, assist,
+  start-retrain) AND `/agent/control` accept POST
+  AND reject GET / PUT / DELETE / PATCH.
+- Read routes (`/api/wizard/status`, `/agent/events`)
+  are GET-only — POST / PUT / DELETE / PATCH are
+  absent.
+- Behavioral: GET against a POST-only route via
+  Starlette TestClient returns 405 (or auth-rejection
+  status before method check — also acceptable since
+  the GET never reaches the handler body).
+- Behavioral inverse: POST to a POST-only route
+  does NOT return 405 (sanity check the route
+  actually accepts POST).
+
+6 new regression tests in
+`test_wizard_http_method_enforcement.py`.
+
+634 / 634 tests passing.
+
+### Files
+
+- `tests/test_wizard_http_method_enforcement.py`: new — 6 tests guarding HTTP-method discipline on wizard + agent routes.
+- `cli.py`, `pyproject.toml`, `CHANGELOG.md`: version bump only — no source changes (the router state was already correct; this release is the regression-test lockdown).
+
+---
+
 ## 0.1.0a499 — May 4 2026 — `/api/wizard/start-retrain` rewound wizard state without consulting the BRAIN-120 dna gate, allowing a sibling-tab Re-train to flip `_interview_complete=False` mid-generation while DNA was still in flight; gate now consulted, but only honors the `dna_pending` block (failed/invalid pass through since start-retrain IS the recovery path for those) (BRAIN-130)
 
 ### Bug fix (BRAIN-130, start-retrain shared-gate consistency)
