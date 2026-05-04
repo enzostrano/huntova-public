@@ -7,6 +7,7 @@ import queue
 import threading
 import time
 import json
+from collections import deque
 from datetime import datetime, timezone
 from openai import OpenAI
 
@@ -44,6 +45,19 @@ class UserEventBus:
     _SSE_EVENT_BYTES_MAX = 32 * 1024
     _SSE_OVERSIZE_EXEMPT_EVENTS = frozenset({"screenshot"})
 
+    # a630 (BRAIN-158): per-user replay ring buffer for SSE
+    # reconnect-resume. The browser EventSource auto-resends
+    # `Last-Event-ID` on every reconnect; without an id: line on each
+    # frame and a server-side history to replay from, every reconnect
+    # was a fresh feed and any event emitted during the disconnect
+    # window was lost forever. 256 entries balances memory (~ a few
+    # MB worst-case at the 32 KiB byte cap) against typical reconnect
+    # gaps (a backgrounded tab pause < 60s rarely exceeds 50 events).
+    # Screenshots bypass the buffer — they're already exempt from the
+    # byte cap and would dominate the ring if kept.
+    _REPLAY_BUFFER_MAX = 256
+    _REPLAY_EXEMPT_EVENTS = frozenset({"screenshot", "log"})
+
     def __init__(self):
         self._subscribers: set[queue.Queue] = set()
         self._lock = threading.Lock()
@@ -55,6 +69,14 @@ class UserEventBus:
         # locally until the next emit, which can be tens of seconds.
         self._last_progress: str | None = None
         self._last_running_status: str | None = None
+        # a630 (BRAIN-158): per-user replay buffer. Each entry is a
+        # tuple (event_id, sse_frame_str). _next_id is monotonic
+        # within the bus — survives across reconnects of the same
+        # process. Server restart resets it; a Last-Event-ID from a
+        # previous process will be older than _replay_buffer[0][0]
+        # and trigger the gap marker.
+        self._next_id = 1
+        self._replay_buffer: deque[tuple[int, str]] = deque(maxlen=self._REPLAY_BUFFER_MAX)
 
     def subscribe(self) -> queue.Queue:
         q = queue.Queue(maxsize=self._MAXSIZE)
@@ -75,6 +97,54 @@ class UserEventBus:
     def unsubscribe(self, q: queue.Queue):
         with self._lock:
             self._subscribers.discard(q)
+
+    def replay_since(self, last_event_id) -> list[str]:
+        """a630 (BRAIN-158): return the list of SSE frames the client
+        missed since `last_event_id`. Called by the /agent/events
+        generator on reconnect (browser auto-resends Last-Event-ID).
+
+        Returns:
+          - [] if `last_event_id` is None / unparseable / >= newest id
+            (nothing to replay).
+          - [gap_marker, ...buffered_frames] if `last_event_id` is
+            older than the oldest entry still in the ring buffer
+            (events were evicted; client must self-heal via
+            /api/status). Gap marker is itself a real SSE event so
+            the client gets an explicit signal to refetch state.
+          - [...buffered_frames] if `last_event_id` is in range
+            (clean resume — no gap).
+        """
+        try:
+            cursor = int(last_event_id)
+        except (TypeError, ValueError):
+            return []
+        with self._lock:
+            if not self._replay_buffer:
+                return []
+            oldest_id = self._replay_buffer[0][0]
+            newest_id = self._replay_buffer[-1][0]
+            if cursor >= newest_id:
+                return []
+            frames: list[str] = []
+            if cursor < oldest_id - 1:
+                # Gap: events evicted. Tell the client to refetch
+                # full state via /api/status. Use a fresh id so this
+                # gap marker itself becomes the new Last-Event-ID.
+                gap_id = self._next_id
+                self._next_id += 1
+                gap_payload = json.dumps({
+                    "missed_from": cursor,
+                    "buffered_from": oldest_id,
+                    "buffered_to": newest_id,
+                    "advice": "refetch_full_state",
+                })
+                frames.append(
+                    f"id: {gap_id}\nevent: _gap\ndata: {gap_payload}\n\n"
+                )
+            for eid, frame in self._replay_buffer:
+                if eid > cursor:
+                    frames.append(frame)
+            return frames
 
     def emit_keepalive(self) -> None:
         """a291 fix: SSE keepalive heartbeat. Cloudflare / nginx /
@@ -140,9 +210,24 @@ class UserEventBus:
         # the SSE frame — a single 50 KiB+ frame can break the
         # frontend EventSource parser for the rest of the run.
         payload_json = self._clip_sse_event_payload(event, data)
-        msg = f"event: {event}\ndata: {payload_json}\n\n"
+        # a630 (BRAIN-158): assign a monotonic event id so the browser
+        # EventSource stores it as Last-Event-ID and we can replay
+        # missed events on reconnect. The id: line MUST come before
+        # the data: line per the SSE spec for the browser to update
+        # its stored value.
+        with self._lock:
+            event_id = self._next_id
+            self._next_id += 1
+        msg = f"id: {event_id}\nevent: {event}\ndata: {payload_json}\n\n"
         dead = []
         with self._lock:
+            # a630: append to replay buffer (skip exempt event types
+            # that are either too large — screenshots — or too noisy
+            # — log lines that would dominate the ring and squeeze
+            # out the lead/status/progress events the UI actually
+            # needs to recover state).
+            if event not in self._REPLAY_EXEMPT_EVENTS:
+                self._replay_buffer.append((event_id, msg))
             # Cache terminal status for replay to future subscribers; clear
             # on any non-terminal status so a restart doesn't replay stale
             # "idle" to new clients.

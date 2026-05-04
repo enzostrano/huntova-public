@@ -6,6 +6,35 @@ Versioning: `0.1.0aNN` alpha increments. Public install path: `pipx install hunt
 
 ---
 
+## 0.1.0a630 — May 4 2026 — SSE reconnect-resume via Last-Event-ID + per-user replay ring buffer (BRAIN-158)
+
+### Bug fix (BRAIN-158, SSE event-bus durability under reconnect)
+
+The browser EventSource auto-resends the `Last-Event-ID` header on every reconnect — when a tab backgrounds and the OS pauses the socket, when a proxy idle-times out the stream, when a server restart drops the connection. Before this release Huntova ignored the protocol entirely:
+
+1. `UserEventBus.emit()` produced SSE frames with no `id:` line, so the browser never had a `Last-Event-ID` to send back.
+2. `/agent/events` ignored the header even if a manual client sent one.
+3. There was no per-user history of recent events, so even with the header there was nothing to replay.
+
+Net result: every reconnect was a fresh feed. Every event emitted during the disconnect window — newly-scored leads, status flips, progress snapshots — was permanently lost. The 5s `/api/status` polling fallback closed most state gaps but did NOT deliver missed `lead` / `thought` / `progress` events.
+
+Fix:
+
+- `UserEventBus.emit` now stamps each frame with a monotonic `id: N` line and appends it to a per-user ring buffer (`_REPLAY_BUFFER_MAX = 256`, oldest-first eviction). `screenshot` and `log` events bypass the buffer — too large / too noisy to keep around.
+- `UserEventBus.replay_since(last_event_id)` returns the missed frames; if the cursor is older than the buffer's oldest entry it prepends a `_gap` marker event with `advice: refetch_full_state` so the client can self-heal via `/api/status`.
+- `/agent/events` reads `Last-Event-ID` (or `?lastEventId=` query param fallback) at request entry and replays missed frames before subscribing — preserving order (replay → live).
+- `templates/jarvis.html` listens for `_gap` and triggers an immediate `loadStatus()` to reconverge state with a one-line warning in the agent log.
+
+7 new tests in `tests/test_sse_reconnect_resume.py` pin: monotonic id assignment, normal-case replay, invalid/missing cursor handling, gap-marker emission with fresh id, screenshot/log buffer exemption, oldest-first eviction under overflow, and BRAIN-147 truncation marker durability through replay.
+
+### Files
+- `user_context.py`: id stamping, ring buffer, `replay_since()`.
+- `server.py`: `Last-Event-ID` ingestion + replay yield in `/agent/events`.
+- `templates/jarvis.html`: `_gap` listener triggers `loadStatus()`.
+- `tests/test_sse_reconnect_resume.py`: 7 regression tests.
+
+---
+
 ## 0.1.0a586 — May 4 2026 — Update button still erroring after a511; root cause: cookie `Secure` flag set on plain HTTP local mode silently dropped by Firefox/Safari/Brave; fix gates Secure on runtime mode + adds frontend HTTP-status surface + server-side stderr logging (BRAIN-PROD-5)
 
 ### Bug fix (BRAIN-PROD-5, in-browser update flow — second half of the CSRF parity fix)

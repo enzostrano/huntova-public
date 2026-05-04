@@ -12995,6 +12995,21 @@ async def agent_events(request: Request):
         return Response(status_code=401)
 
     ctx = get_or_create_context(user["id"], user["email"], user.get("tier", "free"))
+    # a630 (BRAIN-158): SSE reconnect-resume. Browser EventSource
+    # auto-resends Last-Event-ID on reconnect. Standard header is
+    # `Last-Event-ID`; query-param fallback `?lastEventId=` lets
+    # non-EventSource clients (manual reconnect after long pauses
+    # where the browser dropped the cached id) opt in. Replay any
+    # missed frames from the bus's ring buffer BEFORE subscribing
+    # so the client sees a contiguous timeline. If the client is
+    # behind the buffer's oldest entry, the bus emits a `_gap`
+    # marker telling it to refetch full state via /api/status.
+    last_event_id = (
+        request.headers.get("last-event-id")
+        or request.query_params.get("lastEventId")
+        or request.query_params.get("last_event_id")
+    )
+    replay_frames = ctx.bus.replay_since(last_event_id) if last_event_id else []
     q = ctx.bus.subscribe()
 
     async def event_stream():
@@ -13004,6 +13019,11 @@ async def agent_events(request: Request):
             pos = agent_runner.queue_position(user["id"])
             state = "running" if running else ("queued" if pos else "idle")
             yield f"event: status\ndata: {json.dumps({'text': 'Connected', 'state': state})}\n\n"
+            # a630: replay missed frames captured at request entry.
+            # These are emitted BEFORE the subscriber starts
+            # consuming new events so order is preserved (replay → live).
+            for frame in replay_frames:
+                yield frame
 
             # Stability fix (bug #53): the previous version
             # blocked 30s on q.get and only ever cleaned up via

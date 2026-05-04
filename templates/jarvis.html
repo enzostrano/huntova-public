@@ -5287,6 +5287,14 @@ body.hv-has-update-banner{padding-top:var(--hv-update-banner-h, 38px)}
     });
     _agentSse.addEventListener('lead', () => loadStatus());
     _agentSse.addEventListener('status', () => loadStatus());
+    // a630 (BRAIN-158): the server emits a `_gap` event on reconnect
+    // when the client's Last-Event-ID is older than the bus's replay
+    // ring buffer. Some events are gone for good — refetch full
+    // state so the UI converges instead of silently missing leads.
+    _agentSse.addEventListener('_gap', () => {
+      try { _agentLogAppend('· reconnected after a gap — refetching state', 'warn'); } catch(_) {}
+      loadStatus();
+    });
     _agentSse.addEventListener('error', () => {
       // EventSource fires error on transient drop AND on permanent
       // failure (CLOSED state). For permanent failure the browser
