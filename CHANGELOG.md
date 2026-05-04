@@ -6,6 +6,28 @@ Versioning: `0.1.0aNN` alpha increments. Public install path: `pipx install hunt
 
 ---
 
+## v0.1.0a2002 — May 4 2026 — Test-only audit sweep on SMTP settings + secrets-store atomic-write primitive
+
+### What we audited
+- `email_service._smtp_settings` + `is_email_configured` + `_esc` — SMTP config resolver, configured-check, HTML-escape helper.
+- `secrets_store._atomic_write_0600` + `_harden_perms` + `_plain_read` + `_plain_write` — TOCTOU-safe secrets-file write primitive + plaintext-tier round-trip.
+
+### Tests added
+- `tests/test_email_settings_audit.py` — 17 tests on `_smtp_settings` env-at-call-time read; HV-prefix vs bare env-var precedence (`SMTP_USER` wins over `HV_SMTP_USER` per `or` order); default port 587 + default from_email + default from_name; full 6-key set; `is_email_configured` requires host + user + password (any missing → False); `_esc` HTML-escape + None / empty / non-string defenses.
+- `tests/test_secrets_atomic_write_audit.py` — 15 tests pinning `_atomic_write_0600` direct-create-with-0600 (no TOCTOU window between create and chmod), fsync-before-rename durability, .tmp cleanup on success and failure, parent-dir auto-create, stale-tmp recovery, empty-bytes write, unicode round-trip; `_harden_perms` chmods to 0600 + idempotent + missing-file safe; `_plain_read` defensive empty on missing/corrupt; `_plain_write` round-trips and writes 0600.
+
+### What this protects
+- SMTP precedence — pinning `_smtp_settings` env-at-call-time read prevents a future module-import regression that would freeze SMTP config at import (and ignore dashboard updates).
+- Secrets TOCTOU window — `_atomic_write_0600` uses `os.open(O_CREAT|O_EXCL|O_WRONLY, 0o600)` so the file mode is 0600 from creation. A reader process racing in between create-and-chmod could otherwise slurp plaintext keys. Pin the contract.
+
+### Backwards compat
+- None. Test-only release — zero source changes.
+
+### Migration
+- None. `pipx upgrade huntova`.
+
+---
+
 ## v0.1.0a2001 — May 4 2026 — Test-only audit sweep on email body builder + LLM thinking-cleanup helpers
 
 ### What we audited
