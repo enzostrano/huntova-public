@@ -6,6 +6,32 @@ Versioning: `0.1.0aNN` alpha increments. Public install path: `pipx install hunt
 
 ---
 
+## 0.1.0a710 — May 4 2026 — Invariant audit on `runtime.py` (`CAPABILITIES`) — pin `_truthy` case-insensitive accept-set + reject-set, `_resolve` defaults for unknown / blank / whitespace-padded `APP_MODE`, local-mode flag defaults (off-by-default except single_user + public_share), cloud-mode flag defaults (on-by-default), `google_oauth_enabled` tracks `GOOGLE_CLIENT_ID` presence, `frozen=True` mutation block, `to_dict()` field-set, `get_capabilities()` live singleton, `is_local()` / `is_cloud()` agree with mode (BRAIN-160)
+
+### Lockdown (BRAIN-160, runtime capability invariants)
+
+`runtime.CAPABILITIES` is the single source of truth for "what does this install do?". Every backend gate and every frontend feature flag reads it. A regression here flips entire surfaces silently.
+
+17 new tests in `tests/test_runtime_invariant_audit.py` pin:
+
+- `_truthy("1"|"true"|"TRUE"|"True"|"yes"|"YES"|"on"|"ON")` → True; everything else → False; `None` → default; whitespace-padded inputs handled.
+- `_resolve()` defaults to cloud for unknown `APP_MODE` ("weird-unknown"), blank APP_MODE, or whitespace-padded "  local  " (still resolves to local).
+- Local mode: `billing_enabled=False`, `auth_enabled=False`, `single_user_mode=True`, `hosted_mode=False`, `smtp_enabled=False`, `public_share_enabled=True`, `google_oauth_enabled=False`.
+- Cloud mode: `billing_enabled=True`, `auth_enabled=True`, `single_user_mode=False`, `hosted_mode=True`, `smtp_enabled=True`, `public_share_enabled=True`; `google_oauth_enabled` defaults to `bool(GOOGLE_CLIENT_ID)` and `HV_GOOGLE_OAUTH` overrides.
+- `frozen=True` blocks per-field mutation.
+- `to_dict()` returns exactly the 8 documented fields.
+- `get_capabilities() is CAPABILITIES`.
+- `is_local()`/`is_cloud()` are mutually exclusive and agree with `mode`.
+- `HV_BILLING` env override works in both modes.
+
+No source changes. 17/17 tests pass.
+
+### Files
+- `tests/test_runtime_invariant_audit.py`: new — 17 tests.
+- `cli.py` + `pyproject.toml` + `CHANGELOG.md`. Versions a701-a709 reserved for parallel agents.
+
+---
+
 ## 0.1.0a700 — May 4 2026 — Surface-parity + invariant audit on `policy.py` (`_LocalPolicy` ↔ `_CloudPolicy`) — pin method-name set parity + parameter-name parity + return-shape contract for `can_run_agent` + local-mode permissive invariants (None user, unknown feature, ignore credits) + cloud-mode strict invariants (None user denied, no-credits denied, cost constant) + `_resolve()` short-circuit when billing disabled (BRAIN-159)
 
 ### Lockdown (BRAIN-159, policy surface parity)
