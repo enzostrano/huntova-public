@@ -6,6 +6,26 @@ Versioning: `0.1.0aNN` alpha increments. Public install path: `pipx install hunt
 
 ---
 
+## 0.1.0a563 — May 4 2026 — Daily-quota constants integrity audit (parallel to BRAIN-151) — `_SCAN_DAILY_MAX` / `_PHASE5_DAILY_MAX` / `_COMPLETE_DAILY_MAX` / `_ASSIST_DAILY_MAX` plus BRAIN-132 idempotency cache constants + BRAIN-117/127 byte-cap constants all blanket-audited for sane bounds (BRAIN-152)
+
+### Lockdown (BRAIN-152, blanket numeric-config integrity)
+
+Parallel to BRAIN-151: every numeric config constant must have sane bounds. A typo or env-var misread leaves a quota at 0 (instant block) or wildly high (no real cap).
+
+Audited constants:
+- `_SCAN_DAILY_MAX`, `_PHASE5_DAILY_MAX`, `_COMPLETE_DAILY_MAX`, `_ASSIST_DAILY_MAX` (each in `[1, 10000]`).
+- Cost ordering: `_COMPLETE_DAILY_MAX <= _SCAN_DAILY_MAX` (complete more expensive); assist not the lowest cap.
+- BRAIN-132 idempotency: `_IDEMPOTENCY_TTL_SEC` (1h..30d), `_IDEMPOTENCY_KEY_MAX_LEN` (32..1024), `_IDEMPOTENCY_CACHE_PER_USER_MAX` (5..1000).
+- BRAIN-117/127 byte caps: `_WIZARD_BODY_BYTES_MAX` (64 KiB..4 MiB), `_WIZARD_FIELD_BYTES_MAX` (4..64 KiB).
+
+6 new tests in `tests/test_daily_quota_config_audit.py`. No source changes.
+
+### Files
+- `tests/test_daily_quota_config_audit.py`: new — 6 tests.
+- `cli.py` + `pyproject.toml` + `CHANGELOG.md`.
+
+---
+
 ## 0.1.0a562 — May 4 2026 — `_RATE_BUCKETS` config integrity audit — every entry must be `(window_int, max_calls_int)` with sane bounds (10..3600s window, 1..1000 calls); guards against typo regressions like `(60, 0)` that would silently instant-block an endpoint (BRAIN-151)
 
 ### Lockdown (BRAIN-151, rate-bucket config integrity)
