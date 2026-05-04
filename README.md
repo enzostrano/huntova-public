@@ -389,7 +389,7 @@ same SQLite file, so leads found via either path show up in both.
 
 | Provider | When to pick | Get a key |
 |----------|--------------|-----------|
-| **Claude (Anthropic)** (default) | Highest-quality scoring, best email drafts. Huntova was built using Claude end-to-end. | <https://console.anthropic.com/settings/keys> |
+| **Claude (Anthropic)** (default) | Highest-quality scoring, best email drafts. | <https://console.anthropic.com/settings/keys> |
 | **Gemini** | Free tier, fast scoring, good defaults | <https://aistudio.google.com/apikey> |
 | **OpenAI** | Broad model selection, GPT-5 reasoning | <https://platform.openai.com/api-keys> |
 
@@ -422,13 +422,4 @@ AGPL-3.0-or-later. See [LICENSE](./LICENSE).
 
 ## Credits
 
-**Brain:** [@enzostrano](https://github.com/enzostrano) — product
-direction, architecture, every decision behind the surface you see.
-
-**Coding:** [Claude (Anthropic)](https://www.anthropic.com), running on
-[Claude Code](https://claude.com/claude-code). Claude wrote nearly every
-line of the codebase to Enzo's spec, line by line, prompt by prompt.
-
-Huntova would not exist without Anthropic's models. **Thank you to the
-Anthropic team for building the tool that built Huntova.** That's why
-Claude is the default provider — it's the model that shipped this thing.
+Built and maintained by [@enzostrano](https://github.com/enzostrano).

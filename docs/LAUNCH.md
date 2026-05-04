@@ -1,7 +1,6 @@
 # Huntova launch plan — Tuesday May 5, 2026
 
-This is the operational launch playbook synthesised from the 3-tab Perplexity
-brainstorm rounds (Huntova engineering strategy, Gemini 3.1 Pro GTM, Kimi K2.6 architecture).
+This is the operational launch playbook 1 Pro GTM, Kimi K2.6 architecture).
 **Date and angle are locked.** Read this top-to-bottom before launch day.
 
 ## Date and angle
@@ -17,11 +16,11 @@ Launch is gated on **`huntova doctor` exit-code 0** on a clean wheel install acr
 the 9-cell matrix (ubuntu-latest / macos-latest / windows-latest × Python 3.11 / 3.12 / 3.13).
 
 YAML stashed at `docs/workflows/pre-launch-smoke.yml` — Enzo copies it into
-`.github/workflows/` when ready (Claude can't push to that path). Run it manually
+`.github/workflows/` when ready (the agent can't push to that path). Run it manually
 the morning of launch via `workflow_dispatch`. If green on all 9 cells: ship. If any
 red: fix, re-run, hold until green.
 
-## PyPI publishing — the launch's hidden critical-path (GPT round 75)
+## PyPI publishing — the launch's hidden critical-path
 
 **The biggest hidden risk to May 5 is install-path integrity, NOT marketing.** Every
 bullet of the launch story assumes `pipx install huntova` Just Works. If the package
@@ -42,7 +41,7 @@ PyPI trusted-publishing via `pypa/gh-action-pypi-publish`, no API tokens needed)
    - Workflow: `publish.yml`
    - Environment: `pypi`
 3. Copy `docs/workflows/publish.yml` to `.github/workflows/publish.yml` via the
-   GitHub UI (Claude can't push to that path).
+   GitHub UI (the agent can't push to that path).
 4. Add a GitHub Environment named `pypi` to the repo (Settings → Environments).
 5. Cut the first release: `git tag v0.1.0a1 && git push origin v0.1.0a1`.
    The Action runs, builds sdist + wheel, publishes to PyPI.
@@ -78,7 +77,7 @@ Backup only — never the headline install path.
 
 In this exact order:
 
-1. **PyPI publishing pipeline (GPT round-75 critical-path).** See § PyPI
+1. **PyPI publishing pipeline.** See § PyPI
    publishing — the launch's hidden critical-path below for the full 6-step
    procedure. Verify on TWO clean machines (macOS + Linux) BEFORE moving on.
    Without this, the entire launch story breaks. Block on this until green.
@@ -237,7 +236,7 @@ at **09:30 ET** (before HN at 10:00 ET):
    is live on Hacker News today. Would love feedback on the Postgres-to-SQLite
    architecture or the scraping heuristics. [HN link]"
 
-## 48-hour @enzostrano content arc (GPT round 73)
+## 48-hour @enzostrano content arc
 
 Three-beat narrative: **problem → artifact → proof → launch.** Founder-led
 content works as one continuous build, not random promo bursts.
@@ -252,7 +251,7 @@ content works as one continuous build, not random promo bursts.
 | Tue May 6 09:30 | **Launch thread (4 tweets)** — see above | per-tweet | asciinema + OG |
 | Tue May 6 12:00 | **Objection-handling** — answer the top 2 HN questions: Preview Mode + why local-first | 250–400 | none |
 
-## "One real success story" — founder dogfood (GPT round 73)
+## "One real success story" — founder dogfood
 
 By **Monday EOD**, Enzo needs the following live as the public proof:
 - One real `huntova hunt` for **his own agency's ICP**, published as a
@@ -330,8 +329,7 @@ the targeted founder/SDR emails with the HN link anyway, and use whatever
 comments you got to refine the first-reply framing for the next wave.
 
 **If a savvy commenter still nukes Preview Mode** (despite the badge + label):
-do NOT concede, do NOT defend the demo as a demo. **Reframe** (GPT round 73
-verbatim):
+do NOT concede, do NOT defend the demo as a demo. **Reframe**:
 
 > Fair push. /try is not meant to prove Huntova's live-web accuracy — it is
 > meant to show the **output artifact**: Proof Packs, evidence layout,
@@ -388,7 +386,7 @@ critique cluster.
 > exists to replace. If you wanted a spam tool, you'd use a spam tool;
 > this is what you build when you've been on the receiving end of one.
 
-### Reply 4 — "Synthetic /try is misleading" (GPT round 73 verbatim)
+### Reply 4 — "Synthetic /try is misleading"
 
 > Fair push. /try is not meant to prove Huntova's live-web accuracy — it
 > is meant to show the **output artifact**: Proof Packs, evidence
@@ -435,7 +433,7 @@ critique cluster.
 - `/try` live quota counter: "X / 5 demos left this hour" with auto-refresh
   on 429. Disables submit when zero.
 - `/h/<slug>` "Preview-generated sample" banner at top + same badge in OG
-  image (the GPT round-72 counter-takedown for the synthetic-demo critique).
+  image (the.
 - `/h/<slug>` dynamic OG image at `/h/<slug>/og.svg` — 1200×630 terminal-
   styled with the visitor's ICP as a quoted query, top-3 lead names, fit
   scores colour-coded. Pasted-link unfurl is the billboard.
@@ -467,13 +465,13 @@ support requests if they matter).
 
 NOT v1.0 blockers: 5 verified plugins in registry; more landing-page polish.
 
-## Success-metric trajectory (GPT rounds 74 + 75)
+## Success-metric trajectory
 
 The **north-star is NOT GitHub stars.** It's `cli_hunt / cli_init` ratio +
 **repeat hunts per user.** Stars tell you distribution worked; repeat hunts
 tell you the product is becoming a habit.
 
-But — critical refinement from GPT round 75 — north-star is the **week-1
+But — critical refinement from
 truth, not the Wednesday truth.** Repeat-hunt data isn't visible until enough
 time has passed. So split metrics by horizon:
 
@@ -497,7 +495,7 @@ time has passed. So split metrics by horizon:
 | **Week 1** (May 12) | 600 stars, 300 cli_init, 120 cli_hunt, 25 users with hunts on 2+ separate days, 8 public Proof Packs from non-Enzo users, 3 community plugin convos |
 | **Month 1** (June 5) | 1.5K stars, 1K cli_init, 300 users with 2+ hunts, 75 with 5+ hunts, 15 plugins (registry or pending), 5 serious agency teams using repeatedly, 2 inbound commercial convos |
 
-## Phenomenon-scale risks (GPT round 74)
+## Phenomenon-scale risks
 
 If launch goes BIGGER than expected, the top-2 risks to pre-stage:
 
@@ -575,7 +573,7 @@ it instantly.** It's the ultimate proof-of-work.
 
 This captures 1–2 buyer leads for the future €29/mo paid tier.
 
-## Failure-mode posture (GPT round 74)
+## Failure-mode posture
 
 If Tuesday underperforms, **Wednesday = iterate the product, soft relaunch**:
 
@@ -650,8 +648,7 @@ based on HN sentiment whether to flip the flag and post a v1.1 follow-up.
 Tuesday night Enzo sees ≥1 cold-email reply from an agency owner saying "this
 is sick — when can I use it for my own client list?". Huntova engineering + Gemini
 converged on a hybrid — give them the free CLI to prove the value AND open
-the design-partner door for the Cloud Proxy wedge. Don't anchor a price yet
-(GPT round 76 — premature precision before knowing operating cost), but DO
+the design-partner door for the Cloud Proxy wedge. Don't anchor a price yet, but DO
 educate on the technical pain (Gemini round 76 — agency owners hit CAPTCHAs
 at scale).
 
@@ -675,7 +672,7 @@ at scale).
 product that doesn't exist), with Gemini's CAPTCHA pain education baked in
 so the agency owner SEES why the cloud tier exists.
 
-## Cloud Proxy MVP (GPT round 76)
+## Cloud Proxy MVP
 
 The smallest credible paid wedge that captures Tuesday-night buyer intent:
 
@@ -697,7 +694,7 @@ The smallest credible paid wedge that captures Tuesday-night buyer intent:
 
 **Pricing language (post-launch):** stay design-partner / free-90-days
 through Month 1. Set price after observing operating cost from the first
-3–5 partners. GPT round 76: "premature pricing creates fake precision
+3–5 partners.
 before Enzo knows the cost, usage profile, or support burden."
 
 ## Quote-tweet protocol (Gemini round 76)
@@ -885,7 +882,7 @@ multi-agent orchestration (`asyncio.gather` on hooks is parallel enough),
 `huntova examples reproduce` (gimmicky — open-source code IS the
 reproducibility), `huntova try-locally` (don't blur the preview boundary).
 
-## Enzo's 30-day calendar (GPT round 76)
+## Enzo's 30-day calendar
 
 Meta-rule: **NO MORE THAN TWO STRATEGIC FRONTS AT ONCE.** For the next
 30 days, those fronts are:

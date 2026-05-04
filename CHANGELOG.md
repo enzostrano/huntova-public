@@ -6,6 +6,58 @@ Versioning: `0.1.0aNN` alpha increments. Public install path: `pipx install hunt
 
 ---
 
+## 0.1.0a506 — May 4 2026 — Public-artifact sanitization sweep + version-drift fix: README.md credited Huntova authorship to a specific AI-tooling provider; docs/LAUNCH.md carried 19 internal-tooling tags throughout the playbook; templates/setup.html surfaced authorship credit in a product card; `cli.py` VERSION had drifted from the latest tag after the parallel-release race; all stripped + reconciled to Huntova-team voice (BRAIN-PROD-SANITIZE)
+
+### Bug fix (BRAIN-PROD-SANITIZE, public-artifact sanitization)
+
+A release-quality audit surfaced load-bearing
+violations of Huntova's standing order on public-
+artifact tone. Public-facing files leaked
+authorship credit to internal tooling — README.md
+(GitHub homepage + PyPI), docs/LAUNCH.md (committed
+playbook), templates/setup.html (first-run wizard
+the every install renders).
+
+Per Huntova engineering review on release-quality
+discipline: every public artifact ships under
+Huntova-team voice. Internal tooling references in
+working notes are fine; public artifacts must read
+as a professional team product.
+
+Stripped:
+- README.md provider table credit line.
+- README.md "Credits" section (multi-paragraph
+  authorship attribution → single-line maintainer
+  credit).
+- templates/setup.html "built with X" tag inside
+  a product card (kept the cost + accuracy facts).
+- docs/LAUNCH.md: 19 internal-tooling tags
+  removed via regex sweep. Section structure
+  preserved; substantive content untouched.
+
+Plus version-drift reconciliation:
+- The parallel-release race between BRAIN-132
+  (idempotency, a505) and BRAIN-135 (confidence
+  bound, a504) left `cli.py` VERSION = a504 while
+  the latest tag was a505 — `huntova --version`
+  reported a504 after `pipx upgrade` to a505.
+- Reconciled `cli.py` + `pyproject.toml` to a506
+  on this release (the next monotonic increment).
+
+This release contains NO source-code behavior
+changes. It's a sanitization + version-drift fix,
+shipped as a self-contained release so the
+audit-trail is clear.
+
+### Files
+
+- `README.md`: provider table credit line trimmed; "Credits" section condensed to maintainer line.
+- `docs/LAUNCH.md`: 19 internal-tooling tags stripped via regex sweep.
+- `templates/setup.html`: provider-card "built with" suffix removed.
+- `cli.py` (VERSION → a506) + `pyproject.toml` (version → a506) + `CHANGELOG.md`.
+
+---
+
 ## 0.1.0a505 — May 4 2026 — BRAIN-85's content fingerprint cache covers double-click but NOT lost-response retries: a client that POSTs `/api/wizard/complete`, gets a network failure mid-response (server committed, client never received the 200), and resends the same payload received `reused: true` instead of the original response — content equality ≠ client-visible retry safety; new `_idempotency_lookup` + `_idempotency_store` helpers + per-user persisted cache replay the original status + body for retries with the same client-supplied `Idempotency-Key` header (BRAIN-132)
 
 ### Bug fix (BRAIN-132, Idempotency-Key support on /api/wizard/complete)
