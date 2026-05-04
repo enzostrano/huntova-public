@@ -6,6 +6,26 @@ Versioning: `0.1.0aNN` alpha increments. Public install path: `pipx install hunt
 
 ---
 
+## 0.1.0a1700 — May 4 2026 — Audit-sweep batch BRAIN-184..186 — cli_sequence cadence + due-check (24 tests pinning _user_cadence None-fallback / sequence-disabled / default 4/9 days / explicit follow_up_N_days deltas / negative-clamp / 3rd-step optional / non-numeric garbage fallback, _first_name first-token / fallback, _recap first-para / 220 clamp / ellipsis / None defense, _booking_line empty/with-url, _due naive→UTC / Z-suffix / step-beyond-cadence-false), cli_terminal color + event-formatter (18 tests pinning _color_enabled NO_COLOR-standard + TTY-check, _c bare-text-when-disabled + ANSI-wrap-when-enabled + unknown-color fallback, _format_label 20-char-padding, _format_body 200-char-cap + empty/non-dict defense, _print_event handles non-JSON / empty / malformed raw_data without crash), cli_teach fuzzy-match + org-name normaliser (17 tests pinning _norm_org legal-suffix-strip Inc/Ltd/LLC/GmbH/SA/SRL + lowercase + punctuation strip + None/empty defense + only-trailing-suffix-strip, _fuzzy_find exact-match-immediate-return + 0.78 threshold rejection + empty-needle/leads None + skip-no-org_name + best-match selection)
+
+### Lockdown bundle (BRAIN-184..186)
+
+59 new tests across 3 modules. Zero source changes.
+
+**BRAIN-184 — cli_sequence.py (24 tests)** — pin cadence helper builder + first-name extraction + recap clamp + due-check timezone handling.
+
+**BRAIN-185 — cli_terminal.py (18 tests)** — pin color helpers + event formatter (20-char padded label, 200-char body cap, non-dict defense, malformed-JSON tolerance).
+
+**BRAIN-186 — cli_teach.py (17 tests)** — pin org-name normaliser (legal suffix strip + lowercase + punctuation strip + only-trailing) and fuzzy matcher (exact-match shortcut + 0.78 threshold + empty-input defenses + best-match selection).
+
+### Files
+- `tests/test_cli_sequence_audit.py`: new — 24 tests.
+- `tests/test_cli_terminal_audit.py`: new — 18 tests.
+- `tests/test_cli_teach_audit.py`: new — 17 tests.
+- `cli.py` + `pyproject.toml` + `CHANGELOG.md`. Versions a1601-a1699 reserved for parallel agents.
+
+---
+
 ## 0.1.0a1600 — May 4 2026 — Audit-sweep batch BRAIN-181..183 — cli_deliverability SPF/DMARC parser invariants (17 tests pinning _check_spf RFC-7208-multiple-records-fail + +all/?all/missing-all warn + -all/~all ok + case-insensitive, _check_dmarc no-record-fail + p=none/quarantine warn + p=reject ok), cli_approve pending-detection + score-band (18 tests pinning _is_pending sent-status filter + audit-wave-28 awaiting-approval-requires-email + fit≥8 path + missing/whitespace email defense + status-priority-over-score, _score_band 8/6/0 boundaries), cli_migrate CSV-import helpers (25 tests pinning _autodetect linkedin-priority audit-wave-27 + first-match-wins + canonical-claimed-once + case-insensitive, _parse_map_overrides parsing + skip-invalid + whitespace strip, _normalise_row contact_name synthesis + fit_score clamp + drop-empty, _make_lead_id stability/uniqueness/seed-priority, _dedup_keys https-strip + name-fallback-without-email + email-makes-name-irrelevant)
 
 ### Lockdown bundle (BRAIN-181..183)
