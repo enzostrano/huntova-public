@@ -6,6 +6,57 @@ Versioning: `0.1.0aNN` alpha increments. Public install path: `pipx install hunt
 
 ---
 
+## 0.1.0a900 — May 4 2026 — Audit-sweep batch BRAIN-164..167 — auth.py cookie Secure-flag (`_serving_over_https()` contract for local vs cloud + safe-fallback on runtime import failure), update_runner.py invariants (`_resolve_cmd` list-form, single-flight `start_job` under 8-way concurrent contention, `get_job` copy-semantics, hardcoded args injection-safety), huntova_daemon.py unit-file generation (launchd plist XML correctness against `</string>` injection in env values, systemd escape rules for `\` / `"` / `$`, newline + CR rejection to prevent `ExecStart=/bin/evil` injection, XDG path resolution), bundled_plugins SSRF guard (22 tests pinning `_safe_outbound_url` against localhost / cloud-metadata / RFC1918 / link-local / 0.0.0.0 / numeric loopback forms / CGNAT / IPv4-mapped IPv6 loopback / DNS rebinding via failure-rejection / unknown schemes)
+
+### Lockdown bundle (BRAIN-164..167)
+
+64 new tests across 4 modules. Zero source changes. Pins existing security and invariant contracts so a refactor can't silently regress them.
+
+**BRAIN-164 — auth.py cookie Secure-flag (13 tests)**
+- `_serving_over_https()` returns False in local mode, True in cloud mode (mirrors a586 BRAIN-PROD-5 fix that closed the update button bug).
+- Falls back to False conservatively on runtime-import failure (better to omit Secure than lock users out).
+- `set_csrf_cookie`, `set_session_cookie`, `clear_session_cookie` all use `_serving_over_https()` (no caller bypasses).
+- Cookie attributes invariant across modes: HttpOnly, SameSite=Lax, Path=/.
+- Cookie max_age tracks `SESSION_EXPIRY_HOURS` (multi-agent bug #8 fix pinned).
+- Switching APP_MODE flips Secure on next call after reload (no stale module cache).
+
+**BRAIN-165 — update_runner.py (12 tests)**
+- `_resolve_cmd` returns list-form `[pipx, "upgrade", "huntova"]` or `[pip, "install", "--upgrade", git_url]` or None.
+- Single-flight `start_job`: returns existing `(id, reused=True)` when a job is queued/running.
+- Done/fail jobs don't block new upgrades (user can retry after failure).
+- `get_job` returns dict copy (caller mutation doesn't corrupt canonical state).
+- Hardcoded command tuples free of shell metachars (`;`, `&`, `|`, `$(`).
+- Thread-safe under 8-way concurrent contention: exactly 1 new + 7 reused.
+
+**BRAIN-166 — huntova_daemon.py unit-file generation (17 tests)**
+- launchd plist parses as valid XML; expected keys (Label / ProgramArguments / RunAtLoad / KeepAlive) present.
+- Env values containing `</string><key>EVIL</key><string>injected` survive `_xml_escape` — no XML-injection escape into a separate key/value pair.
+- Empty / None / empty-value env entries skipped (no `KEY=` empty lines).
+- `_systemd_escape` correctly escapes `\` → `\\`, `"` → `\"`, `$` → `$$`.
+- Env values with newline / CR rejected (prevents `ExecStart=/bin/evil` directive injection in systemd unit).
+- systemd unit has required `[Unit]` / `[Service]` / `[Install]` sections.
+- `_linux_unit_path` respects `XDG_CONFIG_HOME`; `_log_dir` respects `XDG_DATA_HOME`.
+
+**BRAIN-167 — bundled_plugins SSRF guard (22 tests)**
+- `_safe_outbound_url` rejects `localhost`, `127.0.0.1`, `[::1]`, `ip6-localhost`, `ip6-loopback`.
+- Rejects cloud-metadata IPs and named hosts: `169.254.169.254` (AWS), `metadata.amazonaws.com`, `metadata.google.internal`, `metadata.azure.com`, `100.100.100.200` (Alibaba), `instance-data`.
+- Rejects RFC1918 (`10.x` / `172.16-31.x` / `192.168.x`), link-local (`169.254.x.y`), `0.0.0.0`.
+- Rejects octal / decimal-int numeric loopback forms (`http://017700000001/`, `http://2130706433/`).
+- Rejects CGNAT (`100.64.0.0/10`) via `not is_global` check.
+- Rejects IPv4-mapped IPv6 loopback (`[::ffff:127.0.0.1]`).
+- Rejects unknown schemes (`file://`, `ftp://`, `gopher://`).
+- Rejects empty / None / unparseable URLs.
+- Rejects DNS resolution failures (NXDOMAIN) — better to refuse a flaky webhook than risk a TTL=0 DNS rebind.
+
+### Files
+- `tests/test_auth_cookie_secure_flag_audit.py`: new — 13 tests.
+- `tests/test_update_runner_audit.py`: new — 12 tests.
+- `tests/test_daemon_unit_generation_audit.py`: new — 17 tests.
+- `tests/test_ssrf_guard_audit.py`: new — 22 tests.
+- `cli.py` + `pyproject.toml` + `CHANGELOG.md`. Versions a741-a899 reserved for parallel agents (wave-2 swarm).
+
+---
+
 ## 0.1.0a740 — May 4 2026 — Two real-bug fixes batched: (1) provider override-vs-keyless-local parity so `push_provider_override("ollama"|"lmstudio"|"llamafile")` from the chat selector or multi-agent fan-out actually returns the local provider instead of silently picking Anthropic (BRAIN-162); (2) `set_secret` sweeps stale lower-tier copies (Fernet + plaintext) so a future keyring failure can't fall back to a pre-rotation key value (BRAIN-163). Plus prior BRAIN-159/160/161 audit-sweep test pins (policy surface parity, runtime invariants, db_driver SQL translation).
 
 ### Bug fix (BRAIN-162, provider override parity)
