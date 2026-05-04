@@ -6,6 +6,64 @@ Versioning: `0.1.0aNN` alpha increments. Public install path: `pipx install hunt
 
 ---
 
+## 0.1.0a513 — May 4 2026 — HTTP-method discipline lockdown extended to admin/ops mutating routes; current router state is correct (all use `@app.post`), but operator routes amplify blast radius (credit injection, user suspension, session clearing, wizard wipe), so the regression-test lockdown is even more important here than on the wizard surface — codified via FastAPI route-method assertions + behavioral TestClient GET-rejection checks (BRAIN-138)
+
+### Bug fix (BRAIN-138, HTTP-method discipline on operator surface)
+
+BRAIN-131 (a500) locked in HTTP-method discipline on
+`/api/wizard/*` + `/agent/*` mutating routes via
+regression tests. The operator surface
+(`/api/ops/*` + `/api/admin/*`) was not yet covered.
+
+The current router state is correct — all mutators
+use `@app.post`, all reads use `@app.get`. But like
+BRAIN-131, the controls live entirely in route
+decorators. One accidental `@app.post` → `@app.get`
+swap on a future refactor for `/api/ops/users/{id}/
+credits` or `/wizard/reset` would silently reopen
+the destructive-action-via-GET attack surface.
+
+Operator routes amplify the blast radius — a
+destructive admin action triggered by a cached link,
+image-prefetch, or browser reload would have
+catastrophic impact (credit injection, user
+suspension, session clearing, wizard wipe). The
+discipline matters even more here than on the
+wizard surface.
+
+Per Huntova engineering review on HTTP-method
+discipline (companion to BRAIN-131): every operator
+endpoint that can mutate state must reject GET and
+accept only the intended unsafe method. Read
+endpoints stay GET-only.
+
+The deliverable is regression-test lockdown so the
+invariant survives future refactors.
+
+Tests inspect `app.routes` directly:
+- 10 mutating ops/admin routes (rerun-pass3,
+  credits, plan, verify, suspend, sessions/clear,
+  wizard/reset, agent/stop, cloud-token, _metric)
+  accept POST and reject GET / PUT / DELETE / PATCH.
+- 13 read ops/admin routes (summary, users, users/
+  {id}, billing, agents, audit, runs, runs/{id},
+  incidents, metrics, health, users/{id}/events,
+  admin/metrics) are GET-only.
+- Behavioral via Starlette TestClient: GET against
+  a mutating route returns 405 (or auth/not-found
+  rejection — also acceptable since GET never
+  reaches the handler body).
+
+5 new regression tests in
+`tests/test_admin_ops_http_method_enforcement.py`.
+
+### Files
+
+- `tests/test_admin_ops_http_method_enforcement.py`: new — 5 tests guarding HTTP-method discipline on the operator surface.
+- `cli.py` (VERSION) + `pyproject.toml` (version) + `CHANGELOG.md`. No source-code behavior changes — this release is a regression-test lockdown.
+
+---
+
 ## 0.1.0a511 — May 4 2026 — Update button returned "CSRF validation failed" 403 for users on /jarvis (BRAIN-PROD-1)
 
 ### Bug fix (BRAIN-PROD-1, in-browser update flow CSRF parity)
