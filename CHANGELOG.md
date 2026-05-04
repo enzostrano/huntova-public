@@ -6,6 +6,26 @@ Versioning: `0.1.0aNN` alpha increments. Public install path: `pipx install hunt
 
 ---
 
+## 0.1.0a2000 — May 4 2026 — Audit-sweep batch BRAIN-193..195 — app.make_fingerprint + dedup helpers (20 tests pinning _fp_normalize lowercase + noise-word/legal-suffix/event-word strip + None defense, _hostish_netloc full-URL extraction + bug-#63 schemeless handling + explicit-port strip + www-strip, make_fingerprint default-domain mode + bug-#63 schemeless-matches-schemed + fallback-when-no-domain + deterministic + different-country-distinct), app._atomic_write + _safe_read durability primitives (17 tests pinning .tmp+rename atomicity + cleanup-on-failure + JSON round-trip + UTF-8 preservation + a413/BRAIN-52 fsync, _safe_read missing/corrupt/empty/directory→default), app.classify_url + is_private_url SSRF gate (18 tests pinning 4-state classification with audit-wave-29 IPv4-mapped IPv6 loopback unwrap + .local/.localhost suffix block + fail-closed on exception)
+
+### Lockdown bundle (BRAIN-193..195)
+
+55 new tests across 3 modules. Zero source changes.
+
+**BRAIN-193 — app.make_fingerprint (20 tests)** — pin lead-dedup contract: `_fp_normalize` noise/legal/event-word strip, `_hostish_netloc` bug-#63 schemeless extraction + port-strip, `make_fingerprint` default-domain mode + schemeless-matches-schemed.
+
+**BRAIN-194 — app._atomic_write + _safe_read (17 tests)** — pin durability primitives: .tmp+rename + cleanup, UTF-8 preservation, fsync (a413/BRAIN-52), `_safe_read` missing/corrupt/empty/directory defenses.
+
+**BRAIN-195 — app.classify_url SSRF gate (18 tests)** — pin 4-state classification (ok / private / unresolvable / malformed) with audit-wave-29 IPv4-mapped IPv6 loopback unwrap, .local/.localhost mDNS/RFC6761 suffix, fail-closed on exception.
+
+### Files
+- `tests/test_fingerprint_audit.py`: new — 20 tests.
+- `tests/test_atomic_write_audit.py`: new — 17 tests.
+- `tests/test_classify_url_audit.py`: new — 18 tests.
+- `cli.py` + `pyproject.toml` + `CHANGELOG.md`. Versions a1901-a1999 reserved for parallel agents.
+
+---
+
 ## 0.1.0a1900 — May 4 2026 — Audit-sweep batch BRAIN-190..192 — user_context.UserEventBus invariants (16 tests pinning subscribe/unsubscribe + cached terminal/progress replay + emit_keepalive SSE-comment + dead-subscriber drop + BRAIN-147 _clip_sse_event_payload 32KiB byte-cap + screenshot exemption + truncation-marker preserves identifying keys + multi-agent-bug-11 _DEAD_THRESHOLD), agent_runner._SubagentRegistry (15 tests pinning _Subagent 12-hex-id + uniqueness + initial-state + register-cap-enforcement + a277 cancel-flips-running-to-cancelled-immediately + idempotent-on-terminal + cross-user-rejection + cancel_event propagation), providers _key_for + _resolve_settings + list_available_providers (17 tests pinning settings→keychain→env priority + a289 env-strip + a289 empty-env→None + nested dict/string forms + top-level-overrides-nested + cloud/local _resolve_settings + key-filter contract + _DEFAULT_ORDER ⊆ _ENV_KEY + _LOCAL_PROVIDERS ⊆ _DEFAULT_ORDER)
 
 ### Lockdown bundle (BRAIN-190..192)
