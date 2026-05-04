@@ -452,6 +452,75 @@ def _check_ai_rate(user_id: int, bucket: str = "ai") -> bool:
         return False
 
 
+# a481 (BRAIN-112): machine-readable backoff hints on
+# every wizard 429. Per Huntova engineering review on
+# rate-limited APIs + IETF draft-ietf-httpapi-ratelimit-
+# headers. Without Retry-After + RateLimit-*, clients
+# either hammer the endpoint or back off arbitrarily —
+# both are bad. Two helpers below; every wizard 429 site
+# uses the matching one.
+
+
+def _rate_limit_429(user_id: int, bucket: str, message: str, error_kind: str | None = None):
+    """Build a 429 JSONResponse for a burst-bucket
+    `_check_ai_rate` block, carrying:
+
+    - `Retry-After: <window-seconds>` — when the next
+      window opens. We use the bucket's full window
+      length as a safe upper bound; computing the precise
+      seconds-until-oldest-call-ages-out would require
+      re-acquiring the lock and inspecting the user's
+      timestamps, which adds complexity for marginal gain
+      since the window is short (typically 60s).
+    - `RateLimit-Limit: <max-calls>` — the bucket cap.
+    - `RateLimit-Remaining: 0` — caller already hit the
+      wall.
+    - `RateLimit-Reset: <window-seconds>` — IETF draft
+      uses delta-seconds form.
+
+    Body keeps the same `{error, error_kind?}` shape as
+    pre-BRAIN-112 callers expected.
+    """
+    window, max_calls = _RATE_BUCKETS.get(bucket) or (AI_RATE_WINDOW, AI_RATE_MAX)
+    payload = {"ok": False, "error": message}
+    if error_kind:
+        payload["error_kind"] = error_kind
+    headers = {
+        "Retry-After": str(int(window)),
+        "RateLimit-Limit": str(int(max_calls)),
+        "RateLimit-Remaining": "0",
+        "RateLimit-Reset": str(int(window)),
+    }
+    return JSONResponse(payload, status_code=429, headers=headers)
+
+
+def _daily_quota_429(daily_max: int, message: str, error_kind: str):
+    """Build a 429 JSONResponse for a daily-quota block
+    (BRAIN-92/93/96/97), carrying Retry-After computed as
+    seconds-until-next-UTC-midnight + the standard
+    RateLimit-* triple. Quotas reset at the day boundary,
+    not on a sliding window.
+    """
+    _now = datetime.now(timezone.utc)
+    _midnight = (_now + timedelta(days=1)).replace(
+        hour=0, minute=0, second=0, microsecond=0
+    )
+    _retry_after = max(1, int((_midnight - _now).total_seconds()))
+    headers = {
+        "Retry-After": str(_retry_after),
+        "RateLimit-Limit": str(int(daily_max)),
+        "RateLimit-Remaining": "0",
+        "RateLimit-Reset": str(_retry_after),
+    }
+    payload = {
+        "ok": False,
+        "error": message,
+        "error_kind": error_kind,
+        "daily_max": int(daily_max),
+    }
+    return JSONResponse(payload, status_code=429, headers=headers)
+
+
 # Backward-compat: pre-BRAIN-91 callsites or tests may reference
 # the bare `_ai_rate` dict. View it as the legacy bucket state so
 # external readers don't break.
@@ -8622,7 +8691,7 @@ def _is_safe_url(url: str) -> bool:
 @app.post("/api/wizard/scan")
 async def api_wizard_scan(request: Request, user: dict = Depends(require_user)):
     if _check_ai_rate(user["id"], bucket="wizard_scan"):
-        return JSONResponse({"error": "Too many scan requests. Wait a moment."}, status_code=429)
+        return _rate_limit_429(user["id"], "wizard_scan", "Too many scan requests. Wait a moment.")
     # a461 fix (BRAIN-92): persistent daily quota in addition to
     # the BRAIN-91 burst bucket. Per Huntova engineering review
     # on metered-API spend control. Burst caps don't stop a
@@ -8635,16 +8704,13 @@ async def api_wizard_scan(request: Request, user: dict = Depends(require_user)):
     # deploys, and worker crashes. The in-memory variant
     # (BRAIN-92 legacy) is no longer the load-bearing path.
     if await _check_scan_daily_quota_async(user["id"]):
-        return JSONResponse(
-            {
-                "error": (
-                    f"You've used your {_SCAN_DAILY_MAX} scans for today. "
-                    "Quota resets at 00:00 UTC."
-                ),
-                "error_kind": "daily_quota_exceeded",
-                "daily_max": _SCAN_DAILY_MAX,
-            },
-            status_code=429,
+        return _daily_quota_429(
+            _SCAN_DAILY_MAX,
+            (
+                f"You've used your {_SCAN_DAILY_MAX} scans for today. "
+                "Quota resets at 00:00 UTC."
+            ),
+            "daily_quota_exceeded",
         )
     body = await request.json()
     url = (body.get("url") or "").strip()
@@ -8754,7 +8820,7 @@ async def api_wizard_complete(request: Request, user: dict = Depends(require_use
     # twice, costing 2× spend and racing the DNA write. Per Huntova engineering
     # engineering review on idempotency.
     if _check_ai_rate(user["id"], bucket="wizard_complete"):
-        return JSONResponse({"error": "Too many requests. Wait a moment."}, status_code=429)
+        return _rate_limit_429(user["id"], "wizard_complete", "Too many requests. Wait a moment.")
     # a465 fix (BRAIN-96): durable daily quota on complete to
     # cap slow-burn BYOK drain (parity with BRAIN-93 scan).
     # a466 fix (BRAIN-97): use read-only check here; the
@@ -8764,16 +8830,13 @@ async def api_wizard_complete(request: Request, user: dict = Depends(require_use
         user["id"], "wizard_complete", _COMPLETE_DAILY_MAX
     )
     if _complete_blocked:
-        return JSONResponse(
-            {
-                "error": (
-                    f"You've used your {_COMPLETE_DAILY_MAX} training "
-                    "completions for today. Quota resets at 00:00 UTC."
-                ),
-                "error_kind": "complete_daily_quota_exceeded",
-                "daily_max": _COMPLETE_DAILY_MAX,
-            },
-            status_code=429,
+        return _daily_quota_429(
+            _COMPLETE_DAILY_MAX,
+            (
+                f"You've used your {_COMPLETE_DAILY_MAX} training "
+                "completions for today. Quota resets at 00:00 UTC."
+            ),
+            "complete_daily_quota_exceeded",
         )
     body = await request.json()
     raw_profile = body.get("profile", {}) or {}
@@ -9669,7 +9732,7 @@ async def api_wizard_reset(request: Request, user: dict = Depends(require_user))
     in stale state.
     """
     if _check_ai_rate(user["id"], bucket="wizard_reset"):
-        return JSONResponse({"ok": False, "error": "Too many requests. Wait a moment."}, status_code=429)
+        return _rate_limit_429(user["id"], "wizard_reset", "Too many requests. Wait a moment.")
 
     def _reset_mutator(cur: dict) -> dict:
         cur = {**DEFAULT_SETTINGS, **(cur or {})}
@@ -9710,7 +9773,7 @@ async def api_wizard_save_progress(request: Request, user: dict = Depends(requir
     # with rapid writes, ballooning the user_settings row + thrashing
     # SQLite's WAL.
     if _check_ai_rate(user["id"], bucket="wizard_save_progress"):
-        return JSONResponse({"error": "Too many saves. Wait a moment."}, status_code=429)
+        return _rate_limit_429(user["id"], "wizard_save_progress", "Too many saves. Wait a moment.")
     body = await request.json()
     answers = body.get("answers", {})
     phase = body.get("phase", 0)
@@ -9914,7 +9977,7 @@ async def api_wizard_generate_phase5(request: Request, user: dict = Depends(requ
     # any chatty client could fire duplicate AI calls — each costs the
     # user real spend on their BYOK key. Same 2-line guard pattern.
     if _check_ai_rate(user["id"], bucket="wizard_phase5"):
-        return JSONResponse({"error": "Too many requests. Wait a moment."}, status_code=429)
+        return _rate_limit_429(user["id"], "wizard_phase5", "Too many requests. Wait a moment.")
     # a465 fix (BRAIN-96): durable daily quota on phase-5 to
     # cap slow-burn BYOK drain (parity with BRAIN-93 scan).
     # a466 fix (BRAIN-97): use read-only check here; the
@@ -9924,16 +9987,13 @@ async def api_wizard_generate_phase5(request: Request, user: dict = Depends(requ
         user["id"], "wizard_phase5", _PHASE5_DAILY_MAX
     )
     if _phase5_blocked:
-        return JSONResponse(
-            {
-                "error": (
-                    f"You've used your {_PHASE5_DAILY_MAX} phase-5 generations "
-                    "for today. Quota resets at 00:00 UTC."
-                ),
-                "error_kind": "phase5_daily_quota_exceeded",
-                "daily_max": _PHASE5_DAILY_MAX,
-            },
-            status_code=429,
+        return _daily_quota_429(
+            _PHASE5_DAILY_MAX,
+            (
+                f"You've used your {_PHASE5_DAILY_MAX} phase-5 generations "
+                "for today. Quota resets at 00:00 UTC."
+            ),
+            "phase5_daily_quota_exceeded",
         )
     body = await request.json()
     answers = body.get("answers", {}) or {}
@@ -10203,20 +10263,17 @@ NO markdown. NO commentary. JSON array only."""
 async def api_wizard_assist(request: Request, user: dict = Depends(require_user)):
     """AI assistant for the wizard — helps users craft better, more specific answers."""
     if _check_ai_rate(user["id"], bucket="wizard_assist"):
-        return JSONResponse({"error": "Too many requests. Wait a moment."}, status_code=429)
+        return _rate_limit_429(user["id"], "wizard_assist", "Too many requests. Wait a moment.")
     # a465 fix (BRAIN-96): durable daily quota on assist to
     # cap slow-burn BYOK drain (parity with BRAIN-93 scan).
     if await _check_paid_endpoint_quota_async(user["id"], "wizard_assist", _ASSIST_DAILY_MAX):
-        return JSONResponse(
-            {
-                "error": (
-                    f"You've used your {_ASSIST_DAILY_MAX} assist messages "
-                    "for today. Quota resets at 00:00 UTC."
-                ),
-                "error_kind": "assist_daily_quota_exceeded",
-                "daily_max": _ASSIST_DAILY_MAX,
-            },
-            status_code=429,
+        return _daily_quota_429(
+            _ASSIST_DAILY_MAX,
+            (
+                f"You've used your {_ASSIST_DAILY_MAX} assist messages "
+                "for today. Quota resets at 00:00 UTC."
+            ),
+            "assist_daily_quota_exceeded",
         )
     body = await request.json()
     message = (body.get("message") or "").strip()

@@ -6,6 +6,83 @@ Versioning: `0.1.0aNN` alpha increments. Public install path: `pipx install hunt
 
 ---
 
+## 0.1.0a481 — May 4 2026 — Wizard 429 responses (burst buckets + daily quotas) emitted no Retry-After or RateLimit-* headers; clients couldn't back off intelligently and either hammered the endpoint or stalled longer than necessary; shared `_rate_limit_429` + `_daily_quota_429` helpers now emit IETF-standard backoff hints across every wizard rate-limited path (BRAIN-112)
+
+### Bug fix (BRAIN-112, machine-readable backoff hints)
+
+Every wizard 429 path returned a bare HTTP 429 with a
+JSON body — no `Retry-After`, no `RateLimit-Limit`,
+`RateLimit-Remaining`, or `RateLimit-Reset`. Affected:
+the BRAIN-91 burst buckets (`_check_ai_rate`) on
+/api/wizard/scan, /api/wizard/complete,
+/api/wizard/generate-phase5, /api/wizard/assist,
+/api/wizard/save-progress, /api/wizard/reset, AND the
+BRAIN-92/93/96/97 daily quotas (`_check_paid_endpoint_quota_async`,
+`_check_scan_daily_quota_async`) on scan / complete /
+phase-5 / assist.
+
+Per Huntova engineering review on rate-limited APIs +
+IETF draft-ietf-httpapi-ratelimit-headers: clients
+seeing a bare 429 either:
+1. Hammer the endpoint immediately and re-trip the same
+   429, burning patience and producing log noise.
+2. Back off arbitrarily long (e.g. 5 minutes) when the
+   actual reset is 30 seconds — wasted user time.
+3. Implement ad-hoc retry timing that drifts from the
+   server's actual policy as we tune buckets.
+
+Standard contract:
+- `Retry-After: <seconds>` — the per-window seconds for
+  burst buckets, or seconds-until-next-UTC-midnight for
+  daily quotas.
+- `RateLimit-Limit` / `RateLimit-Remaining` /
+  `RateLimit-Reset` — the IETF draft delta-seconds form,
+  so clients know the cap and how long until the window
+  resets.
+
+Fix: two module-scope helpers near `_check_ai_rate`.
+- `_rate_limit_429(user_id, bucket, message,
+  error_kind=None)` — burst-bucket 429s. Reads
+  `_RATE_BUCKETS[bucket]` for `(window, max_calls)` and
+  emits Retry-After=window, RateLimit-Limit=max_calls,
+  RateLimit-Remaining=0, RateLimit-Reset=window.
+- `_daily_quota_429(daily_max, message, error_kind)` —
+  daily-quota 429s. Computes seconds-until-next-UTC-
+  midnight for Retry-After, sets RateLimit-Limit=daily_max,
+  RateLimit-Remaining=0, RateLimit-Reset=that-same-delta.
+
+All wizard 429 callsites migrated:
+- /api/wizard/scan (burst + daily)
+- /api/wizard/complete (burst + daily)
+- /api/wizard/generate-phase5 (burst + daily)
+- /api/wizard/assist (burst + daily)
+- /api/wizard/save-progress (burst)
+- /api/wizard/reset (burst)
+
+Body shape preserved: same `{ok:false, error,
+error_kind?, daily_max?}` keys clients already branched
+on; only the headers are added. Future wizard endpoints
+inherit the contract for free by calling the helpers
+instead of building bare JSONResponse(..., status_code=429).
+
+14 new regression tests in `test_wizard_rate_limit_headers.py`:
+- Helpers exist at module scope.
+- Burst-bucket helper emits Retry-After (sane bound),
+  RateLimit-Limit, RateLimit-Remaining=0, RateLimit-Reset.
+- Daily-quota helper emits Retry-After (0 < x ≤ 25h),
+  RateLimit-Limit=daily_max, RateLimit-Remaining=0.
+- Source-level: every wizard rate-limited endpoint uses
+  the matching helper.
+
+488 / 488 tests passing.
+
+### Files
+
+- `server.py`: new `_rate_limit_429` and `_daily_quota_429` module-scope helpers near the BRAIN-91 rate-limit code. Wizard 429 callsites for scan/complete/phase5/assist/save-progress/reset migrated. Daily-quota 429 callsites for scan/complete/phase5/assist migrated.
+- `tests/test_wizard_rate_limit_headers.py`: new — 14 tests guarding the IETF rate-limit-headers contract.
+
+---
+
 ## 0.1.0a480 — May 4 2026 — BRAIN-110's `_dna_state="pending"` lease had no expiry: a crashed `_gen_dna()` (asyncio cancel, SIGKILL, OOM, deploy mid-run) stranded the lock forever and 409'd every future retrain permanently; lease TTL on the read side + try/finally interrupt-writeback in the worker (BRAIN-111)
 
 ### Bug fix (BRAIN-111, lease lifecycle for atomic claim)
