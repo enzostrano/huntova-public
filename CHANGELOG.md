@@ -6,6 +6,28 @@ Versioning: `0.1.0aNN` alpha increments. Public install path: `pipx install hunt
 
 ---
 
+## 0.1.0a585 — May 4 2026 — Settings audit: clearing model override / temperature / max-leads / countries no longer silently no-ops (BRAIN-PROD-6)
+
+### Bug fix (BRAIN-PROD-6, Settings "clear-and-save" silent no-op)
+
+Enzo reported the Settings panel "feels overally bugged in some places". Audit found the cause: the **Engine** and **Defaults** tabs each had a save handler that only included a field in the POST patch when the input was non-empty. Clearing the model override, temperature, max-leads, or countries field and clicking Save shipped a patch without that key — `api_save_settings` left the prior persisted value untouched, the toast said "Saved", and the next page load re-rendered the old value. Symptom: the form felt buggy because edits were silently ignored.
+
+Twin fix:
+
+1. **Front-end** (`templates/jarvis.html` `_renderSettingsEngine` + `_renderSettingsDefaults`): always include the field in the patch, sending `null` / `""` / `[]` to mean "clear me".
+
+2. **Back-end** (`server.api_save_settings`): when `preferred_temperature` or `default_max_leads` is `null` or empty string, reset to the `DEFAULT_SETTINGS` value (0.2 and 10 respectively) instead of letting `int()` / `float()` raise into the silent `except: pass` branch. `default_countries` already accepted empty list correctly; `preferred_model` already passed through the string whitelist.
+
+9 new tests in `tests/test_settings_clear_resets_to_default.py` pin both the front-end save-handler shape (always-include) and the back-end null-clear branches.
+
+### Files
+- `server.py`: null/"" → DEFAULT_SETTINGS reset for `default_max_leads` + `preferred_temperature` (server.py:7301-7335).
+- `templates/jarvis.html`: `_renderSettingsEngine` save handler always sends `preferred_model` + `preferred_temperature`; `_renderSettingsDefaults` always sends `default_max_leads` + `default_countries`.
+- `tests/test_settings_clear_resets_to_default.py`: new — 9 tests.
+- `cli.py` + `pyproject.toml` + `CHANGELOG.md`.
+
+---
+
 ## 0.1.0a570 — May 4 2026 — Blanket invariant audit on the BRAIN-* helper family — every defensive helper (`_safe_nonneg_int`, `_normalize_dna_state`, `_clip_to_byte_budget`, `_idempotency_key_clean`, `_normalize_phase5_prefill`, `_normalize_wizard_phase`, `_dna_pending_is_stale`, etc.) handles None / non-string / non-list input without raising — protects every status-emit + every persist path against TypeError on corrupt rows (BRAIN-157)
 
 ### Lockdown (BRAIN-157, helper defensiveness sweep)

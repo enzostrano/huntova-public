@@ -5427,9 +5427,22 @@ body.hv-has-update-banner{padding-top:var(--hv-update-banner-h, 38px)}
 
     save.addEventListener('click', async () => {
       status.textContent = 'Saving…'; status.className = 'row-status';
-      const patch = { preferred_provider: engineSel.value || '' };
-      if (modelInput.value !== '') patch.preferred_model = modelInput.value.trim();
-      if (tempInput.value !== '')  patch.preferred_temperature = Math.max(0, Math.min(1, parseFloat(tempInput.value) || 0));
+      // BRAIN-PROD-6 (a568): always include `preferred_model` and
+      // `preferred_temperature` in the patch — including when the user
+      // CLEARED them. Pre-a568, the JS only sent these fields when the
+      // input was non-empty, so clearing the model override or
+      // temperature in the UI + clicking Save was a silent no-op (the
+      // old value persisted). On reload, the form re-rendered the old
+      // value, looking buggy. Empty model → empty string (clears the
+      // override); empty temperature → null (server resets to the
+      // default 0.2).
+      const patch = {
+        preferred_provider: engineSel.value || '',
+        preferred_model: modelInput.value.trim(),
+        preferred_temperature: tempInput.value === ''
+          ? null
+          : Math.max(0, Math.min(1, parseFloat(tempInput.value) || 0)),
+      };
       try {
         const r = await fetch('/api/settings', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(patch) });
         if (r.ok) {
@@ -5697,11 +5710,20 @@ body.hv-has-update-banner{padding-top:var(--hv-update-banner-h, 38px)}
 
     save.addEventListener('click', async () => {
       status.textContent = 'Saving…'; status.className = 'row-status';
-      const patch = {};
-      if (maxLeads.value)  patch.default_max_leads = parseInt(maxLeads.value, 10) || 10;
-      if (countries.value !== '') patch.default_countries = countries.value.split(',').map(s => s.trim()).filter(Boolean);
-      patch.default_tone = tone.value || '';
-      patch.reduced_motion = rmInput.checked;
+      // BRAIN-PROD-6 (a568): always include `default_max_leads` and
+      // `default_countries` in the patch — including when the user
+      // CLEARED them. Pre-a568, the JS only sent these fields when
+      // truthy / non-empty, so clearing max-leads or the countries
+      // textarea + clicking Save was a silent no-op (the old value
+      // persisted). On reload, the form re-rendered the old value,
+      // looking buggy. Empty max-leads → null (server resets to default
+      // 10); empty countries → empty array (clears the list).
+      const patch = {
+        default_max_leads: maxLeads.value === '' ? null : (parseInt(maxLeads.value, 10) || 10),
+        default_countries: countries.value === '' ? [] : countries.value.split(',').map(s => s.trim()).filter(Boolean),
+        default_tone: tone.value || '',
+        reduced_motion: rmInput.checked,
+      };
       try {
         const r = await fetch('/api/settings', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(patch) });
         if (r.ok) {

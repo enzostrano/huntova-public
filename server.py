@@ -7298,13 +7298,23 @@ async def api_save_settings(request: Request, user: dict = Depends(require_user)
                 pass
     # a240: numeric coercions so the chat-first UI's Settings panels
     # can save these without bothering with type narrowing client-side.
+    # a568 (BRAIN-PROD-6): explicit null/"" → reset to DEFAULT_SETTINGS
+    # value. The Settings UI's "clear-and-save" path was previously a
+    # silent no-op because the back-end only persisted in-range numeric
+    # values and `except: pass`-swallowed everything else (None, "",
+    # garbage). Frontend re-rendered the prior persisted value on
+    # reload, so users perceived the form as ignoring their edits.
     if "default_max_leads" in body:
-        try:
-            v = int(body["default_max_leads"])
-            if 1 <= v <= 500:
-                s["default_max_leads"] = v
-        except Exception:
-            pass
+        _v_raw = body["default_max_leads"]
+        if _v_raw is None or (isinstance(_v_raw, str) and _v_raw.strip() == ""):
+            s["default_max_leads"] = DEFAULT_SETTINGS.get("default_max_leads", 10)
+        else:
+            try:
+                v = int(_v_raw)
+                if 1 <= v <= 500:
+                    s["default_max_leads"] = v
+            except Exception:
+                pass
     if "default_countries" in body:
         c = body["default_countries"]
         if isinstance(c, list):
@@ -7312,12 +7322,16 @@ async def api_save_settings(request: Request, user: dict = Depends(require_user)
         elif isinstance(c, str):
             s["default_countries"] = [x.strip() for x in c.split(",") if x.strip()][:30]
     if "preferred_temperature" in body:
-        try:
-            t = float(body["preferred_temperature"])
-            if 0.0 <= t <= 1.0:
-                s["preferred_temperature"] = t
-        except Exception:
-            pass
+        _t_raw = body["preferred_temperature"]
+        if _t_raw is None or (isinstance(_t_raw, str) and _t_raw.strip() == ""):
+            s["preferred_temperature"] = DEFAULT_SETTINGS.get("preferred_temperature", 0.2)
+        else:
+            try:
+                t = float(_t_raw)
+                if 0.0 <= t <= 1.0:
+                    s["preferred_temperature"] = t
+            except Exception:
+                pass
     # Local/single-user mode: when the user fills in "Your Name" in the
     # Profile tab, mirror it to users.display_name so the dashboard
     # greeting + avatar pick it up. Cloud users have their own
