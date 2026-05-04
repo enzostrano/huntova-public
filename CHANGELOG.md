@@ -6,6 +6,128 @@ Versioning: `0.1.0aNN` alpha increments. Public install path: `pipx install hunt
 
 ---
 
+## 0.1.0a509 — May 4 2026 — Settings → Engine "preferred provider" picker was a write-only ghost: the form persisted to the user_settings DB row, but `providers.get_provider()` reads `preferred_provider` from `~/.config/huntova/config.toml` via `_load_local_settings()` and never touches the DB in local mode — so the only writer that actually mattered was `/api/setup/key` (the Keys tab), which forces `preferred_provider` to whichever slug the user just saved a key for, regardless of their Engine pick; symptom was "I selected Anthropic but chat says my OpenAI account is out of credits" — new shared `_write_preferred_provider_to_config_toml` helper, called from BOTH `/api/settings` POST and `/api/setup/key`, restores the contract that Engine selections actually drive the chat dispatcher (BRAIN-PROD-2)
+
+### Bug fix (BRAIN-PROD-2, Engine selection now reaches the chat dispatcher)
+
+Two paired user reports tracked to the same root
+cause: chat returning provider-credit errors on a
+provider the user hadn't picked, and the Settings
+Engine selector "looking weird and not sticking".
+Root cause was a write surface that nothing read.
+
+`/api/settings` POST whitelisted `preferred_provider`
+in its body-coercion loop and persisted it to the
+user_settings JSON blob via `merge_settings`. The
+GET handler echoed it back so the form re-rendered
+the saved value on reload. Visible to the UI as a
+working setting.
+
+The chat dispatcher in `api_chat` calls
+`get_provider()` with no settings argument:
+
+```py
+prov = get_provider()           # server.py:3810
+```
+
+`providers.get_provider(None)` calls
+`_resolve_settings(None)` which, in local mode,
+returns `_load_local_settings()` — i.e. the parsed
+contents of `~/.config/huntova/config.toml`. The
+DB-backed `user_settings.preferred_provider` field
+is never read on this path.
+
+So the Engine save was a write-only ghost. The
+only writer that ever touched config.toml's
+`preferred_provider` line was `/api/setup/key` (the
+Keys tab save) — which forces
+`preferred_provider = "<provider whose key you just
+saved>"` regardless of what the user had pinned in
+the Engine tab. Net effect:
+
+1. User configures Anthropic + OpenAI keys via the
+   Keys tab. Last save (OpenAI) wins → config.toml
+   reads `preferred_provider = "openai"`.
+2. User switches to "Anthropic" in Settings → Engine
+   later because that's where their credits are.
+3. DB writes `preferred_provider = "anthropic"`.
+   config.toml still reads `"openai"`.
+4. `get_provider()` returns the OpenAI provider on
+   every chat dispatch → user sees an OpenAI 402 /
+   401 / 429 even though they thought they were on
+   Anthropic.
+
+The chat-dock per-message provider override (the
+small dropdown next to the input) DID work because
+that path goes through `push_provider_override` and
+bypasses `_load_local_settings`. Users who could
+read the source learned to override per-message.
+Users who couldn't, hit the bug.
+
+### Fix shape
+
+New module-level helper in `server.py`:
+
+```py
+def _write_preferred_provider_to_config_toml(
+    provider_slug: str
+) -> tuple[bool, str]:
+    """Persist `preferred_provider = "<slug>"` to
+    ~/.config/huntova/config.toml. Empty/None slug
+    clears the line so the resolver returns to the
+    default-priority order (Auto)."""
+```
+
+The helper:
+- Drops any prior `preferred_provider` line before
+  writing — avoids double-key TOML which fails to
+  parse and silently degrades to "first available".
+- Honours `XDG_CONFIG_HOME` (matches CLI + tests).
+- Writes the file with mode 0o600 on POSIX (matches
+  the existing keychain-write convention from a323).
+- Preserves all other lines (HV_*_KEY entries,
+  custom base URLs, etc.).
+- Returns `(ok: bool, info: str)` so callers can
+  surface a metric without losing the underlying
+  exception class.
+
+Call sites:
+- `/api/setup/key` (refactored from inline code at
+  what was server.py:5118-5145) — Keys-tab save
+  still writes config.toml, but now via the shared
+  helper.
+- `/api/settings` POST (new — was missing entirely):
+  when the body contains `preferred_provider`,
+  mirror to config.toml in local mode only. Cloud
+  mode skips the write because cloud uses DB-only
+  resolution and doesn't have a config.toml. The
+  unknown-slug filter (`_VALID_PROVIDERS`) prevents
+  a typo from corrupting config.toml at the
+  boundary; the DB write still proceeds so the
+  typo surfaces in the UI on reload.
+
+### Test (tests/test_preferred_provider_config_toml_mirror.py, +7)
+
+- `test_helper_exists_at_module_level` — guards
+  the shared-helper contract.
+- `test_helper_writes_preferred_provider_line` —
+  end-to-end check that `_load_local_settings()`
+  parses the helper's output (the contract the
+  resolver depends on).
+- `test_helper_replaces_existing_line` — switching
+  providers replaces, not appends. Two
+  `preferred_provider` keys would corrupt
+  config.toml.
+- `test_helper_clears_line_on_empty_slug` — empty
+  slug returns to "Auto" cleanly.
+- `test_helper_preserves_other_keys` — HV_*_KEY
+  entries survive a preferred_provider rewrite.
+- `test_api_save_settings_calls_config_toml_mirror`
+  — source-level guard preventing future
+  regressions where someone removes the call.
+- `test_api_setup_key_uses_shared_helper` — both
+  call sites must use the same writer.
+
 ## 0.1.0a507 — May 4 2026 — `_WIZARD_FIELD_SCHEMA` is closed (BRAIN-73) but had no version marker; older clients posting the old shape against a newer server had their data silently dropped/defaulted with no drift signal — neither side knew the user's intent was being lost; new `_WIZARD_SCHEMA_VERSION` constant + `_check_wizard_schema_compat` helper + `wizard_schema_version` emission on /api/wizard/status give clients an explicit compatibility contract (BRAIN-136)
 
 ### Bug fix (BRAIN-136, explicit schema-version contract)
@@ -130,7 +252,6 @@ audit-trail is clear.
 - `templates/setup.html`: provider-card "built with" suffix removed.
 - `cli.py` (VERSION → a506) + `pyproject.toml` (version → a506) + `CHANGELOG.md`.
 
----
 
 ## 0.1.0a505 — May 4 2026 — BRAIN-85's content fingerprint cache covers double-click but NOT lost-response retries: a client that POSTs `/api/wizard/complete`, gets a network failure mid-response (server committed, client never received the 200), and resends the same payload received `reused: true` instead of the original response — content equality ≠ client-visible retry safety; new `_idempotency_lookup` + `_idempotency_store` helpers + per-user persisted cache replay the original status + body for retries with the same client-supplied `Idempotency-Key` header (BRAIN-132)
 

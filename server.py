@@ -4998,6 +4998,48 @@ async def api_setup_reveal_key(request: Request, user: dict = Depends(require_us
     return {"ok": True, "key": val}
 
 
+def _write_preferred_provider_to_config_toml(provider_slug: str) -> tuple[bool, str]:
+    """Persist `preferred_provider = "<slug>"` to ~/.config/huntova/config.toml.
+
+    `providers.get_provider()` reads `preferred_provider` from
+    config.toml when called without explicit settings (the chat
+    dispatcher path: `prov = get_provider()` in api_chat). The DB
+    `user_settings.preferred_provider` field is a separate write-only
+    surface that the resolver never touches in local mode — without
+    this mirror, Settings → Engine selections were silently ignored
+    and chat kept using whatever provider config.toml already pinned.
+
+    Returns (ok, backend_message). Caller decides whether to record a
+    metric or surface a warning. Empty/None slug clears the line.
+
+    BRAIN-PROD-2 (a507): unified single source of truth for the
+    preferred-provider write so Engine settings and the Keys-tab save
+    both reach `get_provider()`.
+    """
+    try:
+        from pathlib import Path as _P
+        cfg_dir = _P(os.environ.get("XDG_CONFIG_HOME") or _P.home() / ".config") / "huntova"
+        cfg_dir.mkdir(parents=True, exist_ok=True)
+        cfg_path = cfg_dir / "config.toml"
+        existing = cfg_path.read_text() if cfg_path.exists() else ""
+        # Drop any prior preferred_provider line — we always rewrite.
+        lines = [ln for ln in existing.splitlines()
+                 if not ln.strip().startswith("preferred_provider")]
+        slug = (provider_slug or "").strip().lower()
+        if slug:
+            lines.insert(0, f'preferred_provider = "{slug}"')
+        body = "\n".join(lines)
+        if body and not body.endswith("\n"):
+            body += "\n"
+        cfg_path.write_text(body)
+        if os.name != "nt":
+            try: os.chmod(cfg_path, 0o600)
+            except OSError: pass
+        return True, str(cfg_path)
+    except Exception as e:
+        return False, f"{type(e).__name__}: {e}"
+
+
 @app.post("/api/setup/key")
 async def api_setup_key(request: Request):
     """Save an API key to the secrets store + optionally run a 1-shot
@@ -5113,34 +5155,24 @@ async def api_setup_key(request: Request):
         os.environ[env_var] = save_value
     # else: leave os.environ untouched — caller's existing key (if any)
     # remains in effect.
-    # Persist preferred_provider in config.toml so the next CLI run
-    # picks the right provider even before a key is loaded
-    try:
-        from pathlib import Path as _P
-        cfg_dir = _P(os.environ.get("XDG_CONFIG_HOME") or _P.home() / ".config") / "huntova"
-        cfg_dir.mkdir(parents=True, exist_ok=True)
-        cfg_path = cfg_dir / "config.toml"
-        existing = cfg_path.read_text() if cfg_path.exists() else ""
-        # Replace or insert preferred_provider line
-        lines = [ln for ln in existing.splitlines() if not ln.strip().startswith("preferred_provider")]
-        lines.insert(0, f'preferred_provider = "{provider}"')
-        cfg_path.write_text("\n".join(lines) + "\n")
-        if os.name != "nt":
-            try: os.chmod(cfg_path, 0o600)
-            except OSError: pass
-    except Exception as _ct:
+    # Persist preferred_provider in config.toml so the next CLI run AND
+    # the chat dispatcher (`get_provider()` reads config.toml in local
+    # mode) pick the right provider even before a key is loaded.
+    # a507: factored to shared helper so /api/settings → Engine save
+    # mirrors here too — was missing entirely, so user-picked providers
+    # in Settings were silently ignored by chat.
+    _ok_ct, _ct_info = _write_preferred_provider_to_config_toml(provider)
+    if not _ok_ct:
         # a268: bare swallow meant a config.toml write failure (FS
         # permissions, full disk, etc.) silently lost the
         # `preferred_provider` line — the next CLI invocation would
         # default back to whatever the resolver finds first. Log +
         # record metric. Don't fail the request since the keychain
         # write already succeeded.
-        import traceback as _tb_ct
-        print(f"[setup/key] config.toml preferred_provider write failed: {type(_ct).__name__}: {_ct}", flush=True)
-        _tb_ct.print_exc()
+        print(f"[setup/key] config.toml preferred_provider write failed: {_ct_info}", flush=True)
         try:
             await db.record_metric("setup_key_config_toml_failed",
-                                    props={"err": str(type(_ct).__name__)[:60]})
+                                    props={"err": _ct_info[:60]})
         except Exception:
             pass
     test_passed = None
@@ -7299,6 +7331,37 @@ async def api_save_settings(request: Request, user: dict = Depends(require_user)
         return merged
 
     await db.merge_settings(user["id"], _settings_save_mutator)
+    # a507 (BRAIN-PROD-2): when the user changes `preferred_provider` in
+    # Settings → Engine, mirror it to ~/.config/huntova/config.toml in
+    # local mode. The chat dispatcher's `get_provider()` reads
+    # `preferred_provider` from config.toml (via providers._load_local_settings)
+    # and never touches the DB — so without this mirror, Engine selections
+    # were silently ignored and chat kept routing through whichever
+    # provider config.toml had pinned previously. Surface symptom:
+    # "I selected OpenAI but chat says Anthropic is out of credits."
+    # Empty string clears the line so users can return to "Auto".
+    if "preferred_provider" in body:
+        try:
+            from runtime import CAPABILITIES as _CAPS_PP
+            if _CAPS_PP.mode == "local":
+                _slug_pp = (body.get("preferred_provider") or "").strip().lower()
+                # Only allow known slugs (or empty for clear). Unknown values
+                # would corrupt config.toml's source-of-truth.
+                if _slug_pp and _slug_pp not in _VALID_PROVIDERS:
+                    pass  # silently ignore — body-validation already permissive
+                else:
+                    _ok_pp, _info_pp = _write_preferred_provider_to_config_toml(_slug_pp)
+                    if not _ok_pp:
+                        print(f"[settings] config.toml preferred_provider mirror failed: {_info_pp}", flush=True)
+                        try:
+                            await db.record_metric(
+                                "settings_preferred_provider_mirror_failed",
+                                props={"err": _info_pp[:60]},
+                            )
+                        except Exception:
+                            pass
+        except Exception as _ppx:
+            print(f"[settings] preferred_provider mirror unexpected: {type(_ppx).__name__}: {_ppx}", flush=True)
     # Strip secret payloads from echo so they never round-trip back to JS.
     safe = {k: v for k, v in s.items()
             if k not in ("smtp_password", "webhook_secret", "plugin_slack_webhook_url")}
