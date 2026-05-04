@@ -6,6 +6,26 @@ Versioning: `0.1.0aNN` alpha increments. Public install path: `pipx install hunt
 
 ---
 
+## 0.1.0a1800 — May 4 2026 — Audit-sweep batch BRAIN-187..189 — cli_inbox reply-classifier (24 tests pinning _split_msgids angle-bracket extraction + _decode_payload utf-8/cp1252/latin-1 fallback chain + _is_autoreply RFC-3834 subject patterns + Re/Fwd peel + Auto-Submitted/X-Autoreply/X-Auto-Response-Suppress headers + _heuristic_class OOO/unsub/wrong + audit-wave-27 'will-be-back' no-longer-OOO fix), cli_remote Telegram-bridge config (16 tests pinning _load_config missing/unparseable→{}, _save_config 0600 mode + atomic-rename + .tmp-cleanup + overwrite + unicode round-trip, _format_reply action hints + 1500-char json-dump cap), plugins.PluginRegistry (15 tests pinning hook chain semantics + audit-wave-29 scalar-form post_score current_lead tracking + a275 dedupe-by-name + async-hook rejection + plugin-exception caught + _HOOK_NAMES canonical set)
+
+### Lockdown bundle (BRAIN-187..189)
+
+55 new tests across 3 modules. Zero source changes.
+
+**BRAIN-187 — cli_inbox.py (24 tests)** — pin reply-classification heuristics + RFC-3834 auto-reply detection + Re/Fwd subject peel + audit-wave-27 'will-be-back' false-positive fix.
+
+**BRAIN-188 — cli_remote.py (16 tests)** — pin Telegram bridge config storage (0600 mode, atomic rename, fsync hardening, unicode round-trip) + format-reply action-aware rendering.
+
+**BRAIN-189 — plugins.py (15 tests)** — pin plugin hook chain (single-arg / two-arg / void), audit-wave-29 scalar-form post_score current_lead tracking, a275 dedupe-by-name, async-hook rejection, plugin-exception isolation, get_registry singleton.
+
+### Files
+- `tests/test_cli_inbox_audit.py`: new — 24 tests.
+- `tests/test_cli_remote_audit.py`: new — 16 tests.
+- `tests/test_plugin_registry_audit.py`: new — 15 tests.
+- `cli.py` + `pyproject.toml` + `CHANGELOG.md`. Versions a1701-a1799 reserved for parallel agents.
+
+---
+
 ## 0.1.0a1700 — May 4 2026 — Audit-sweep batch BRAIN-184..186 — cli_sequence cadence + due-check (24 tests pinning _user_cadence None-fallback / sequence-disabled / default 4/9 days / explicit follow_up_N_days deltas / negative-clamp / 3rd-step optional / non-numeric garbage fallback, _first_name first-token / fallback, _recap first-para / 220 clamp / ellipsis / None defense, _booking_line empty/with-url, _due naive→UTC / Z-suffix / step-beyond-cadence-false), cli_terminal color + event-formatter (18 tests pinning _color_enabled NO_COLOR-standard + TTY-check, _c bare-text-when-disabled + ANSI-wrap-when-enabled + unknown-color fallback, _format_label 20-char-padding, _format_body 200-char-cap + empty/non-dict defense, _print_event handles non-JSON / empty / malformed raw_data without crash), cli_teach fuzzy-match + org-name normaliser (17 tests pinning _norm_org legal-suffix-strip Inc/Ltd/LLC/GmbH/SA/SRL + lowercase + punctuation strip + None/empty defense + only-trailing-suffix-strip, _fuzzy_find exact-match-immediate-return + 0.78 threshold rejection + empty-needle/leads None + skip-no-org_name + best-match selection)
 
 ### Lockdown bundle (BRAIN-184..186)
