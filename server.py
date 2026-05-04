@@ -12462,8 +12462,23 @@ async def api_generate_agent_dna(request: Request, user: dict = Depends(require_
 
 
 @app.post("/api/lead-feedback")
-async def api_lead_feedback(request: Request, user: dict = Depends(require_user)):
-    """Record good/bad feedback on a lead."""
+async def api_lead_feedback(request: Request, response: Response, user: dict = Depends(require_user)):
+    """Record good/bad feedback on a lead.
+
+    a522 (BRAIN-139): adjacent-AI-surface parity with
+    the wizard surface — `lead_feedback` bucket in
+    `_RATE_BUCKETS`, BRAIN-117 byte cap before parse,
+    BRAIN-91 burst rate-limit, BRAIN-113 RateLimit-*
+    headers on success. Existing 5-min DB-windowed
+    counter (line ~12490) preserved as the daily-quota
+    class limit.
+    """
+    if _check_ai_rate(user["id"], bucket="lead_feedback"):
+        return _rate_limit_429(user["id"], "lead_feedback", "Too many feedback submissions. Wait a moment.")
+    _attach_burst_rate_headers(response, user["id"], "lead_feedback")
+    _body_bytes, _too_large = await _enforce_body_byte_cap(request, _WIZARD_BODY_BYTES_MAX)
+    if _too_large is not None:
+        return _too_large
     body = await request.json()
     lead_id = body.get("lead_id", "")
     signal = body.get("signal", "")

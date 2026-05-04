@@ -6,6 +6,57 @@ Versioning: `0.1.0aNN` alpha increments. Public install path: `pipx install hunt
 
 ---
 
+## 0.1.0a524 — May 4 2026 — Hotfix: a523 release pipeline accidentally rebased away the BRAIN-139 (a522) lead-feedback hardening — the test file was deleted from disk and the `api_lead_feedback` handler signature + helper-call additions were lost; restored both from git history with no behavior changes (BRAIN-FIX-A523)
+
+### Hotfix (a523 rebase regression on lead-feedback hardening)
+
+The a523 ship pipeline did `git pull --rebase origin
+work-clean` to absorb the in-flight BRAIN-139 a522
+commit, but the rebase + force-with-lease push lost
+the agent's `tests/test_lead_feedback_hardening.py`
+file (deleted) AND the corresponding server.py
+edits to `api_lead_feedback`:
+
+- Handler signature dropped `response: Response`.
+- `_check_ai_rate(..., bucket="lead_feedback")` call
+  reverted.
+- `_rate_limit_429(...)` 429-path call reverted.
+- `_attach_burst_rate_headers(...)` success-path
+  call reverted.
+- `_enforce_body_byte_cap(...)` byte-cap call
+  reverted.
+
+The 326-line test file was preserved in git history
+on commit `5746b31` (the BRAIN-139 a522 commit). The
+`lead_feedback` bucket entry in `_RATE_BUCKETS` had
+already been re-added by my a523 commit (BRAIN-142
+chat hardening added both `chat` and `lead_feedback`
+buckets), so the bucket itself survived.
+
+Restoration:
+- `git show 5746b31:tests/test_lead_feedback_hardening.py
+  > tests/test_lead_feedback_hardening.py`.
+- `api_lead_feedback` handler restored to the BRAIN-139
+  shape: `response: Response` parameter, the four
+  helper calls (`_check_ai_rate` + `_rate_limit_429`
+  + `_attach_burst_rate_headers` + `_enforce_body_byte_cap`)
+  before `request.json()`.
+
+739 / 739 tests passing (728 from a523 + 11 restored
+lead-feedback tests).
+
+### Files
+
+- `server.py`: `api_lead_feedback` handler restored to the BRAIN-139 shape.
+- `tests/test_lead_feedback_hardening.py`: restored (326 lines).
+- `cli.py` (VERSION) + `pyproject.toml` (version) + `CHANGELOG.md`.
+
+### Lessons
+
+The shared-tree contamination problem: even with `git pull --rebase` before push, the local working tree's NEW UNTRACKED FILES from agents-in-other-worktrees aren't visible. When the rebase replays the agent's commit on top of mine, it re-adds the file — but my next `git add` (which I ran with explicit file globs, not `git add -A`) didn't include the agent's file, so it appeared as a deletion in my commit's diff. Future rule: always check `git diff HEAD --stat` before pushing, looking specifically for unexpected deletions.
+
+---
+
 ## 0.1.0a523 — May 4 2026 — `/api/chat` was the next adjacent AI-spending surface lacking the wizard's full hardening: shared default rate-limit bucket (cross-callsite starvation), no body-byte cap, ad-hoc bare 429 shape, no RateLimit-* headers, no Idempotency-Key replay; new `chat` bucket + helper migration brings the dispatcher to BRAIN-117/112/113/132 parity (BRAIN-142)
 
 ### Bug fix (BRAIN-142, /api/chat dispatcher hardening)
