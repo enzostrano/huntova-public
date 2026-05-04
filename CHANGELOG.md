@@ -6,6 +6,94 @@ Versioning: `0.1.0aNN` alpha increments. Public install path: `pipx install hunt
 
 ---
 
+## 0.1.0a497 — May 4 2026 — BRAIN-103 capped phase-5 question count at 5 but each item could still be 50 KB; AI hallucinations are a separate ingress into the same row contract that BRAIN-127's user-side caps don't cover; new `_WIZARD_PHASE5_QUESTION_BYTES_MAX` + `_WIZARD_PHASE5_OPTION_BYTES_MAX` constants + `_normalize_phase5_questions` helper applied at persist + emit (BRAIN-128)
+
+### Bug fix (BRAIN-128, AI-output byte cap on phase-5 questions)
+
+BRAIN-103 (a472) caps `_phase5_questions` at 5
+items. BRAIN-127 (a496) caps every user-writable
+field at 16 KiB on save-progress + complete. Phase-5
+questions are AI-OUTPUT, not user-input — they enter
+the row through the `/api/wizard/generate-phase5`
+cleaner, a separate ingress neither cap covers.
+
+The cleaner pre-fix:
+
+```python
+cleaned.append({
+    "question": _q_text,        # no byte cap
+    "type": _q_type,
+    "options": opts,            # no per-option cap
+    "placeholder": ...,         # no byte cap
+    "prefill": ...,             # no byte cap
+})
+```
+
+A hallucinating model could produce a single 50 KB
+question text or 50 KB options. The 5-item count
+cap then keeps the list at 5 — but each item could
+be 50 KB, totaling up to 250 KB in the persisted
+row. That:
+
+- Bloated the SQLite row.
+- Slowed BRAIN-86 canonicalization (key sort + JSON
+  dump on every fingerprint).
+- Inflated BRAIN-85 fingerprint cache lookups.
+- Poisoned clients trying to render the question
+  text in a small textarea.
+- Floods AI prompts when the question feeds back
+  in via `_BRAIN_QUESTIONS` rendering during
+  brain-build / dossier / assist.
+
+Per Huntova engineering review on LLM output
+handling + insecure-output guidance: prompt
+instructions don't reliably control output length.
+Validated structured output still needs field-level
+bounds matching storage and rendering limits.
+
+Fix: three module-scope additions near
+`_PHASE5_QUESTIONS_MAX`.
+
+- `_WIZARD_PHASE5_QUESTION_BYTES_MAX` (default
+  4 KiB, env-overridable). Phase-5 questions are
+  1-2 sentences; 4 KiB is generous.
+- `_WIZARD_PHASE5_OPTION_BYTES_MAX` (default 512 B).
+  Options are short labels.
+- `_normalize_phase5_questions(questions)` clamps
+  every text field on every question (question
+  text, placeholder, prefill, each option) using
+  `_clip_to_byte_budget`. Tolerant to non-list,
+  non-dict, missing-field inputs.
+
+The phase-5 cleaner now applies the per-field
+caps inline before appending to `cleaned`. The
+`/api/wizard/status` emit applies
+`_normalize_phase5_questions` as defense-in-depth
+on the read side — a legacy row persisted before
+the cap was added (or any future regression) gets
+clamped before reaching the client.
+
+8 new regression tests in
+`test_wizard_phase5_question_byte_cap.py`:
+- Both constants exist with sane bounds (1-16 KiB
+  for question text, 256-4096 B for options).
+- Source-level: cleaner uses `_clip_to_byte_budget`
+  + references the question + option byte caps.
+- Source-level: status emit clips on read.
+- Behavioral: helper clamps a 50 KB question + 50 KB
+  options + 100 KB placeholder.
+- Helper round-trips multibyte UTF-8 safely
+  (no orphan continuation bytes).
+
+616 / 616 tests passing.
+
+### Files
+
+- `server.py`: new `_WIZARD_PHASE5_QUESTION_BYTES_MAX` + `_WIZARD_PHASE5_OPTION_BYTES_MAX` constants + `_normalize_phase5_questions(questions)` helper near `_PHASE5_QUESTIONS_MAX`. `api_wizard_generate_phase5` cleaner applies per-field caps inline. `api_wizard_status` emit applies the normalize helper for defense-in-depth.
+- `tests/test_wizard_phase5_question_byte_cap.py`: new — 8 tests guarding the AI-output byte-cap contract.
+
+---
+
 ## 0.1.0a496 — May 4 2026 — BRAIN-117/118's top-level body cap (256 KiB) closes "many keys" + "huge body" but not "few keys, one massive field": a single 200 KB persisted-row field survived under the body ceiling, bloating BRAIN-86 canonicalization, BRAIN-85 fingerprint hash, and every subsequent get-mutate-save cycle; new `_WIZARD_FIELD_BYTES_MAX` + `_clip_to_byte_budget` helper now clamp every user-writable field BEFORE merge (BRAIN-127)
 
 ### Bug fix (BRAIN-127, per-field byte cap)

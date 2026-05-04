@@ -1153,6 +1153,75 @@ _KNOWLEDGE_LIST_MAX = int(os.environ.get("HV_WIZARD_KNOWLEDGE_LIST_MAX") or "50"
 # ranking — first items are most relevant.
 _PHASE5_QUESTIONS_MAX = int(os.environ.get("HV_WIZARD_PHASE5_QUESTIONS_MAX") or "5")
 
+# a497 (BRAIN-128): per-question byte caps on AI-
+# generated phase-5 output. BRAIN-103 (a472) caps the
+# LIST count at 5; this caps each ITEM. A hallucinating
+# model can still produce a 50 KB question text or 50 KB
+# options that survive the count cap and bloat the
+# persisted row, BRAIN-86 canonicalization, BRAIN-85
+# fingerprint hash, and any client trying to render
+# the questions. Per Huntova engineering review on LLM
+# output handling: prompt instructions don't reliably
+# control output length — validated structured output
+# still needs field-level bounds matching storage and
+# rendering limits.
+_WIZARD_PHASE5_QUESTION_BYTES_MAX = int(
+    os.environ.get("HV_WIZARD_PHASE5_QUESTION_BYTES_MAX") or str(4 * 1024)
+)
+_WIZARD_PHASE5_OPTION_BYTES_MAX = int(
+    os.environ.get("HV_WIZARD_PHASE5_OPTION_BYTES_MAX") or "512"
+)
+
+
+def _normalize_phase5_questions(questions):
+    """Clamp every text field on every phase-5 question
+    to the documented byte budgets. Used on:
+    1. Persist path (in the cleaner before merge).
+    2. Read path (`/api/wizard/status` emit) for
+       defense-in-depth against legacy rows that
+       persisted before the cap was added.
+
+    Tolerant: non-list inputs return [], non-dict items
+    are filtered, missing fields default to "".
+    """
+    if not isinstance(questions, list):
+        return []
+    out = []
+    for q in questions[:_PHASE5_QUESTIONS_MAX]:
+        if not isinstance(q, dict):
+            continue
+        _q_text = _clip_to_byte_budget(
+            str(q.get("question") or "").strip(),
+            _WIZARD_PHASE5_QUESTION_BYTES_MAX,
+        )
+        if not _q_text:
+            continue
+        _q_type = str(q.get("type") or "text").strip()
+        _opts_raw = q.get("options") or []
+        opts = []
+        if isinstance(_opts_raw, list):
+            for o in _opts_raw:
+                clipped = _clip_to_byte_budget(
+                    str(o).strip(),
+                    _WIZARD_PHASE5_OPTION_BYTES_MAX,
+                )
+                if clipped:
+                    opts.append(clipped)
+        out.append({
+            "question": _q_text,
+            "type": _q_type,
+            "options": opts,
+            "placeholder": _clip_to_byte_budget(
+                str(q.get("placeholder") or "").strip(),
+                _WIZARD_PHASE5_QUESTION_BYTES_MAX,
+            ),
+            "prefill": _clip_to_byte_budget(
+                str(q.get("prefill") or "").strip(),
+                _WIZARD_PHASE5_QUESTION_BYTES_MAX,
+            ) if q.get("prefill") is not None else "",
+        })
+    return out
+
 # State: {(user_id, utc_date_str): count}. The date suffix in
 # the key is the natural cleanup mechanism — yesterday's keys
 # are dead and get pruned by the same periodic cleanup that
@@ -10830,11 +10899,21 @@ NO markdown. NO commentary. JSON array only."""
                 #    advances with no answer captured; <2 isn't a real
                 #    choice either)
                 _ALLOWED_TYPES = {"text", "single_select", "multi_select"}
+                # a497 (BRAIN-128): apply per-question
+                # byte caps as part of the cleaner. Each
+                # text field clipped to its respective
+                # budget before persistence — the AI's
+                # output ingress is a separate path into
+                # the row contract; BRAIN-103's count
+                # cap doesn't bound per-item size.
                 cleaned = []
                 for q in questions[:5]:
                     if not isinstance(q, dict):
                         continue
-                    _q_text = str(q.get("question") or "").strip()
+                    _q_text = _clip_to_byte_budget(
+                        str(q.get("question") or "").strip(),
+                        _WIZARD_PHASE5_QUESTION_BYTES_MAX,
+                    )
                     if not _q_text:
                         continue
                     _q_type = str(q.get("type") or "text").strip()
@@ -10843,15 +10922,30 @@ NO markdown. NO commentary. JSON array only."""
                     _opts_raw = q.get("options") or []
                     if not isinstance(_opts_raw, list):
                         continue
-                    opts = [str(o).strip() for o in _opts_raw if str(o).strip()]
+                    opts = [
+                        _clip_to_byte_budget(
+                            str(o).strip(),
+                            _WIZARD_PHASE5_OPTION_BYTES_MAX,
+                        )
+                        for o in _opts_raw if str(o).strip()
+                    ]
+                    opts = [o for o in opts if o]
                     if _q_type in ("single_select", "multi_select") and len(opts) < 2:
                         continue
                     cleaned.append({
                         "question": _q_text,
                         "type": _q_type,
                         "options": opts,
-                        "placeholder": str(q.get("placeholder") or "").strip(),
-                        "prefill": q.get("prefill") if q.get("prefill") is not None else "",
+                        "placeholder": _clip_to_byte_budget(
+                            str(q.get("placeholder") or "").strip(),
+                            _WIZARD_PHASE5_QUESTION_BYTES_MAX,
+                        ),
+                        "prefill": (
+                            _clip_to_byte_budget(
+                                str(q.get("prefill") or "").strip(),
+                                _WIZARD_PHASE5_QUESTION_BYTES_MAX,
+                            ) if q.get("prefill") is not None else ""
+                        ),
                     })
                 # BRAIN-69: re-check the 3-question threshold AFTER
                 # filtering. Pre-fix this check ran on raw AI output,
@@ -11326,7 +11420,12 @@ async def api_wizard_status(user: dict = Depends(require_user)):
         # on reload without re-spending on a fresh
         # generate-phase5 call. Empty list for users who never
         # reached phase-5 or whose wizard was reset.
-        "phase5_questions": w.get("_phase5_questions") if isinstance(w.get("_phase5_questions"), list) else [],
+        # a497 (BRAIN-128): defense-in-depth byte clip
+        # on the read side. A legacy row that persisted
+        # phase-5 questions before the cleaner cap was
+        # added (or any future regression) gets clamped
+        # here before reaching the client.
+        "phase5_questions": _normalize_phase5_questions(w.get("_phase5_questions")),
         # a474 (BRAIN-105): split audit counters. `train_count`
         # is executions (full-pipeline completes only).
         # `train_attempts` includes BRAIN-85 short-circuit
