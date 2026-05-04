@@ -6,6 +6,70 @@ Versioning: `0.1.0aNN` alpha increments. Public install path: `pipx install hunt
 
 ---
 
+## 0.1.0a475 — May 4 2026 — BRAIN-105's synchronous attempts-bump eroded the BRAIN-85 short-circuit fast path; moved off the synchronous request via `_spawn_bg` (BRAIN-106)
+
+### Bug fix (BRAIN-106, idempotency fast-path preservation)
+
+BRAIN-105 (a474) restored audit visibility by adding a
+synchronous `merge_settings` to bump `_train_attempts` on
+every cache-hit return. That fixed the audit gap, but the
+short-circuit branch now did:
+
+- 1 read (`get_settings` for cache check)
+- 1 synchronous `merge_settings` write (attempts bump)
+- Return
+
+For the exact scenario idempotency is meant to absorb
+(rapid retries, double-clicks, flaky clients on retry
+timers), each duplicate now adds DB pressure roughly equal
+to a save-progress write — the wizard's hottest path.
+
+Standard idempotency-pattern guidance: cached hit must
+perform strictly less durable work than the cache miss,
+ideally at most one best-effort audit write moved off the
+synchronous fast path.
+
+Fix: dispatch the BRAIN-105 attempts-bump via `_spawn_bg`
+instead of `await`. The bump still fires; it still uses
+atomic `merge_settings` inside the bg coroutine (so
+concurrent rapid bumps don't race); the user's response
+returns immediately; audit lands eventually.
+
+```python
+async def _bg_bump_short_circuit_attempts():
+    try:
+        def _bump_attempts_short_circuit(cur):
+            cur = {**DEFAULT_SETTINGS, **(cur or {})}
+            _w = dict(cur.get("wizard") or {})
+            _w["_train_attempts"] = int(_w.get("_train_attempts", 0) or 0) + 1
+            cur["wizard"] = _w
+            return cur
+        await db.merge_settings(_user_id_for_bg, _bump_attempts_short_circuit)
+    except Exception:
+        ...
+_spawn_bg(_bg_bump_short_circuit_attempts())
+return {"ok": True, "reused": True, ...}
+```
+
+Net behavior: short-circuit response latency drops back to
+"effectively zero DB writes on the synchronous path."
+Audit still records every attempt — eventually consistent
+within milliseconds.
+
+The full-pipeline `_train_attempts` bump stays inline (it's
+already inside an existing merge mutator alongside
+`_train_count`, so no extra cost).
+
+4 new regression tests in
+`tests/test_wizard_short_circuit_fast_path.py`. BRAIN-89 +
+BRAIN-101 source-window tests widened (a few more chars
+shifted) since the short-circuit branch now contains the
+new `async def _bg_bump_*` coroutine definition.
+
+442 of 442 tests passing.
+
+---
+
 ## 0.1.0a474 — May 4 2026 — Re-train audit counter `_train_count` stayed flat through BRAIN-85/101 idempotency short-circuits; new `_train_attempts` counter records intent even when execution skipped (BRAIN-105)
 
 ### Bug fix (BRAIN-105, audit-trail accuracy)

@@ -59,8 +59,8 @@ def test_short_circuit_requires_brain_present():
     if fire_idx == -1:
         fire_idx = src.find("'reused': True")
     assert fire_idx != -1
-    # Look back ~1000 chars for the conditions.
-    block = src[max(0, fire_idx - 3000):fire_idx]
+    # Look back for the conditions. Window grew across BRAIN-101/106.
+    block = src[max(0, fire_idx - 5000):fire_idx]
     assert "normalized_hunt_profile" in block, (
         "BRAIN-89 regression: BRAIN-85 short-circuit must verify "
         "`normalized_hunt_profile` is present in the snapshot "
@@ -78,7 +78,7 @@ def test_short_circuit_requires_dossier_present():
     if fire_idx == -1:
         fire_idx = src.find("'reused': True")
     assert fire_idx != -1
-    block = src[max(0, fire_idx - 3000):fire_idx]
+    block = src[max(0, fire_idx - 5000):fire_idx]
     assert "training_dossier" in block, (
         "BRAIN-89 regression: short-circuit must also verify "
         "`training_dossier` exists before reusing the prior "

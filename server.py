@@ -8897,19 +8897,32 @@ async def api_wizard_complete(request: Request, user: dict = Depends(require_use
         # though execution short-circuited. Per Huntova
         # engineering review on audit accuracy: accepted
         # retrain intent must be audit-visible regardless of
-        # whether the pipeline executed. Atomic via
-        # merge_settings; failure is non-fatal (audit precision
-        # is best-effort, user functionality isn't).
-        try:
-            def _bump_attempts_short_circuit(cur):
-                cur = {**DEFAULT_SETTINGS, **(cur or {})}
-                _w = dict(cur.get("wizard") or {})
-                _w["_train_attempts"] = int(_w.get("_train_attempts", 0) or 0) + 1
-                cur["wizard"] = _w
-                return cur
-            await db.merge_settings(user["id"], _bump_attempts_short_circuit)
-        except Exception as _ms_err:
-            print(f"[WIZARD] _train_attempts bump on short-circuit failed (non-fatal): {_ms_err}")
+        # whether the pipeline executed.
+        # a475 fix (BRAIN-106): move the bump off the
+        # synchronous path via `_spawn_bg`. The whole point of
+        # the BRAIN-85 short-circuit is fast duplicate-submit
+        # absorption — adding a synchronous DB write per
+        # duplicate submit (BRAIN-105 v1) eroded the latency
+        # win. Fire-and-forget keeps the user response instant;
+        # audit lands eventually. Atomic merge_settings inside
+        # the bg coroutine still serializes concurrent bumps,
+        # so two rapid retries don't both see attempts=N and
+        # both write N+1.
+        _user_id_for_bg = user["id"]
+
+        async def _bg_bump_short_circuit_attempts():
+            try:
+                def _bump_attempts_short_circuit(cur):
+                    cur = {**DEFAULT_SETTINGS, **(cur or {})}
+                    _w = dict(cur.get("wizard") or {})
+                    _w["_train_attempts"] = int(_w.get("_train_attempts", 0) or 0) + 1
+                    cur["wizard"] = _w
+                    return cur
+                await db.merge_settings(_user_id_for_bg, _bump_attempts_short_circuit)
+            except Exception as _ms_err:
+                print(f"[WIZARD] bg _train_attempts bump on short-circuit failed (non-fatal): {_ms_err}")
+
+        _spawn_bg(_bg_bump_short_circuit_attempts())
         return {
             "ok": True,
             "reused": True,
