@@ -10984,6 +10984,37 @@ async def api_wizard_save_progress(request: Request, response: Response, user: d
         return _rate_limit_429(user["id"], "wizard_save_progress", "Too many saves. Wait a moment.")
     # a482 (BRAIN-113): success path RateLimit-* headers.
     _attach_burst_rate_headers(response, user["id"], "wizard_save_progress")
+    # a525 (BRAIN-141): client-supplied Idempotency-Key
+    # replay, second-order extension of BRAIN-132 (a505)
+    # which added the same pattern to /api/wizard/complete.
+    # save-progress is the higher-frequency endpoint —
+    # effectively every keystroke / every Continue click —
+    # so a network failure mid-response (server committed
+    # the merge, client never received the 200) is much
+    # more common here than on complete. Without retry
+    # safety the client either reissues blindly (consumes
+    # an extra revision slot, may collide with the
+    # BRAIN-68 stale-write guard on a parallel tab) or
+    # gives up and shows a "save failed" toast even
+    # though the write actually landed. With a stable
+    # Idempotency-Key the same retry replays the same
+    # ok/phase/confidence/revision body verbatim.
+    # Order: rate check → idempotency lookup → byte cap
+    # → json parse → mutator → success-return → store.
+    # Lookup is a read so it sits before the byte-cap
+    # check (cheap denial first); store sits on the
+    # success-return path AFTER the merge committed +
+    # AFTER the conflict branch returns its own 409/410.
+    _idem_key_raw = request.headers.get("idempotency-key") or ""
+    _idem_cleaned = _idempotency_key_clean(_idem_key_raw)
+    if _idem_cleaned:
+        _idem_hit = await _idempotency_lookup(user["id"], _idem_cleaned)
+        if _idem_hit is not None:
+            print(f"[IDEMPOTENCY] user={user['id']} save-progress replay key={_idem_cleaned[:16]}...")
+            return JSONResponse(
+                _idem_hit["body"],
+                status_code=int(_idem_hit["status"]),
+            )
     # a486 (BRAIN-117): byte-cap BEFORE json parse so a
     # 10 MB POST is rejected in microseconds without
     # paying parse cost. OWASP API4:2023 unrestricted
@@ -11175,12 +11206,25 @@ async def api_wizard_save_progress(request: Request, response: Response, user: d
             current_revision=_stale.get("current") or 0,
             current_epoch=_stale.get("current_epoch") or 0,
         )
-    return {
+    _success_body = {
         "ok": True,
         "phase": phase,
         "confidence": confidence,
         "revision": _stale["current"],
     }
+    # a525 (BRAIN-141): persist this successful response
+    # under the client-supplied Idempotency-Key (if any)
+    # so a subsequent retry with the same key replays
+    # the same body + 200 status. Best-effort; the helper
+    # logs + swallows internally so a cache write failure
+    # never propagates back to the client. Conflict
+    # branches (BRAIN-68 stale_revision / BRAIN-81
+    # wizard_reset) returned earlier without reaching
+    # this point — only true successes are cached, per
+    # the BRAIN-132 contract.
+    if _idem_cleaned:
+        await _idempotency_store(user["id"], _idem_cleaned, 200, _success_body)
+    return _success_body
 
 
 @app.post("/api/wizard/generate-phase5")

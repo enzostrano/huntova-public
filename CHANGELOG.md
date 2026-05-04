@@ -6,6 +6,78 @@ Versioning: `0.1.0aNN` alpha increments. Public install path: `pipx install hunt
 
 ---
 
+## 0.1.0a525 — May 4 2026 — Idempotency-Key support extended to /api/wizard/save-progress (BRAIN-141)
+
+### Bug fix (BRAIN-141, retry safety on the high-frequency wizard write)
+
+BRAIN-132 (a505) added `Idempotency-Key` header
+support to /api/wizard/complete: a client that POSTs
+the wizard, hits a network failure mid-response (server
+committed, client never received the 200), and resends
+the same payload with the same key now replays the
+original 200 body verbatim instead of getting a
+semantically different `reused: true` from BRAIN-85's
+content-fingerprint cache.
+
+save-progress is the higher-frequency endpoint by an
+order of magnitude. complete fires once per training
+run; save-progress fires effectively on every
+keystroke / every Continue click as the user moves
+through the wizard. A network failure mid-response is
+correspondingly more common, and the fallout is worse:
+
+- A blind retry consumes another revision slot
+  (BRAIN-14 monotonic bump still goes through), and a
+  parallel tab whose `expected_revision` token now
+  trails by one starts colliding with the BRAIN-68
+  stale-write guard for no real reason.
+- Without retry safety, the client either reissues
+  blindly or surfaces a "save failed" toast even
+  though the merge actually landed.
+
+Per Huntova engineering review on client retry safety:
+retry semantics matter MORE on the high-frequency
+write than on the terminal one. The complete handler
+got it first because that's where AI spend lives, but
+save-progress is where retries actually happen in the
+field.
+
+Fix: /api/wizard/save-progress now reads
+`Idempotency-Key` at handler entry, calls
+`_idempotency_lookup` BEFORE `_enforce_body_byte_cap`
+(replays short-circuit before walking the request
+body), and stores the success body via
+`_idempotency_store` only on the true success path —
+after `db.merge_settings` commits and after the
+BRAIN-68 stale_revision / BRAIN-81 wizard_reset
+conflict branch returns its own 409/410. The four
+helpers (`_idempotency_key_clean`, `_idempotency_lookup`,
+`_idempotency_store`, plus the
+`_IDEMPOTENCY_TTL_SEC` / `_KEY_MAX_LEN` /
+`_CACHE_PER_USER_MAX` constants) are reused
+unchanged from BRAIN-132 — one cache, one namespace,
+one retry contract spanning both endpoints. The
+success body (`{ok, phase, confidence, revision}`)
+is unchanged for old clients that don't send the
+header.
+
+Order: rate check → idempotency lookup → byte cap →
+json parse → mutator → success-return → store. Lookup
+follows the rate-limit gate (a rate-limited caller
+cannot probe the cache for free) and precedes the
+byte-cap check (cheap denial / cheap replay before
+any expensive work). Tests:
+`tests/test_save_progress_idempotency.py` covers
+source-level handler-uses-helper checks plus the full
+ordering contract (rate before lookup, lookup before
+byte-cap, lookup before json-parse, store after merge,
+store after lookup, store at status 200) plus
+behavioral lookup-returns-None checks plus a
+helpers-shared-with-BRAIN-132 invariant guarding
+against accidental namespace duplication.
+
+---
+
 ## 0.1.0a524 — May 4 2026 — Hotfix: a523 release pipeline accidentally rebased away the BRAIN-139 (a522) lead-feedback hardening — the test file was deleted from disk and the `api_lead_feedback` handler signature + helper-call additions were lost; restored both from git history with no behavior changes (BRAIN-FIX-A523)
 
 ### Hotfix (a523 rebase regression on lead-feedback hardening)
