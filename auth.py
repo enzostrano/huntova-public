@@ -257,8 +257,44 @@ async def logout(token: str):
     await db.delete_session(token)
 
 
+def _serving_over_https() -> bool:
+    """Decide whether cookies should carry the `Secure` attribute.
+
+    Used by `set_session_cookie`, `set_csrf_cookie`, and
+    `clear_session_cookie` to gate the `Secure` flag. Returns True only
+    when this Huntova install is actually serving over HTTPS — which
+    in practice means cloud mode where the request reaches uvicorn
+    behind the Railway/cloud TLS terminator.
+
+    a586 (BRAIN-PROD-5): the previous gate
+    `PUBLIC_URL.startswith("https")` was wrong for local mode.
+    `PUBLIC_URL` defaults to the cloud production URL
+    (`https://huntova.com`) even when the local CLI is binding to
+    `http://127.0.0.1:5050` — so cookies got `Secure` even though
+    the actual transport was plain HTTP. Some browsers (Firefox <75,
+    Safari, Brave with strict cookies) silently drop Secure cookies
+    on non-HTTPS origins, breaking the CSRF double-submit pattern
+    and surfacing as "the Update button spawns an error". The runtime
+    mode check (`CAPABILITIES.mode == "cloud"`) is the canonical
+    indicator and avoids the build-time-vs-runtime mismatch.
+    """
+    try:
+        from runtime import CAPABILITIES
+        # In cloud mode we always serve behind HTTPS (Railway terminates
+        # TLS in front of uvicorn). In local mode we never do.
+        return CAPABILITIES.mode == "cloud"
+    except Exception:
+        # Conservative fallback if runtime isn't importable for any
+        # reason: don't set Secure. Worse to lock the user out of the
+        # dashboard than to omit the flag on a https origin where the
+        # transport-layer security is enforced anyway.
+        return False
+
+
 def set_session_cookie(response: Response, token: str):
-    """Set HttpOnly session cookie. Secure flag enabled when PUBLIC_URL uses HTTPS.
+    """Set HttpOnly session cookie. Secure flag enabled when actually
+    serving over HTTPS (cloud mode), not when `PUBLIC_URL` happens to
+    start with `https://`. See `_serving_over_https` for why.
 
     Stability fix (multi-agent bug #8): cookie max_age now derives from
     config.SESSION_EXPIRY_HOURS instead of being hardcoded to 72. Previously
@@ -266,14 +302,18 @@ def set_session_cookie(response: Response, token: str):
     was changed (e.g. tightening to 24h for security) — users would see the
     cookie persist for 72h but every API call would 401 because the DB row
     expired. Both now share one source of truth.
+
+    a586 (BRAIN-PROD-5): Secure flag now uses `_serving_over_https()`
+    instead of `PUBLIC_URL.startswith("https")` — same reason as
+    `set_csrf_cookie`. Local mode runs over plain HTTP so the flag
+    must not be set there.
     """
-    from config import PUBLIC_URL, SESSION_EXPIRY_HOURS
-    _is_prod = PUBLIC_URL.startswith("https")
+    from config import SESSION_EXPIRY_HOURS
     response.set_cookie(
         key=SESSION_COOKIE_NAME,
         value=token,
         httponly=True,
-        secure=_is_prod,
+        secure=_serving_over_https(),
         samesite="lax",
         max_age=SESSION_EXPIRY_HOURS * 3600,
         path="/",
@@ -297,9 +337,13 @@ def clear_session_cookie(response: Response):
     Mirror the attributes used by `set_session_cookie` and
     `set_csrf_cookie` so the deletion actually replaces the
     original.
+
+    a586 (BRAIN-PROD-5): Secure flag now uses `_serving_over_https()`
+    instead of `PUBLIC_URL.startswith("https")` to stay consistent
+    with how the cookies were originally set. Mismatched attributes
+    on delete cause the browser to silently keep the cookie.
     """
-    from config import PUBLIC_URL
-    _is_prod = PUBLIC_URL.startswith("https")
+    _is_prod = _serving_over_https()
     response.delete_cookie(
         key=SESSION_COOKIE_NAME,
         path="/",
@@ -320,15 +364,34 @@ CSRF_COOKIE_NAME = "hv_csrf"
 
 def set_csrf_cookie(response: Response):
     """Set a CSRF token cookie readable by JS (not HttpOnly).
-    Double-submit cookie pattern: JS reads this and sends as X-CSRF-Token header."""
-    from config import PUBLIC_URL, SESSION_EXPIRY_HOURS
-    _is_prod = PUBLIC_URL.startswith("https")
+    Double-submit cookie pattern: JS reads this and sends as X-CSRF-Token header.
+
+    a586 (BRAIN-PROD-5): the Secure flag is now keyed off
+    `_serving_over_https()` — which checks the runtime mode rather than
+    the build-time `PUBLIC_URL` constant. The previous heuristic
+    (`PUBLIC_URL.startswith("https")`) was always True because
+    `PUBLIC_URL` defaults to the cloud production domain
+    (`https://huntova.com`) even when the local pipx-installed CLI is
+    serving over plain `http://127.0.0.1:5050`. Browsers that enforce
+    `Secure` strictly on non-HTTPS origins (Firefox <75, Safari, Brave
+    in strict-cookie mode, any user accessing via a non-localhost host
+    over HTTP) silently dropped the cookie — the dashboard then read
+    `document.cookie` as empty for `hv_csrf`, omitted the
+    `X-CSRF-Token` header, and `/api/update/run` returned `403 {"ok":
+    false, "error": "CSRF validation failed"}`. That surfaced as
+    "Update button still doesn't work" — the symptom a511 thought it
+    had fixed by widening the GET-cookie allowlist (it had — the
+    cookie was being SET, just being silently DROPPED on the
+    browser-side Secure check). This commit closes the second half of
+    the bug. See `_serving_over_https()` for the runtime check.
+    """
+    from config import SESSION_EXPIRY_HOURS
     token = secrets.token_urlsafe(32)
     response.set_cookie(
         key=CSRF_COOKIE_NAME,
         value=token,
         httponly=False,  # JS must read this
-        secure=_is_prod,
+        secure=_serving_over_https(),
         samesite="lax",
         # Mirror the session-cookie lifetime instead of hard-coding 72h.
         # If SESSION_EXPIRY_HOURS gets tightened (e.g. to 24h for security),

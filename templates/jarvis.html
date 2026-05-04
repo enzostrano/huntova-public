@@ -1940,15 +1940,38 @@ body.hv-has-update-banner{padding-top:var(--hv-update-banner-h, 38px)}
     let jobId = null;
     try {
       const r = await fetch('/api/update/run', { method: 'POST', credentials: 'include' });
-      const d = await r.json();
-      if (!d || !d.ok) {
-        phase.textContent = '✗ ' + (d && d.error || 'Could not start upgrade');
+      // a586 (BRAIN-PROD-5): surface the actual HTTP status + parsed
+      // body shape so update-button bug reports carry diagnostic info
+      // instead of a generic "Could not start upgrade". Pre-a586 the
+      // user-visible error swallowed the response status entirely, so
+      // the difference between "401 not authenticated" / "403 CSRF
+      // failed" / "409 hunt running" / "503 runtime unavailable" all
+      // looked identical from the user's perspective.
+      let d = null;
+      let parseFailed = false;
+      try { d = await r.json(); } catch (_) { parseFailed = true; }
+      if (!r.ok || parseFailed || !d || !d.ok) {
+        const httpHint = ' (HTTP ' + r.status + ')';
+        const serverErr = (d && (d.error || d.detail || d.message)) || '';
+        const fallback = parseFailed
+          ? 'Server returned a non-JSON response'
+          : 'Could not start upgrade';
+        phase.textContent = '✗ ' + (serverErr || fallback) + httpHint;
+        // Hint for the most common failure modes so the user knows
+        // what to do next without reading the server logs.
+        if (r.status === 401) {
+          phase.textContent += ' — try refreshing the page and signing in again.';
+        } else if (r.status === 403 && serverErr === 'CSRF validation failed') {
+          phase.textContent += ' — try a hard refresh (⌘⇧R / Ctrl+Shift+R) to reset cookies.';
+        } else if (r.status === 409) {
+          phase.textContent += ' — stop the running hunt before updating.';
+        }
         _allowClose = true;
         return;
       }
       jobId = d.job_id;
     } catch (e) {
-      phase.textContent = '✗ Network error: could not reach the server.';
+      phase.textContent = '✗ Network error: ' + (e && e.message || 'could not reach the server.');
       _allowClose = true;
       return;
     }

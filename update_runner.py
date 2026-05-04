@@ -43,16 +43,28 @@ def _resolve_cmd() -> list[str] | None:
 
 def _run(job_id: str) -> None:
     """Background-thread runner. Streams output line-by-line into the
-    job record. Caps captured output at 400 lines to bound memory."""
+    job record. Caps captured output at 400 lines to bound memory.
+
+    a586 (BRAIN-PROD-5): every failure path now prints to stderr
+    via `print(..., file=sys.stderr)` so update-button bug reports
+    can be reproduced from the server log. Pre-a586 the failures
+    were silent on the server — only the JSON job record carried
+    the error, and users couldn't see it without inspecting
+    /api/update/job/<id> directly.
+    """
     cmd = _resolve_cmd()
     if cmd is None:
+        msg = "Neither pipx nor pip found on PATH"
+        print(f"[update_runner] job {job_id}: {msg}", file=sys.stderr)
         with _jobs_lock:
             j = _jobs.get(job_id) or {}
             j.update({"state": "fail",
-                      "error": "Neither pipx nor pip found on PATH",
+                      "error": msg,
                       "exit_code": -1})
             _jobs[job_id] = j
         return
+    print(f"[update_runner] job {job_id}: running {' '.join(cmd)}",
+          file=sys.stderr)
     try:
         # List-form Popen is execve-style — no shell, no string parsing,
         # no injection surface. Args are baked-in constants above.
@@ -84,7 +96,15 @@ def _run(job_id: str) -> None:
             if proc.returncode != 0:
                 j["error"] = f"upgrade command exited {proc.returncode}"
             _jobs[job_id] = j
+        if proc.returncode == 0:
+            print(f"[update_runner] job {job_id}: done (exit 0)",
+                  file=sys.stderr)
+        else:
+            print(f"[update_runner] job {job_id}: FAIL exit={proc.returncode}",
+                  file=sys.stderr)
     except Exception as exc:
+        print(f"[update_runner] job {job_id}: exception {type(exc).__name__}: {exc}",
+              file=sys.stderr)
         with _jobs_lock:
             j = _jobs.get(job_id) or {}
             j.update({"state": "fail", "error": str(exc), "exit_code": -1})

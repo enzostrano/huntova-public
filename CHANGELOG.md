@@ -6,6 +6,32 @@ Versioning: `0.1.0aNN` alpha increments. Public install path: `pipx install hunt
 
 ---
 
+## 0.1.0a586 — May 4 2026 — Update button still erroring after a511; root cause: cookie `Secure` flag set on plain HTTP local mode silently dropped by Firefox/Safari/Brave; fix gates Secure on runtime mode + adds frontend HTTP-status surface + server-side stderr logging (BRAIN-PROD-5)
+
+### Bug fix (BRAIN-PROD-5, in-browser update flow — second half of the CSRF parity fix)
+
+Enzo: "the update button still doesnt work in the app by the way... spawns an error". a511 (BRAIN-PROD-1) thought it had fixed this by widening the `_CSRF_COOKIE_HTML_GET_ALLOWLIST` to include `/jarvis` so the `hv_csrf` cookie was actually *set* on the response. It was — but the cookie carried `Secure=True` because `set_csrf_cookie` keyed the Secure flag off `PUBLIC_URL.startswith("https")`, and `PUBLIC_URL` defaults to the cloud production domain (`https://huntova.com`) **even when the local pipx-installed CLI is binding to plain `http://127.0.0.1:5050`**. Browsers that enforce `Secure` strictly on non-HTTPS origins (Firefox <75, Safari, Brave with strict cookies, any user reverse-proxying through HTTP) silently dropped the cookie — the dashboard JS then read `document.cookie` as empty for `hv_csrf`, the auto-injecting fetch wrapper omitted the `X-CSRF-Token` header on the POST to `/api/update/run`, and the server returned `403 {"ok": false, "error": "CSRF validation failed"}`. The user saw the modal flash "✗ Could not start upgrade" — the same generic "spawns an error" surfacing as before.
+
+Three-layer fix:
+
+1. **Server (`auth.py`)**: new `_serving_over_https()` helper returns True only when the runtime mode is `cloud`. `set_csrf_cookie` / `set_session_cookie` / `clear_session_cookie` all switched off `PUBLIC_URL.startswith("https")` and onto the runtime check. Local mode now correctly omits `Secure` on plain HTTP, fixing every browser that enforces Secure strictly. Cloud mode still sets Secure (Railway terminates TLS in front of uvicorn).
+
+2. **Frontend (`templates/jarvis.html`)**: the update modal's error-rendering path now surfaces the HTTP status + parsed error so future bug reports carry diagnostic info. Pre-a586 the user-visible error was "Could not start upgrade" for every failure — 401 / 403 / 409 / 503 all looked identical. Per-status hints added: 401 → "refresh and sign in again"; 403 CSRF → "hard refresh (⌘⇧R) to reset cookies"; 409 → "stop the running hunt".
+
+3. **Server logs (`update_runner.py`)**: every failure path in `_run` now prints to `stderr` so users can grep the server log to find the actual cause. Pre-a586 the failures were silent on the server — only the JSON job record carried the error.
+
+7 new tests in `tests/test_update_button_v2.py` lock down the runtime-aware Secure flag, the docstring-tolerant negative scan against a `PUBLIC_URL.startswith` regression, the stderr-logging contract, and the frontend HTTP-status surface.
+
+### Files
+
+- `auth.py`: new `_serving_over_https()` helper. `set_session_cookie`, `set_csrf_cookie`, `clear_session_cookie` now key Secure off it instead of `PUBLIC_URL.startswith("https")`.
+- `templates/jarvis.html`: update modal's error path includes HTTP status + per-status recovery hint.
+- `update_runner.py`: `_run` logs every state transition + failure to stderr.
+- `tests/test_update_button_v2.py`: new — 7 tests.
+- `cli.py` + `pyproject.toml` + `CHANGELOG.md`: version bump.
+
+---
+
 ## 0.1.0a585 — May 4 2026 — Settings audit: clearing model override / temperature / max-leads / countries no longer silently no-ops (BRAIN-PROD-6)
 
 ### Bug fix (BRAIN-PROD-6, Settings "clear-and-save" silent no-op)
