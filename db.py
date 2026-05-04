@@ -2047,28 +2047,44 @@ async def create_hunt_share(user_id: int, run_id: int | None, leads: list,
                              expires_at: str | None = None) -> str:
     """Create a shareable snapshot, return the slug.
 
-    `leads` should already be sanitised by the caller (only public-safe
-    fields). `hunt_meta` is a small dict — country list, query count,
-    finished_at — for context on the public page. The slug is
-    URL-safe and ~11 chars.
+    Slug is `secrets.token_urlsafe(8)` (~11 chars, ~64 bits entropy).
+    Collisions are astronomically unlikely but theoretically possible;
+    retry up to 5 times on a PRIMARY KEY collision so the caller never
+    sees a 500 from a freshly-rolled duplicate.
     """
-    slug = secrets.token_urlsafe(8)
     now = datetime.now(timezone.utc).isoformat()
-    snapshot = {
-        "leads": leads or [],
-        "meta": hunt_meta or {},
-    }
+    snapshot = {"leads": leads or [], "meta": hunt_meta or {}}
     snapshot_json = json.dumps(snapshot, ensure_ascii=False, default=str)
-    await _aexec(
-        "INSERT INTO hunt_shares (slug, user_id, run_id, snapshot, title, created_at, expires_at) "
-        "VALUES (%s, %s, %s, %s, %s, %s, %s)",
-        [slug, user_id, run_id, snapshot_json, (title or "")[:200], now, expires_at])
-    return slug
+    title_clean = (title or "")[:200]
+    last_err: Exception | None = None
+    for _ in range(5):
+        slug = secrets.token_urlsafe(8)
+        try:
+            await _aexec(
+                "INSERT INTO hunt_shares (slug, user_id, run_id, snapshot, title, created_at, expires_at) "
+                "VALUES (%s, %s, %s, %s, %s, %s, %s)",
+                [slug, user_id, run_id, snapshot_json, title_clean, now, expires_at])
+            return slug
+        except Exception as e:
+            msg = str(e).lower()
+            if "unique" in msg or "primary key" in msg or "duplicate" in msg:
+                last_err = e
+                continue
+            raise
+    raise last_err if last_err else RuntimeError("hunt_share slug exhausted")
 
 
-async def get_hunt_share(slug: str) -> dict | None:
+async def get_hunt_share(slug: str, bump_views: bool = False) -> dict | None:
     """Public lookup by slug. Returns None if missing, revoked, or
-    expired. Increments view_count on success (best-effort, non-fatal).
+    expired.
+
+    `bump_views=False` (default) is a pure read — used by JSON / OG
+    endpoints + CLI fork tooling where we must NOT inflate analytics.
+    `bump_views=True` (HTML page render) increments `view_count`.
+
+    Prior to a1120 every call site bumped view_count, so Slack/Twitter
+    unfurls hitting `/h/<slug>/og.svg` and `huntova hunt --from-share`
+    pulls of `/h/<slug>.json` were silently inflating share counts.
     """
     row = await _afetchone(
         "SELECT slug, user_id, run_id, snapshot, title, revoked, view_count, "
@@ -2091,12 +2107,16 @@ async def get_hunt_share(slug: str) -> dict | None:
             snapshot = {}
     except (json.JSONDecodeError, TypeError):
         snapshot = {}
-    try:
-        await _aexec(
-            "UPDATE hunt_shares SET view_count = view_count + 1 WHERE slug = %s",
-            [slug])
-    except Exception:
-        pass
+    base_count = int(row.get("view_count") or 0)
+    out_count = base_count
+    if bump_views:
+        try:
+            await _aexec(
+                "UPDATE hunt_shares SET view_count = view_count + 1 WHERE slug = %s",
+                [slug])
+            out_count = base_count + 1
+        except Exception:
+            pass
     return {
         "slug": row["slug"],
         "user_id": row["user_id"],
@@ -2104,7 +2124,7 @@ async def get_hunt_share(slug: str) -> dict | None:
         "title": row.get("title") or "",
         "leads": snapshot.get("leads") or [],
         "meta": snapshot.get("meta") or {},
-        "view_count": int(row.get("view_count") or 0) + 1,
+        "view_count": out_count,
         "created_at": row["created_at"],
     }
 

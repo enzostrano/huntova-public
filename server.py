@@ -1366,6 +1366,11 @@ async def api_try(request: Request):
     forkable. Rate-limited per IP. Requires HV_DEMO_AI_KEY (or falls
     back to HV_GEMINI_KEY) on the server.
     """
+    from runtime import CAPABILITIES
+    if not CAPABILITIES.public_share_enabled:
+        return JSONResponse({"ok": False, "error": "public_share_disabled",
+                             "message": "demo /try is disabled because public sharing is off"},
+                            status_code=404)
     ip = _get_client_ip(request)
     allowed, retry = _try_rate_check(ip)
     if not allowed:
@@ -2681,7 +2686,16 @@ async def api_hunts_share(request: Request, user: dict = Depends(require_user)):
     `/h/<slug>` page. Body: {run_id?, lead_ids[], title?}. Returns
     {slug, url}. Snapshot semantics — later CRM edits don't affect
     the public page.
+
+    Gated by `public_share_enabled` (HV_PUBLIC_SHARE) so operators who
+    want a single-tenant install with zero public surface can flip it
+    off and have the route disappear entirely.
     """
+    from runtime import CAPABILITIES
+    if not CAPABILITIES.public_share_enabled:
+        return JSONResponse({"ok": False, "error": "public_share_disabled",
+                             "message": "public sharing is disabled on this server"},
+                            status_code=404)
     body = await request.json()
     raw_ids = body.get("lead_ids") or []
     title = (body.get("title") or "").strip()
@@ -2720,6 +2734,9 @@ async def api_hunts_share(request: Request, user: dict = Depends(require_user)):
 @app.get("/api/hunts/shares")
 async def api_hunts_shares_list(user: dict = Depends(require_user)):
     """List the caller's recent shares for an account-page management view."""
+    from runtime import CAPABILITIES
+    if not CAPABILITIES.public_share_enabled:
+        return {"ok": True, "shares": []}
     items = await db.list_hunt_shares(user["id"], limit=100)
     base = PUBLIC_URL.rstrip("/")
     out = []
@@ -2739,6 +2756,11 @@ async def api_hunts_shares_list(user: dict = Depends(require_user)):
 
 @app.post("/api/hunts/share/{slug}/revoke")
 async def api_hunts_share_revoke(slug: str, user: dict = Depends(require_user)):
+    # Revocation must remain reachable even when public sharing is
+    # toggled off later — otherwise an admin who flips HV_PUBLIC_SHARE=0
+    # mid-flight could not revoke pre-existing shares.
+    if not re.fullmatch(r"[A-Za-z0-9_-]{4,32}", slug or ""):
+        return JSONResponse({"error": "invalid slug"}, status_code=404)
     ok = await db.revoke_hunt_share(user["id"], slug)
     if not ok:
         return JSONResponse({"error": "not found or already revoked"}, status_code=404)
@@ -2937,8 +2959,16 @@ def _render_public_recipe_page(rec: dict) -> str:
 async def public_hunt_share_og(slug: str):
     """Dynamic OG image for /h/<slug> — the link-as-billboard. Returns
     a 1200x630 terminal-styled SVG so social previews show the actual
-    hunt query + top leads + fit scores instead of a generic page card."""
-    share = await db.get_hunt_share(slug)
+    hunt query + top leads + fit scores instead of a generic page card.
+
+    Pure read — does NOT bump view_count (a1120 fix: Slack/Twitter
+    unfurls were silently inflating share analytics)."""
+    from runtime import CAPABILITIES
+    if not CAPABILITIES.public_share_enabled:
+        raise HTTPException(status_code=404, detail="public_share_disabled")
+    if not re.fullmatch(r"[A-Za-z0-9_-]{4,32}", slug or ""):
+        raise HTTPException(status_code=404, detail="invalid_slug")
+    share = await db.get_hunt_share(slug, bump_views=False)
     if not share:
         # Fall back to a tiny generic placeholder rather than 404 so
         # broken links still unfurl gracefully on social
@@ -2960,15 +2990,28 @@ async def public_hunt_share_json(slug: str):
     """Machine-readable share snapshot. Same data as the HTML page,
     but as JSON so `huntova hunt --from-share <slug>` can reproduce
     the original ICP locally without scraping HTML.
+
+    Pure read — does NOT bump view_count (a1120 fix: every CLI fork
+    of `huntova hunt --from-share` was double-counting against the
+    HTML view tally).
     """
+    from runtime import CAPABILITIES
+    if not CAPABILITIES.public_share_enabled:
+        return JSONResponse({"ok": False, "error": "public_share_disabled"}, status_code=404)
     if not re.fullmatch(r"[A-Za-z0-9_-]{4,32}", slug or ""):
         return JSONResponse({"ok": False, "error": "invalid slug"}, status_code=404)
-    share = await db.get_hunt_share(slug)
+    share = await db.get_hunt_share(slug, bump_views=False)
     if not share:
         return JSONResponse({"ok": False, "error": "share not found or expired"}, status_code=404)
     # Strip user_id (private) before publishing
     safe = {k: v for k, v in share.items() if k != "user_id"}
-    return {"ok": True, "share": safe}
+    return JSONResponse(
+        {"ok": True, "share": safe},
+        # Defence-in-depth: even though JSON is unlikely to be indexed,
+        # set X-Robots-Tag noindex so any crawler scanning the API
+        # endpoint via Referer / sitemap leak doesn't surface it.
+        headers={"X-Robots-Tag": "noindex, nofollow"},
+    )
 
 
 @app.get("/h/{slug}", response_class=HTMLResponse)
@@ -2982,9 +3025,12 @@ async def public_hunt_share(slug: str, request: Request):
     /h/<slug>/og.svg, not the HTML page, so they don't pollute the
     count.
     """
+    from runtime import CAPABILITIES
+    if not CAPABILITIES.public_share_enabled:
+        return HTMLResponse(_share_not_found_page(), status_code=404)
     if not re.fullmatch(r"[A-Za-z0-9_-]{4,32}", slug or ""):
         return HTMLResponse(_share_not_found_page(), status_code=404)
-    share = await db.get_hunt_share(slug)
+    share = await db.get_hunt_share(slug, bump_views=True)
     if not share:
         return HTMLResponse(_share_not_found_page(), status_code=404)
     # Record view (soft-fails) — runs in the request path so we don't
@@ -3020,6 +3066,9 @@ async def api_share_views(slug: str):
     """Public read endpoint for view count. Consumed by the
     `huntova share status <slug>` CLI (shipped in cli.py cmd_share)
     and for live-updating badges on the /h/<slug> share page."""
+    from runtime import CAPABILITIES
+    if not CAPABILITIES.public_share_enabled:
+        raise HTTPException(status_code=404, detail="public_share_disabled")
     if not re.fullmatch(r"[A-Za-z0-9_-]{4,32}", slug or ""):
         raise HTTPException(status_code=404, detail="not_found")
     n = await db.get_share_view_count(slug, days=30)

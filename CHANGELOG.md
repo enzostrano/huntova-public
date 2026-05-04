@@ -1,5 +1,22 @@
 # Changelog
 
+## v0.1.0a1120 — 2026-05-04 — public-share /h/<slug> hardening
+
+- Enforce `public_share_enabled` capability flag at the route layer
+  (`server.py`). Six share routes now 404 when `HV_PUBLIC_SHARE=0`.
+- Retry slug minting on PRIMARY KEY collision in
+  `db.create_hunt_share` so a (vanishingly rare) `secrets.token_urlsafe(8)`
+  re-roll never bubbles a 500 to the user.
+- Stop bumping `view_count` from `/h/<slug>/og.svg` and `/h/<slug>.json`
+  — Slack/Twitter unfurls and `huntova hunt --from-share` CLI pulls
+  were silently inflating share analytics. Only the HTML page render
+  counts now (`db.get_hunt_share` gained a `bump_views` flag).
+- Emit `X-Robots-Tag: noindex, nofollow` on `/h/<slug>.json` for
+  defence-in-depth (HTML route already had a `<meta robots>` tag).
+- Tighten slug shape regex on the OG svg endpoint so malformed
+  slugs 404 before touching the database.
+- 14 new regression tests in `tests/test_public_share.py`.
+
 ## [Unreleased] — 2026-04-30 BYOK pivot
 
 The hosted-SaaS-only codebase pivoted to a downloadable CLI tool. Cloud
