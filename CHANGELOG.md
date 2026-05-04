@@ -6,6 +6,44 @@ Versioning: `0.1.0aNN` alpha increments. Public install path: `pipx install hunt
 
 ---
 
+## 0.1.0a1000 — May 4 2026 — Audit-sweep batch BRAIN-168..170 — tui.py sanitization (1 standing-order violation removed: tagline that revealed AI authorship; replaced with neutral provider-naming) + 12 invariant tests on ANSI strip-on-non-TTY / open_url scheme + CI + HV_NO_BROWSER gates / SSH-no-display detection / ASCII-only banner; auth.py token + password helpers (17 tests pinning bcrypt format + random-salt + verify_password defensive empties + generate_token uniqueness/url-safety + bug-#72 verification token user_id binding + bug-#70 reset token password_hash fingerprint binding + SECRET_KEY rotation invalidation); app.humanise_ai_error invariants (18 tests pinning 401/402/429/404/timeout classification across all 8 call-sites — chat dispatcher, wizard/scan, research, DNA gen, wizard-assist, lead-rewrite, specialist team, provider init — plus 240-char message cap, no-traceback-leak, provider-label-in-every-branch)
+
+### Lockdown bundle (BRAIN-168..170)
+
+47 new tests across 3 modules.
+
+**BRAIN-168 — tui.py sanitization + audit (12 tests, 1 src fix)**
+- `_TAGLINES`: removed the line "default model: Claude. yes, the irony of an AI built using AI is not lost on me." per Enzo's no-AI-mentions standing order. Replaced with "default model: Anthropic Claude. swap to any of 13 supported providers any time." (names a supported provider, doesn't credit AI authorship).
+- Tests pin: no AI-authorship phrases in any tagline; ANSI helpers strip color when stdout isn't a TTY; `open_url` rejects non-http(s) schemes (`file://`, `javascript:`, `ftp://`, bare hostnames); `open_url` honours `HV_NO_BROWSER` and `CI` env vars; `detect_browser_open_support` flags SSH-without-DISPLAY; banner is ASCII-only (mojibake-safe); `Spinner` falls back to plain print on non-TTY (no `\r` carriage-return spam in log files).
+
+**BRAIN-169 — auth.py token + password helpers (17 tests)**
+- `hash_password` returns bcrypt format (`$2…`); two hashes of the same password differ (random salt).
+- `verify_password` returns False on empty inputs (no exception leak).
+- `generate_token` returns 50+ char URL-safe strings, unique across calls.
+- `generate_verification_token` (bug-#72 fix): dict payload `{email, uid}` when uid given; legacy string payload when uid omitted; both shapes round-trip through `verify_verification_token`.
+- `_password_hash_fingerprint` deterministic, 16-hex chars, defensive on empty input.
+- `generate_reset_token` (bug-#70 fix): pwf changes when `password_hash` changes — invalidates prior tokens after a successful reset.
+- `verify_reset_token` returns None on garbage / expired / SECRET_KEY-rotated tokens.
+
+**BRAIN-170 — app.humanise_ai_error (18 tests)**
+- 401 / unauthorized / invalid_api_key → "API key is invalid or missing" + provider name uppercased.
+- 402 / credit / insufficient → "out of credits" + provider name.
+- 429 / rate-limit phrase → "rate-limiting; wait 30-60s or switch provider".
+- 404 + model → "model isn't available on …".
+- timeout / timed out → "timed out; provider may be slow".
+- Unknown errors fall back with provider name + exception class (no traceback leak).
+- 402 keyword wins over 429 when both present (more actionable).
+- Message body capped at 240 chars (no 50KB JSON dump bleeding into chat UI).
+
+### Files
+- `tui.py`: 1-line tagline replacement.
+- `tests/test_tui_audit.py`: new — 12 tests.
+- `tests/test_auth_token_audit.py`: new — 17 tests.
+- `tests/test_humanise_ai_error_audit.py`: new — 18 tests.
+- `cli.py` + `pyproject.toml` + `CHANGELOG.md`. Versions a901-a999 reserved for parallel agents (wave-2 swarm landed a820/a830/a840/a910 inside that range).
+
+---
+
 ## 0.1.0a900 — May 4 2026 — Audit-sweep batch BRAIN-164..167 — auth.py cookie Secure-flag (`_serving_over_https()` contract for local vs cloud + safe-fallback on runtime import failure), update_runner.py invariants (`_resolve_cmd` list-form, single-flight `start_job` under 8-way concurrent contention, `get_job` copy-semantics, hardcoded args injection-safety), huntova_daemon.py unit-file generation (launchd plist XML correctness against `</string>` injection in env values, systemd escape rules for `\` / `"` / `$`, newline + CR rejection to prevent `ExecStart=/bin/evil` injection, XDG path resolution), bundled_plugins SSRF guard (22 tests pinning `_safe_outbound_url` against localhost / cloud-metadata / RFC1918 / link-local / 0.0.0.0 / numeric loopback forms / CGNAT / IPv4-mapped IPv6 loopback / DNS rebinding via failure-rejection / unknown schemes)
 
 ### Lockdown bundle (BRAIN-164..167)
