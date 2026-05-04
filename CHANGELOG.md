@@ -6,6 +6,31 @@ Versioning: `0.1.0aNN` alpha increments. Public install path: `pipx install hunt
 
 ---
 
+## 0.1.0a700 — May 4 2026 — Surface-parity + invariant audit on `policy.py` (`_LocalPolicy` ↔ `_CloudPolicy`) — pin method-name set parity + parameter-name parity + return-shape contract for `can_run_agent` + local-mode permissive invariants (None user, unknown feature, ignore credits) + cloud-mode strict invariants (None user denied, no-credits denied, cost constant) + `_resolve()` short-circuit when billing disabled (BRAIN-159)
+
+### Lockdown (BRAIN-159, policy surface parity)
+
+`policy.policy` is one of two singletons (`_LocalPolicy` for BYOK / `_CloudPolicy` for hosted SaaS). Every call site assumes the same method set on whichever instance it gets back. A future PR adding a method to one class but forgetting the other crashes at runtime in the un-covered mode with `AttributeError`.
+
+Audit pinned via 18 new tests in `tests/test_policy_surface_audit.py`:
+
+- Method-name set parity (`_LocalPolicy` and `_CloudPolicy` expose the same public methods).
+- Parameter-name parity per method (no signature drift).
+- `can_run_agent` returns `(bool, str)` 2-tuple in both modes.
+- Local: `feature_allowed` always True (None user, unknown feature, weird types); `cost_per_lead` always 0; `deduct_on_save` and `show_billing_ui` False; `model_for_user` honours `preferred_model` then legacy `model` then default.
+- Cloud: `feature_allowed(None, …)` False; `can_run_agent(None)` denied; `can_run_agent({"credits_remaining": 0})` denied; `cost_per_lead` constant 1; `deduct_on_save` and `show_billing_ui` True.
+- `_resolve()` returns `_LocalPolicy` when `APP_MODE=cloud` but `HV_BILLING=0`.
+- `_resolve()` returns `_CloudPolicy` when both `APP_MODE=cloud` and `HV_BILLING=1`.
+- Module-level `policy` singleton always exists and exposes the public surface.
+
+No source changes. 18/18 tests pass.
+
+### Files
+- `tests/test_policy_surface_audit.py`: new — 18 tests.
+- `cli.py` + `pyproject.toml` + `CHANGELOG.md`. Versions a587-a699 reserved for parallel agents.
+
+---
+
 ## 0.1.0a586 — May 4 2026 — Update button still erroring after a511; root cause: cookie `Secure` flag set on plain HTTP local mode silently dropped by Firefox/Safari/Brave; fix gates Secure on runtime mode + adds frontend HTTP-status surface + server-side stderr logging (BRAIN-PROD-5)
 
 ### Bug fix (BRAIN-PROD-5, in-browser update flow — second half of the CSRF parity fix)
