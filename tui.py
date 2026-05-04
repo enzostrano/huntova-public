@@ -62,7 +62,7 @@ _TAGLINES = (
     "evidence-first prospecting — every fit score has a receipt.",
     "I run on YOUR machine. Your AI key. Your data. Your problem if it works.",
     "300 lines of Python and a stubborn refusal to ship fake data.",
-    "default model: Claude. yes, the irony of an AI built using AI is not lost on me.",
+    "default model: Anthropic Claude. swap to any of 13 supported providers any time.",
     "13 AI providers, 1 SearXNG, 0 vendor lock-in.",
 )
 
