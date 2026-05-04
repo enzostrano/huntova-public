@@ -6,6 +6,28 @@ Versioning: `0.1.0aNN` alpha increments. Public install path: `pipx install hunt
 
 ---
 
+## v0.1.0a2003 — May 4 2026 — Test-only audit sweep on user-blocklist filter + lead-id helper
+
+### What we audited
+- `app.is_user_blocked` + `app.is_blocked` — the lead-discovery filter that drops domains/orgs the user has manually blocked plus the per-domain fail-count gate.
+- `app.make_lead_id` — the public 12-char-hex lead identifier derived from `make_fingerprint`.
+
+### Tests added
+- `tests/test_user_blocked_audit.py` — 15 tests pinning bug-#68 fixes (exact-or-subdomain-suffix match instead of substring; bare-TLD entries silently dropped; NFC-normalised org-name comparison) and bug-#69 (schemeless URLs go through `_hostish_netloc`); empty-input defenses; case-insensitive matching.
+- `tests/test_make_lead_id_audit.py` — 5 tests pinning 12-char hex shape + determinism + lowercase + empty-lead defense.
+
+### What this protects
+- Blocklist behaviour — a substring-match regression (the original bug-#68) lets `co` block every `.co` domain and `blocked.com` block every `*blocked.com*` substring including `unblocked.com`. Tests pin the safer suffix-match semantics.
+- Lead-id stability — `make_lead_id` is the dedup key. A regression in shape (e.g. truncating to 8 chars or returning a different hash) silently re-discovers every prior lead as new.
+
+### Backwards compat
+- None. Test-only release — zero source changes.
+
+### Migration
+- None. `pipx upgrade huntova`.
+
+---
+
 ## v0.1.0a2002 — May 4 2026 — Test-only audit sweep on SMTP settings + secrets-store atomic-write primitive
 
 ### What we audited

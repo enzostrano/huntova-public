@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "huntova"
-version = "0.1.0a2002"
+version = "0.1.0a2003"
 description = "Local-first lead-gen super-tool. Run an AI agent on your terminal, bring your own API key."
 readme = "README.md"
 requires-python = ">=3.11"
