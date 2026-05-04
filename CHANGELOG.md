@@ -6,6 +6,28 @@ Versioning: `0.1.0aNN` alpha increments. Public install path: `pipx install hunt
 
 ---
 
+## v0.1.0a2001 — May 4 2026 — Test-only audit sweep on email body builder + LLM thinking-cleanup helpers
+
+### What we audited
+- `email_service._template` + `_plain` — branded HTML / plain-text email body builders used by every transactional email (verification, reset, weekly digest).
+- `app._clean_thinking` + `_clean_subject` + `extract_json` — LLM-output sanitisers that strip chain-of-thought / "Thinking Process:" / `**Sender Role:**` / `<think>...</think>` artifacts before drafts go out.
+
+### Tests added
+- `tests/test_email_template_audit.py` — 18 tests covering doctype, title / preheader / body interpolation, button render gates, footer branding, no-AI-author-mention guard, dark-mode color scheme.
+- `tests/test_thinking_cleanup_audit.py` — 18 tests covering `_clean_thinking` reasoning-line stripping (with paragraph-break preservation), `_clean_subject` `Subject:`/`Re:`/`Fwd:` peel + 80-char truncation, `extract_json` `<think>` and ```json fence stripping.
+
+### What this protects
+- Email template — a future caller passing user-controlled data through `title` / `button_text` would render literally; the no-AI-mention test prevents standing-order violations from creeping back into the footer.
+- Thinking-cleanup — a regex regression here either lets reasoning leak into customer-facing emails or strips legitimate body content. Tests pin the documented rules + paragraph-break preservation.
+
+### Backwards compat
+- None. Test-only release — zero source changes.
+
+### Migration
+- None. `pipx upgrade huntova`.
+
+---
+
 ## 0.1.0a2000 — May 4 2026 — Audit-sweep batch BRAIN-193..195 — app.make_fingerprint + dedup helpers (20 tests pinning _fp_normalize lowercase + noise-word/legal-suffix/event-word strip + None defense, _hostish_netloc full-URL extraction + bug-#63 schemeless handling + explicit-port strip + www-strip, make_fingerprint default-domain mode + bug-#63 schemeless-matches-schemed + fallback-when-no-domain + deterministic + different-country-distinct), app._atomic_write + _safe_read durability primitives (17 tests pinning .tmp+rename atomicity + cleanup-on-failure + JSON round-trip + UTF-8 preservation + a413/BRAIN-52 fsync, _safe_read missing/corrupt/empty/directory→default), app.classify_url + is_private_url SSRF gate (18 tests pinning 4-state classification with audit-wave-29 IPv4-mapped IPv6 loopback unwrap + .local/.localhost suffix block + fail-closed on exception)
 
 ### Lockdown bundle (BRAIN-193..195)
