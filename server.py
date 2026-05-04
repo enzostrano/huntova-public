@@ -494,6 +494,53 @@ def _rate_limit_429(user_id: int, bucket: str, message: str, error_kind: str | N
     return JSONResponse(payload, status_code=429, headers=headers)
 
 
+def _burst_rate_headers(user_id: int, bucket: str) -> dict:
+    """Read the current burst-bucket state for `user_id`
+    in `bucket` and return the IETF RateLimit-* triple as
+    a dict (header_name → str-value).
+
+    a482 (BRAIN-113): success responses must carry the
+    same RateLimit-* triple as the 429 path so clients
+    can throttle proactively before tripping the limiter.
+    Without this, multi-tab and high-latency clients only
+    learn the budget by accidentally exceeding it.
+
+    Defensive: unknown bucket → empty dict (caller can
+    .update() it onto a Response without effect).
+    """
+    cfg = _RATE_BUCKETS.get(bucket)
+    if not cfg:
+        return {}
+    window, max_calls = cfg
+    now = time.time()
+    with _ai_rate_lock:
+        bucket_state = _rate_state.setdefault(bucket, {})
+        attempts = [t for t in bucket_state.get(user_id, []) if now - t < window]
+    used = len(attempts)
+    remaining = max(0, int(max_calls) - used)
+    return {
+        "RateLimit-Limit": str(int(max_calls)),
+        "RateLimit-Remaining": str(remaining),
+        "RateLimit-Reset": str(int(window)),
+    }
+
+
+def _attach_burst_rate_headers(response, user_id: int, bucket: str) -> None:
+    """Mutate `response.headers` in place so endpoints
+    returning a dict (auto-converted by FastAPI) still
+    get the RateLimit-* triple applied at serialization
+    time. Defensive: unknown bucket → no-op."""
+    if response is None:
+        return
+    for k, v in _burst_rate_headers(user_id, bucket).items():
+        try:
+            response.headers[k] = v
+        except Exception:
+            # Don't let a header-write failure break the
+            # endpoint response.
+            pass
+
+
 def _daily_quota_429(daily_max: int, message: str, error_kind: str):
     """Build a 429 JSONResponse for a daily-quota block
     (BRAIN-92/93/96/97), carrying Retry-After computed as
@@ -8689,9 +8736,13 @@ def _is_safe_url(url: str) -> bool:
 
 
 @app.post("/api/wizard/scan")
-async def api_wizard_scan(request: Request, user: dict = Depends(require_user)):
+async def api_wizard_scan(request: Request, response: Response, user: dict = Depends(require_user)):
     if _check_ai_rate(user["id"], bucket="wizard_scan"):
         return _rate_limit_429(user["id"], "wizard_scan", "Too many scan requests. Wait a moment.")
+    # a482 (BRAIN-113): attach RateLimit-* headers to the
+    # success path so clients see budget depletion before
+    # tripping the limiter.
+    _attach_burst_rate_headers(response, user["id"], "wizard_scan")
     # a461 fix (BRAIN-92): persistent daily quota in addition to
     # the BRAIN-91 burst bucket. Per Huntova engineering review
     # on metered-API spend control. Burst caps don't stop a
@@ -8810,7 +8861,7 @@ _WIZARD_COMPLETE_TIMEOUT = 45.0
 
 
 @app.post("/api/wizard/complete")
-async def api_wizard_complete(request: Request, user: dict = Depends(require_user)):
+async def api_wizard_complete(request: Request, response: Response, user: dict = Depends(require_user)):
     # a371 fix (BRAIN-10): rate-limit guard. Was the only wizard endpoint
     # without it after a365 fixed generate-phase5 — overlooked because
     # the synchronous part doesn't directly call the AI. But: this
@@ -8821,6 +8872,12 @@ async def api_wizard_complete(request: Request, user: dict = Depends(require_use
     # engineering review on idempotency.
     if _check_ai_rate(user["id"], bucket="wizard_complete"):
         return _rate_limit_429(user["id"], "wizard_complete", "Too many requests. Wait a moment.")
+    # a482 (BRAIN-113): success path carries the same
+    # RateLimit-* triple as the 429 path. Note: 429
+    # paths from _rate_limit_429 build their own
+    # JSONResponse so this attach only affects success
+    # + non-429 error responses returned as dicts.
+    _attach_burst_rate_headers(response, user["id"], "wizard_complete")
     # a465 fix (BRAIN-96): durable daily quota on complete to
     # cap slow-burn BYOK drain (parity with BRAIN-93 scan).
     # a466 fix (BRAIN-97): use read-only check here; the
@@ -9706,7 +9763,7 @@ async def api_wizard_complete(request: Request, user: dict = Depends(require_use
 
 
 @app.post("/api/wizard/reset")
-async def api_wizard_reset(request: Request, user: dict = Depends(require_user)):
+async def api_wizard_reset(request: Request, response: Response, user: dict = Depends(require_user)):
     """User-facing wizard reset.
 
     a441 fix (BRAIN-80): per Huntova engineering durable-workflow-reset
@@ -9733,6 +9790,8 @@ async def api_wizard_reset(request: Request, user: dict = Depends(require_user))
     """
     if _check_ai_rate(user["id"], bucket="wizard_reset"):
         return _rate_limit_429(user["id"], "wizard_reset", "Too many requests. Wait a moment.")
+    # a482 (BRAIN-113): success path RateLimit-* headers.
+    _attach_burst_rate_headers(response, user["id"], "wizard_reset")
 
     def _reset_mutator(cur: dict) -> dict:
         cur = {**DEFAULT_SETTINGS, **(cur or {})}
@@ -9766,7 +9825,7 @@ async def api_wizard_reset(request: Request, user: dict = Depends(require_user))
 
 
 @app.post("/api/wizard/save-progress")
-async def api_wizard_save_progress(request: Request, user: dict = Depends(require_user)):
+async def api_wizard_save_progress(request: Request, response: Response, user: dict = Depends(require_user)):
     """Incremental save — preserves answers as user progresses through wizard."""
     # Rate-limit: matches /api/wizard/scan + /api/wizard/assist. Without
     # this, a chatty client (or bot) can hammer the wizard JSON column
@@ -9774,6 +9833,8 @@ async def api_wizard_save_progress(request: Request, user: dict = Depends(requir
     # SQLite's WAL.
     if _check_ai_rate(user["id"], bucket="wizard_save_progress"):
         return _rate_limit_429(user["id"], "wizard_save_progress", "Too many saves. Wait a moment.")
+    # a482 (BRAIN-113): success path RateLimit-* headers.
+    _attach_burst_rate_headers(response, user["id"], "wizard_save_progress")
     body = await request.json()
     answers = body.get("answers", {})
     phase = body.get("phase", 0)
@@ -9962,7 +10023,7 @@ async def api_wizard_save_progress(request: Request, user: dict = Depends(requir
 
 
 @app.post("/api/wizard/generate-phase5")
-async def api_wizard_generate_phase5(request: Request, user: dict = Depends(require_user)):
+async def api_wizard_generate_phase5(request: Request, response: Response, user: dict = Depends(require_user)):
     """Generate 5 dynamic AI follow-up questions based on previous answers.
 
     a309: each question now also ships with a `prefill` field — a smart,
@@ -9978,6 +10039,8 @@ async def api_wizard_generate_phase5(request: Request, user: dict = Depends(requ
     # user real spend on their BYOK key. Same 2-line guard pattern.
     if _check_ai_rate(user["id"], bucket="wizard_phase5"):
         return _rate_limit_429(user["id"], "wizard_phase5", "Too many requests. Wait a moment.")
+    # a482 (BRAIN-113): success path RateLimit-* headers.
+    _attach_burst_rate_headers(response, user["id"], "wizard_phase5")
     # a465 fix (BRAIN-96): durable daily quota on phase-5 to
     # cap slow-burn BYOK drain (parity with BRAIN-93 scan).
     # a466 fix (BRAIN-97): use read-only check here; the
@@ -10260,10 +10323,12 @@ NO markdown. NO commentary. JSON array only."""
 
 
 @app.post("/api/wizard/assist")
-async def api_wizard_assist(request: Request, user: dict = Depends(require_user)):
+async def api_wizard_assist(request: Request, response: Response, user: dict = Depends(require_user)):
     """AI assistant for the wizard — helps users craft better, more specific answers."""
     if _check_ai_rate(user["id"], bucket="wizard_assist"):
         return _rate_limit_429(user["id"], "wizard_assist", "Too many requests. Wait a moment.")
+    # a482 (BRAIN-113): success path RateLimit-* headers.
+    _attach_burst_rate_headers(response, user["id"], "wizard_assist")
     # a465 fix (BRAIN-96): durable daily quota on assist to
     # cap slow-burn BYOK drain (parity with BRAIN-93 scan).
     if await _check_paid_endpoint_quota_async(user["id"], "wizard_assist", _ASSIST_DAILY_MAX):

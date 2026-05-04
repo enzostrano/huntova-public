@@ -6,6 +6,77 @@ Versioning: `0.1.0aNN` alpha increments. Public install path: `pipx install hunt
 
 ---
 
+## 0.1.0a482 — May 4 2026 — BRAIN-112's RateLimit-* headers fired only on 429s, so clients could only learn the budget by accidentally exceeding it; success responses now carry the same triple via `_burst_rate_headers` + `_attach_burst_rate_headers`, turning rate-limit metadata into a continuous client-facing control surface instead of a punishment-only signal (BRAIN-113)
+
+### Bug fix (BRAIN-113, RateLimit-* on success path)
+
+BRAIN-112 (a481) closed the bare-429 gap on every
+wizard rate-limited path. But the headers fired ONLY on
+429. Successful 200 responses carried no
+`RateLimit-Limit`, `RateLimit-Remaining`, or
+`RateLimit-Reset` — so a well-behaved client had no way
+to see budget depletion before tripping the limiter.
+
+The downstream effects:
+- Multi-tab clients stampeded the bucket because each
+  tab couldn't see what the others had consumed.
+- High-latency clients re-issued in-flight requests
+  thinking they'd been dropped, accidentally doubling
+  consumption.
+- Avoidable 429s stacked up on hot paths like assist
+  and save-progress, exactly because clients couldn't
+  see the remaining budget.
+
+Per Huntova engineering review on rate-limit
+ergonomics + IETF draft-ietf-httpapi-ratelimit-headers:
+RateLimit-* metadata is an ongoing client-facing
+control surface, not a punishment-only signal. It must
+appear on every response for a rate-limited route, not
+just 429.
+
+Fix: two new module-scope helpers paired with the
+BRAIN-112 ones.
+- `_burst_rate_headers(user_id, bucket) -> dict[str,
+  str]` reads the per-user bucket state (timestamps in
+  the active window) and returns the IETF triple as a
+  dict reflecting post-call remaining. Defensive:
+  unknown bucket → empty dict.
+- `_attach_burst_rate_headers(response, user_id,
+  bucket)` mutates a FastAPI Response's headers in
+  place. This works with endpoints returning a dict
+  (FastAPI auto-converts to JSONResponse and applies
+  the headers we wrote on the injected Response).
+
+Every wizard rate-limited endpoint now accepts a
+`response: Response` parameter and calls
+`_attach_burst_rate_headers` on the success path —
+scan, complete, generate-phase5, assist, save-progress,
+reset. The 429 path remains unchanged: `_rate_limit_429`
+already builds its own JSONResponse with the headers.
+
+Remaining is clamped to ≥ 0 so over-the-cap state
+(stale timestamps, parallel-request races) never
+emits negative values that break uint client parsers.
+
+12 new regression tests in
+`test_wizard_rate_limit_headers_on_success.py`:
+- Helpers exist at module scope.
+- Behavioral: full triple present, Remaining
+  decrements after a call, Remaining floors at 0,
+  attach helper mutates response headers, unknown
+  bucket safe.
+- Source-level: every wizard rate-limited endpoint
+  calls `_attach_burst_rate_headers`.
+
+500 / 500 tests passing.
+
+### Files
+
+- `server.py`: new `_burst_rate_headers` and `_attach_burst_rate_headers` module-scope helpers near `_rate_limit_429`. Six wizard endpoints (`api_wizard_scan`, `api_wizard_complete`, `api_wizard_reset`, `api_wizard_save_progress`, `api_wizard_generate_phase5`, `api_wizard_assist`) now accept `response: Response` and attach headers on the success path.
+- `tests/test_wizard_rate_limit_headers_on_success.py`: new — 12 tests guarding the success-path RateLimit-* contract.
+
+---
+
 ## 0.1.0a481 — May 4 2026 — Wizard 429 responses (burst buckets + daily quotas) emitted no Retry-After or RateLimit-* headers; clients couldn't back off intelligently and either hammered the endpoint or stalled longer than necessary; shared `_rate_limit_429` + `_daily_quota_429` helpers now emit IETF-standard backoff hints across every wizard rate-limited path (BRAIN-112)
 
 ### Bug fix (BRAIN-112, machine-readable backoff hints)
