@@ -6,6 +6,24 @@ Versioning: `0.1.0aNN` alpha increments. Public install path: `pipx install hunt
 
 ---
 
+## 0.1.0a820 — May 4 2026 — Wizard-reset DNA cascade (BRAIN-RESET-DNA-CASCADE)
+
+### Bug fixes
+
+**Wizard reset left orphaned Agent DNA, next hunt loaded stale ICP.** Both the user-facing `/api/wizard/reset` (BRAIN-80, a441) and the admin `/api/ops/users/{id}/wizard/reset` (BRAIN-95, a464) wiped the wizard sub-object via `db.merge_settings` but neither touched the `agent_dna` table. The frontend confirm copy in `templates/jarvis.html` line 3759 explicitly promises "wipes all wizard answers, training, and DNA generation state on the server" — only the first two were honoured. Failure mode: user clicks Restart Brain, completes a NEW wizard for a different ICP, then the agent loop in `app.py` (`run_agent_scoped`) loads the leftover DNA via `db.get_agent_dna(...)` and runs the new hunt with stale `search_queries` + `scoring_rules` tuned for the OLD business. The new wizard's DNA regeneration only OVERWROTE on success — if the AI provider rate-limited or returned malformed JSON, the stale DNA stuck (a340 surfaced this state as a "warn" log but never cleared the cache).
+
+Per the durable-workflow guidance already cited in BRAIN-80: reset must create a clean new run, not reuse leftover derived outputs.
+
+Fix:
+- New `db.delete_agent_dna(user_id)` helper — single cascade primitive used by both reset paths. Returns whether a row was actually wiped, swallows exceptions so a DNA-table problem can't block the wizard reset itself.
+- Both reset endpoints now call `db.delete_agent_dna(...)` AFTER the `merge_settings` wipe (order matters — a `merge_settings` failure must not leave a half-fixed state of stale wizard + no DNA).
+- Both endpoints now also `agent_runner.stop_agent(user_id)` if a hunt is running. The agent loads `_brain` and `_cached_dna` ONCE at hunt start and never re-reads — without the stop, a reset mid-hunt left the running hunt happily targeting the OLD ICP until completion.
+- User reset response surfaces `dna_wiped` + `agent_stopped` so the frontend / curl users can verify the cascade fired. Admin audit-log payload records the same fields for operator paper trail.
+
+11 regression tests pinning: helper exists + is async + parameterised SQL + swallows exceptions; both reset endpoints call the helper; cascade order is merge-then-delete; both endpoints stop running agents; admin audit-log records the cascade outcome; response surfaces `dna_wiped`; reset endpoints use the helper not inline SQL.
+
+---
+
 ## 0.1.0a620 — May 4 2026 — Agent-runner concurrency + AGENT-DNA replay-safety hardening (BRAIN-PROD-7)
 
 ### Bug fixes (BRAIN-PROD-7, agent-runner restart-safety + DNA hot-load gating)

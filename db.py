@@ -2060,6 +2060,47 @@ async def save_agent_dna(user_id: int, dna: dict):
         [user_id, dna_json, version, now, dna_json, version, now])
 
 
+async def delete_agent_dna(user_id: int) -> bool:
+    """Delete the cached Agent DNA row for a user. Returns
+    True if a row was actually deleted.
+
+    a621 fix (BRAIN-RESET-DNA-CASCADE): wizard reset must
+    cascade to the agent_dna table. Pre-fix, both the
+    user-facing /api/wizard/reset (BRAIN-80, a441) and the
+    admin /api/ops/users/(id)/wizard/reset (BRAIN-95, a464)
+    wiped s["wizard"] = (} but left the orphaned agent_dna
+    row intact. The frontend confirm copy explicitly
+    promises "wipes all wizard answers, training, and DNA
+    generation state" (templates/jarvis.html line 3759) —
+    server only honoured the first two.
+
+    Failure mode: user clicks Restart Brain, completes a NEW
+    wizard for a different ICP, then the agent loop in
+    app.py loads leftover DNA from the PRIOR business and
+    silently runs the new hunt with stale search_queries
+    plus scoring rules tuned for the old ICP. The new
+    wizard's DNA regeneration only overwrites if it
+    succeeds; if the AI provider rate-limits or returns
+    malformed JSON, the stale DNA sticks (a340 surfaced
+    this as a "warn" log but never cleared the cache).
+
+    Per the durable-workflow guidance already cited in
+    BRAIN-80: reset must create a clean new run, not reuse
+    leftover derived outputs.
+    """
+    try:
+        affected = await _aexec_rowcount(
+            "DELETE FROM agent_dna WHERE user_id = %s", [user_id]
+        )
+        return bool(affected and affected > 0)
+    except Exception as _e:
+        # Best-effort: never let a DNA cleanup failure block
+        # the actual wizard reset. Worst case the orphan stays
+        # for one more hunt and the next reset will catch it.
+        print(f"[BRAIN] delete_agent_dna({user_id}) failed: {_e}")
+        return False
+
+
 # ── Lead Feedback ──
 
 async def save_lead_feedback(user_id: int, lead_id: str, signal: str, reason: str = ""):

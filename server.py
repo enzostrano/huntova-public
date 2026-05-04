@@ -11058,8 +11058,35 @@ async def api_wizard_reset(request: Request, response: Response, user: dict = De
         return cur
 
     await db.merge_settings(user["id"], _reset_mutator)
-    print(f"[WIZARD] user-initiated reset for user {user['id']}")
-    return {"ok": True, "reset": True}
+    # a621 fix (BRAIN-RESET-DNA-CASCADE): wipe the orphaned
+    # agent_dna row. Pre-fix, the wizard sub-object got cleared
+    # but the cached DNA from the prior business persisted —
+    # next hunt loaded it via db.get_agent_dna and ran with
+    # stale search_queries + scoring rules tuned for the OLD
+    # ICP. The frontend confirm copy already promises the
+    # cascade ("wipes all wizard answers, training, and DNA
+    # generation state", templates/jarvis.html line 3759) —
+    # this brings the server in line with the user's
+    # documented expectation.
+    _dna_wiped = await db.delete_agent_dna(user["id"])
+    # a621: also stop any currently-running agent so a hunt
+    # mid-flight can't keep using the stale in-memory _brain
+    # / _cached_dna captured from the now-wiped wizard. The
+    # agent loop loads brain ONCE at start (app.py
+    # run_agent_scoped), so without a stop the running hunt
+    # would keep targeting the prior ICP until completion.
+    _was_running = False
+    try:
+        from agent_runner import agent_runner as _ar
+        if _ar.is_running(user["id"]):
+            _ar.stop_agent(user["id"])
+            _was_running = True
+            print(f"[WIZARD] stopped running agent for user {user['id']} on reset")
+    except Exception as _stop_err:
+        # Never let agent-stop failure block the reset.
+        print(f"[WIZARD] agent-stop on reset failed (non-fatal): {_stop_err}")
+    print(f"[WIZARD] user-initiated reset for user {user['id']} (dna_wiped={_dna_wiped}, agent_stopped={_was_running})")
+    return {"ok": True, "reset": True, "dna_wiped": _dna_wiped, "agent_stopped": _was_running}
 
 
 @app.post("/api/wizard/save-progress")
@@ -13944,13 +13971,29 @@ async def admin_wizard_reset(user_id: int, request: Request, user: dict = Depend
         return cur
 
     await db.merge_settings(user_id, _admin_reset_mutator)
+    # a621 fix (BRAIN-RESET-DNA-CASCADE): parity with the
+    # user-facing /api/wizard/reset — wipe the orphaned
+    # agent_dna row + stop any running agent. Same failure
+    # mode: stale DNA from the prior business survived an
+    # admin reset and got loaded by the next hunt.
+    _dna_wiped = await db.delete_agent_dna(user_id)
+    _was_running = False
+    try:
+        from agent_runner import agent_runner as _ar
+        if _ar.is_running(user_id):
+            _ar.stop_agent(user_id)
+            _was_running = True
+    except Exception as _stop_err:
+        print(f"[ADMIN] agent-stop on reset failed (non-fatal): {_stop_err}")
     await db.log_admin_action(user["id"], user_id, "wizard_reset", {
         "reason": reason,
         "had_brain": bool(old_wizard.get("normalized_hunt_profile")),
         "had_dossier": bool(old_wizard.get("training_dossier")),
         "archetype_was": old_wizard.get("archetype", ""),
+        "dna_wiped": _dna_wiped,
+        "agent_stopped": _was_running,
     }, _get_client_ip(request))
-    return {"ok": True}
+    return {"ok": True, "dna_wiped": _dna_wiped, "agent_stopped": _was_running}
 
 
 @app.post("/api/ops/users/{user_id}/agent/stop")
