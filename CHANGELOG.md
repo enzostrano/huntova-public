@@ -6,6 +6,59 @@ Versioning: `0.1.0aNN` alpha increments. Public install path: `pipx install hunt
 
 ---
 
+## 0.1.0a476 — May 4 2026 — Skip phase-boundary state-isolation regression guards; current code is correct, tests pin the invariant against future refactors (BRAIN-107)
+
+### Bug fix (BRAIN-107, multistep-form state-machine isolation)
+
+A multi-step wizard's Skip transition is a classic
+state-leak seam. The current Skip handler is correct today:
+
+- `inputEl` is rebound per `_brainRenderQuestion` call.
+- Chips backing arrays use `selected.slice()` so each
+  render gets a fresh closure-bound array.
+- The captured value writes only to
+  `_brainState.answers[q.id]`, where `q` is the question
+  actually rendered.
+
+But the failure mode is brittle. A future refactor that
+lifts `selected` to module scope, or makes the handler
+iterate over `_brainState.answers`, or introduces a shared
+`inputEl` alias, would silently leak prior-phase values
+into the destination phase's persisted profile. Operator
+discovery would happen via "wrong answers in user data"
+support tickets — late and confusing.
+
+Standard multistep-form guidance: phase transitions need
+state isolation. Destination-visible answers must be a
+function of allowed keys for that phase, not whatever
+happened to be in shared draft memory before the skip.
+
+This release pins the invariant in tests:
+
+1. Skip handler writes EXACTLY to
+   `_brainState.answers[q.id]`, no other key.
+2. Skip handler does NOT iterate over `_brainState.answers`
+   (no `for in`, no `Object.keys()` over the answers map —
+   the canonical leak shape).
+3. Chips render path uses `.slice()` on the initial value
+   so the backing `selected` array is per-render.
+4. Companion: Continue handler enforces the same per-qid
+   invariant.
+5. Skip advances `qi` AFTER persisting (so captured text
+   doesn't mis-route to the new phase's slot).
+
+If a future refactor introduces shared mutable state or
+cross-key iteration, these tests fail loudly at the pre-fix
+boundary instead of silently breaking the user's saved
+profile.
+
+5 new regression tests in
+`tests/test_wizard_skip_phase_isolation.py`.
+
+447 of 447 tests passing.
+
+---
+
 ## 0.1.0a475 — May 4 2026 — BRAIN-105's synchronous attempts-bump eroded the BRAIN-85 short-circuit fast path; moved off the synchronous request via `_spawn_bg` (BRAIN-106)
 
 ### Bug fix (BRAIN-106, idempotency fast-path preservation)
