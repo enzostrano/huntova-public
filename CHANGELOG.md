@@ -6,6 +6,37 @@ Versioning: `0.1.0aNN` alpha increments. Public install path: `pipx install hunt
 
 ---
 
+## 0.1.0a1500 — May 4 2026 — Audit-sweep batch BRAIN-178..180 — cli_memory.py helper invariants (26 tests pinning _safe_int defensive None/empty/non-numeric/float-truncate, _score_bucket boundary cases, _score_match org_name 3x weighted + case-insensitivity + None handling, _yaml_scalar None→~ + lowercase booleans + reserved-char quoting + multiline block scalar), cli_benchmark.py helper invariants (19 tests pinning _approx_tokens ≥1-on-empty + unknown-provider-default + _est_cost zero-on-unknown + _pct empty/min/max/median/sorts-input + _parse_score none-on-empty/non-JSON + markdown-fence strip + 0..10 clamp + ≥3-of-5-keys-required), cli_logs.py log-level + since-parser (18 tests pinning _level_of error-status priority + regex matching, _parse_since s/m/h/d units + case-insensitive + UTC, _ts_short 19-char truncation + T→space)
+
+### Lockdown bundle (BRAIN-178..180)
+
+63 new tests across 3 modules. Zero source changes.
+
+**BRAIN-178 — cli_memory.py (26 tests)**
+- `_safe_int` defensive on None / empty / non-numeric / float (truncates).
+- `_score_bucket` boundary cases (0, 4, 6, 8, 10, 11+, negative).
+- `_score_match` weights `org_name` 3x other fields; case-insensitive on hay (terms must be pre-lowered); handles None / missing fields without crashing; returns 0 for no match.
+- `_yaml_scalar` None→`~`, lowercase booleans, reserved-char quoting (`:` `#` `&` `*` `!` `|` `>` `%` `@` `` ` ``), block scalar (`|`) for multiline, `\"` escape for inner double quotes.
+
+**BRAIN-179 — cli_benchmark.py (19 tests)**
+- `_approx_tokens` returns ≥1 for empty / None (no div-by-zero downstream); unknown provider falls back to default 4-chars-per-token.
+- `_est_cost` returns 0.0 for unknown provider.
+- `_pct` empty list returns 0.0; single-element returns that element; 0%/100% return min/max; median is nearest-rank; sorts input internally.
+- `_parse_score` rejects empty / non-JSON; strips ```json … ``` and ``` … ``` fences; clamps each score to [0, 10]; truncates floats; requires ≥3 of 5 score keys (rejects chatty replies with stray `{...}`); rejects non-dict; non-numeric values default to 0.
+
+**BRAIN-180 — cli_logs.py (18 tests)**
+- `_level_of`: error/crashed/failed status returns "error" (priority over text); error regex matches return "error"; warn regex returns "warn"; info default; defensive on None.
+- `_parse_since`: s/m/h/d units, case-insensitive, whitespace-tolerant, returns None on garbage / year-unit, returns UTC datetime.
+- `_ts_short`: 19-char truncation, T→space replacement, None/empty defense, short input passes through.
+
+### Files
+- `tests/test_cli_memory_audit.py`: new — 26 tests.
+- `tests/test_cli_benchmark_audit.py`: new — 19 tests.
+- `tests/test_cli_logs_audit.py`: new — 18 tests.
+- `cli.py` + `pyproject.toml` + `CHANGELOG.md`. Versions a1401-a1499 reserved for parallel agents.
+
+---
+
 ## 0.1.0a1400 — May 4 2026 — Audit-sweep batch BRAIN-175..177 — email_service._scrub_header injection guard (17 tests pinning CRLF + C0-control strip / TAB preservation / RFC-5322 998-octet byte-cap / multibyte UTF-8 boundary safety / BCC-injection neutralisation), payments.handle_webhook signature + replay-window (12 tests pinning STRIPE_WEBHOOK_SECRET-required / missing-Stripe-Signature reject / sig-mismatch reject / a291 5min-past + 60s-future replay-window / multi-v1 key-rotation accept / hmac.compare_digest constant-time), config._env quote-strip + tier-model resolution (15 tests pinning .env-paste-quote-strip + per-provider tier-models)
 
 ### Lockdown bundle (BRAIN-175..177)
