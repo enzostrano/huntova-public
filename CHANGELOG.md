@@ -6,6 +6,50 @@ Versioning: `0.1.0aNN` alpha increments. Public install path: `pipx install hunt
 
 ---
 
+## 0.1.0a1200 — May 4 2026 — Audit-sweep batch BRAIN-171..174 — secrets_store get/list/delete read fallback semantics across all 3 tiers (15 tests), cli_schedule time-parser + chain-builder (18 tests), cli_pulse since-parser + ISO-parser (16 tests), secrets_store._derive_key OWASP-2024-min 600_000 PBKDF2 iterations + persisted .salt + a303 fallback contracts (7 tests)
+
+### Lockdown bundle (BRAIN-171..174)
+
+56 new tests across 4 modules. Zero source changes.
+
+**BRAIN-171 — secrets_store get_secret + list + delete (15 tests)**
+- `get_secret(absent_name)` returns None across keychain / Fernet / plaintext tiers.
+- Plaintext tier: set→get→delete→get round-trips correctly.
+- Keychain SDK raise → get_secret returns None (no exception leak).
+- `list_secret_names` returns sorted in plaintext + Fernet tiers.
+- `_kr_index` round-trips a list of names through the keyring backend.
+- Empty / 4KB-long / unicode (`héllo-wörld-🦊-中文`) values preserve through serialization.
+- `delete_secret` on never-set name is a no-op.
+- Successful keychain read clears the `.keychain_warned` sentinel so the warning can fire again later if keychain breaks.
+
+**BRAIN-172 — cli_schedule.py (18 tests)**
+- `_parse_at` accepts `HH:MM`, clamps overflow (`25:00` → `(23, 0)`, `09:99` → `(9, 59)`), defaults to `(9, 0)` on garbage / empty / None.
+- `_build_chain` always begins with the log-dir mkdir step, uses `$HOME` (not absolute path) for launchd HOME-context portability, chains the canonical 4-step sequence (update --check → sequence run → inbox check → pulse), honours `with_update=False`.
+- `_emit_launchd` produces well-formed plist with expected keys (Label / ProgramArguments / StartCalendarInterval / Hour / Minute), 2-digit zero-padded minute.
+- `_emit_cron` produces a comment + cron entry with minute / hour / `* * *` slots correctly placed.
+
+**BRAIN-173 — cli_pulse.py (16 tests)**
+- `_parse_since` accepts `7d` / `24h` / `2w` / bare-int-days, case-insensitive, whitespace-tolerant; defaults to `7d` on garbage / empty / None.
+- `_parse_iso` normalises `Z` suffix to `+00:00`, accepts explicit timezone offsets, defaults naive timestamps to UTC, returns None on garbage / non-string.
+
+**BRAIN-174 — secrets_store._derive_key (7 tests)**
+- PBKDF2 iterations ≥ 600_000 (OWASP 2024 SHA256 minimum). Lowering this is a security regression.
+- Output is valid 32-byte URL-safe base64 Fernet key (44 chars).
+- Same-process determinism: two calls return identical key.
+- First call creates `~/.config/huntova/.salt` (16 bytes, mode 0600).
+- Cross-process determinism via persisted salt file.
+- a303 fix pinned: existing salt file with wrong length triggers legacy fallback rather than rotating to fresh-random (would orphan prior Fernet ciphertexts).
+- a303 fix pinned: legacy-fallback WARN fires at most once per process (sentinel).
+
+### Files
+- `tests/test_secrets_store_get_audit.py`: new — 15 tests.
+- `tests/test_cli_schedule_audit.py`: new — 18 tests.
+- `tests/test_cli_pulse_audit.py`: new — 16 tests.
+- `tests/test_secrets_store_derive_key_audit.py`: new — 7 tests.
+- `cli.py` + `pyproject.toml` + `CHANGELOG.md`. Versions a1001-a1199 reserved for parallel agents.
+
+---
+
 ## 0.1.0a1000 — May 4 2026 — Audit-sweep batch BRAIN-168..170 — tui.py sanitization (1 standing-order violation removed: tagline that revealed AI authorship; replaced with neutral provider-naming) + 12 invariant tests on ANSI strip-on-non-TTY / open_url scheme + CI + HV_NO_BROWSER gates / SSH-no-display detection / ASCII-only banner; auth.py token + password helpers (17 tests pinning bcrypt format + random-salt + verify_password defensive empties + generate_token uniqueness/url-safety + bug-#72 verification token user_id binding + bug-#70 reset token password_hash fingerprint binding + SECRET_KEY rotation invalidation); app.humanise_ai_error invariants (18 tests pinning 401/402/429/404/timeout classification across all 8 call-sites — chat dispatcher, wizard/scan, research, DNA gen, wizard-assist, lead-rewrite, specialist team, provider init — plus 240-char message cap, no-traceback-leak, provider-label-in-every-branch)
 
 ### Lockdown bundle (BRAIN-168..170)
