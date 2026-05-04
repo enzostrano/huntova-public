@@ -6,6 +6,31 @@ Versioning: `0.1.0aNN` alpha increments. Public install path: `pipx install hunt
 
 ---
 
+## 0.1.0a562 — May 4 2026 — `_RATE_BUCKETS` config integrity audit — every entry must be `(window_int, max_calls_int)` with sane bounds (10..3600s window, 1..1000 calls); guards against typo regressions like `(60, 0)` that would silently instant-block an endpoint (BRAIN-151)
+
+### Lockdown (BRAIN-151, rate-bucket config integrity)
+
+`_RATE_BUCKETS` is the single source of truth for per-endpoint rate budgets across BRAIN-91/112/113/142/144/145. A typo or accidental empty value breaks the rate-limit gate silently — `_check_ai_rate` falls back to defaults that may be wildly wrong.
+
+Pre-fix: each new bucket addition is reviewed manually but no automated guard ensures the shape. A future PR adding `"new_endpoint": (60, 0)` would register a 0-call cap (instant block) without anything catching it.
+
+Blanket regression test:
+- Dict ≥ 8 entries (baseline buckets present).
+- Critical buckets (ai, wizard_*) explicitly enumerated.
+- Every value is a `(window, max_calls)` pair.
+- Every window in `[10, 3600]` seconds.
+- Every max_calls in `[1, 1000]`.
+- Names are lowercase + underscore-only.
+
+6 new regression tests in `tests/test_rate_buckets_config_audit.py`. No source changes.
+
+### Files
+
+- `tests/test_rate_buckets_config_audit.py`: new — 6 tests.
+- `cli.py` + `pyproject.toml` + `CHANGELOG.md`.
+
+---
+
 ## 0.1.0a561 — May 4 2026 — Inverse of BRAIN-149 — comprehensive audit catching every `@app.get` route that ALSO accepts POST/PUT/DELETE/PATCH (dual-method routes silently allow state mutation behind read URLs that caching layers + link-previews treat as read-only); 4 regression tests (test file landed standalone earlier; this release formally tags BRAIN-150) (BRAIN-150)
 
 ### Lockdown (BRAIN-150, blanket GET-route audit)
