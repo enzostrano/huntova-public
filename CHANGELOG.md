@@ -6,6 +6,54 @@ Versioning: `0.1.0aNN` alpha increments. Public install path: `pipx install hunt
 
 ---
 
+## 0.1.0a527 — May 4 2026 — `/api/team/seed-defaults` (Reseed-from-brain button) + `/api/team/{slot}/toggle` (per-specialist enable flag) lacked rate-limit + byte-cap hardening — adjacent mutators users can mash; new `team_seed_defaults` (60s/10) and `team_toggle` (60s/30) buckets added (BRAIN-144)
+
+### Bug fix (BRAIN-144, team-endpoints adjacent-AI-surface parity)
+
+`/api/team/seed-defaults` triggers brain payload work
++ multiple DB writes per call. The "Reseed from
+brain" button (templates/jarvis.html:1365) is one
+click in the UI; nothing throttles repeated firing.
+A user mashing the button burns DB cycles + the
+brain re-build cost.
+
+`/api/team/{slot}/toggle` flips enabled/disabled per
+specialist slot. Cheap operation but mutating, no
+rate-limit budget. Spam-toggle from a buggy client
+or curious user has no upper bound.
+
+Per Huntova engineering review on adjacent-mutating-
+endpoint parity (BRAIN-122/139/142): every mutating
+endpoint that triggers DB / AI work must enforce
+the same three front-door guarantees as the wizard
+surface — bounded body size, per-endpoint rate
+limit, RateLimit-* headers.
+
+Fix: two new buckets in `_RATE_BUCKETS` (60s/10 for
+seed-defaults, 60s/30 for toggle). Both handlers
+migrated to the standard pattern:
+- `_check_ai_rate(user_id, bucket="…")` →
+  `_rate_limit_429(...)` on burst block.
+- `_attach_burst_rate_headers(response, user_id, "…")`
+  on success.
+- `_enforce_body_byte_cap(...)` on seed-defaults
+  (toggle has no body).
+- `response: Response` parameter added to both
+  signatures for FastAPI to inject the response
+  object.
+
+6 new regression tests in
+`tests/test_team_endpoints_hardening.py`.
+
+771 / 771 tests passing.
+
+### Files
+
+- `server.py`: new `team_seed_defaults` + `team_toggle` buckets in `_RATE_BUCKETS`. `api_team_reseed` + `api_team_toggle` handlers migrated to the BRAIN-91/112/113/117 contract.
+- `tests/test_team_endpoints_hardening.py`: new — 6 tests guarding the parity contract.
+
+---
+
 ## 0.1.0a526 — May 4 2026 — Recovery release: my a525 (BRAIN-143 phase-5 prefill type-aware) push raced against the BRAIN-141 (a525) save-progress idempotency agent's commit and force-with-lease overwrote their server.py + test file from work-clean head; this release re-applies BOTH BRAIN-141 + BRAIN-143 cleanly under a526 (BRAIN-RECOVERY-2)
 
 ### Recovery (a525 double-tag race)

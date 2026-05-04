@@ -523,6 +523,8 @@ _RATE_BUCKETS = {
     "wizard_status": (60, 120),         # cheap one-shot
     "chat": (60, 30),                   # /api/chat — interactive
     "lead_feedback": (60, 20),          # /api/lead-feedback — adjacent
+    "team_seed_defaults": (60, 10),     # /api/team/seed-defaults — expensive
+    "team_toggle": (60, 30),            # /api/team/{slot}/toggle — cheap mutator
 }
 
 _rate_state: dict[str, dict[int, list]] = {}  # bucket -> user_id -> [timestamps]
@@ -12462,9 +12464,18 @@ async def api_team_update(slot: str, request: Request,
 
 
 @app.post("/api/team/{slot}/toggle")
-async def api_team_toggle(slot: str, user: dict = Depends(require_user)):
+async def api_team_toggle(slot: str, response: Response, user: dict = Depends(require_user)):
     """Quick on/off for a specialist. Does not delete the row — disabled
-    members just get skipped by the dispatcher."""
+    members just get skipped by the dispatcher.
+
+    a527 (BRAIN-144): adjacent-mutating-endpoint
+    hardening parity — `team_toggle` rate-limit
+    bucket + RateLimit-* headers on success. No
+    body byte-cap (no body parsed).
+    """
+    if _check_ai_rate(user["id"], bucket="team_toggle"):
+        return _rate_limit_429(user["id"], "team_toggle", "Too many team toggles. Wait a moment.")
+    _attach_burst_rate_headers(response, user["id"], "team_toggle")
     cur = await db.get_team_member(user["id"], slot)
     if not cur:
         return JSONResponse({"ok": False, "error": "unknown slot"}, status_code=404)
@@ -12474,10 +12485,24 @@ async def api_team_toggle(slot: str, user: dict = Depends(require_user)):
 
 
 @app.post("/api/team/seed-defaults")
-async def api_team_reseed(request: Request, user: dict = Depends(require_user)):
+async def api_team_reseed(request: Request, response: Response, user: dict = Depends(require_user)):
     """Reset the user's team back to the brain-driven defaults. Wipes
     custom names + prompt_addendums. POST body: {overwrite: true} to
-    confirm; default behaviour is fill-only (insert missing slots)."""
+    confirm; default behaviour is fill-only (insert missing slots).
+
+    a527 (BRAIN-144): adjacent-mutating-endpoint
+    hardening parity. Reseed touches brain payload +
+    multiple DB writes per call; the "Reseed from brain"
+    button can fire it repeatedly. New
+    `team_seed_defaults` bucket (60s/10) plus
+    standard byte-cap + RateLimit-* headers.
+    """
+    if _check_ai_rate(user["id"], bucket="team_seed_defaults"):
+        return _rate_limit_429(user["id"], "team_seed_defaults", "Too many reseeds. Wait a moment.")
+    _attach_burst_rate_headers(response, user["id"], "team_seed_defaults")
+    _body_bytes, _too_large = await _enforce_body_byte_cap(request, _WIZARD_BODY_BYTES_MAX)
+    if _too_large is not None:
+        return _too_large
     try:
         body = await request.json()
     except Exception:
