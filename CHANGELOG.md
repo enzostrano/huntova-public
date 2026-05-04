@@ -6,6 +6,50 @@ Versioning: `0.1.0aNN` alpha increments. Public install path: `pipx install hunt
 
 ---
 
+## 0.1.0a1400 — May 4 2026 — Audit-sweep batch BRAIN-175..177 — email_service._scrub_header injection guard (17 tests pinning CRLF + C0-control strip / TAB preservation / RFC-5322 998-octet byte-cap / multibyte UTF-8 boundary safety / BCC-injection neutralisation), payments.handle_webhook signature + replay-window (12 tests pinning STRIPE_WEBHOOK_SECRET-required / missing-Stripe-Signature reject / sig-mismatch reject / a291 5min-past + 60s-future replay-window / multi-v1 key-rotation accept / hmac.compare_digest constant-time), config._env quote-strip + tier-model resolution (15 tests pinning .env-paste-quote-strip + per-provider tier-models)
+
+### Lockdown bundle (BRAIN-175..177)
+
+44 new tests across 3 modules. Zero source changes.
+
+**BRAIN-175 — email_service._scrub_header (17 tests)**
+- CR / LF replaced with space → no header break possible.
+- C0 control bytes (0x00-0x1F except TAB) stripped.
+- TAB preserved (legal in headers).
+- RFC 5322 998-octet byte-cap (NOT codepoint-cap, a292 fix) — multi-byte UTF-8 safe at the boundary.
+- BCC-injection attack payload (`subject\\r\\nBcc: attacker@evil.com`) neutralised: SMTP sees one header value, not two.
+- None / empty / non-string defensive returns.
+
+**BRAIN-176 — payments.handle_webhook (12 tests)**
+- Empty `STRIPE_WEBHOOK_SECRET` → reject (no-secret-no-bypass).
+- Missing `Stripe-Signature` header → reject.
+- Malformed sig header (no `t=` / no `v1=`) → reject.
+- Wrong v1 sig → reject ("Invalid signature").
+- a291 replay-window: timestamps >5min old → reject.
+- a291 replay-window: timestamps >60s in future → reject.
+- Multiple v1 sigs (key rotation) → any matching accepted.
+- Malformed JSON payload → reject.
+- Event missing `type` → reject.
+- Event missing `id` (idempotency-tracker requirement) → reject.
+- Source uses `hmac.compare_digest` (timing-attack-safe).
+
+**BRAIN-177 — config._env + tier-model resolution (15 tests)**
+- Quote-strip handles `"value"` and `'value'` from .env-template paste-in-shell scenarios.
+- Mismatched quotes preserved (`'foo` stays `'foo`).
+- Inner quotes preserved (`a"b"c` round-trips).
+- Whitespace stripped before quote-check.
+- Default value also quote-stripped.
+- Empty / unset → "" (str, not None).
+- `_tier_models_for_provider` returns dict with `agency` / `growth` / `free` keys; resolves correctly for anthropic / openai / ollama / unknown providers; all values non-empty str.
+
+### Files
+- `tests/test_email_header_injection_audit.py`: new — 17 tests.
+- `tests/test_stripe_webhook_audit.py`: new — 12 tests.
+- `tests/test_config_env_audit.py`: new — 15 tests.
+- `cli.py` + `pyproject.toml` + `CHANGELOG.md`. Versions a1201-a1399 reserved for parallel agents.
+
+---
+
 ## 0.1.0a1200 — May 4 2026 — Audit-sweep batch BRAIN-171..174 — secrets_store get/list/delete read fallback semantics across all 3 tiers (15 tests), cli_schedule time-parser + chain-builder (18 tests), cli_pulse since-parser + ISO-parser (16 tests), secrets_store._derive_key OWASP-2024-min 600_000 PBKDF2 iterations + persisted .salt + a303 fallback contracts (7 tests)
 
 ### Lockdown bundle (BRAIN-171..174)
