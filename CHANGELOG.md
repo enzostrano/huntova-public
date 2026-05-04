@@ -6,6 +6,28 @@ Versioning: `0.1.0aNN` alpha increments. Public install path: `pipx install hunt
 
 ---
 
+## v0.1.0a2004 — May 4 2026 — Test-only audit sweep on domain-fail counter + mega-corp blocklist
+
+### What we audited
+- `app.record_domain_fail` — increments per-domain failure counts that drive auto-blocking.
+- `app.is_blocked` mega-corp branch — rejects URLs matching the Fortune-500 / never-B2B-prospect domain list.
+
+### Tests added
+- `tests/test_record_domain_fail_audit.py` — 9 tests pinning bug-#69 `_hostish_netloc` routing (schemeless URLs record under the same key `is_blocked` reads), accumulator semantics, schemeless-and-schemed convergence, www-prefix normalisation, auto-block-after-2-fails threshold.
+- `tests/test_is_blocked_megacorp_audit.py` — 11 tests pinning Fortune-500 / news / retail / event-platform domain blocking, subdomain-suffix matching, schemeless-URL gate (bug-#69), substring-only-no-match defence (`notgoogle.com` is allowed), 2+ fails override.
+
+### What this protects
+- Domain-fail counter — bug-#69 root cause was schemeless URLs writing under `""` key while `is_blocked` read under `"competitor.com"`. Both sides silently no-op'd. Tests pin the convergence so a future regression on either function breaks both.
+- Mega-corp filter — a regression to substring-match would block `notgoogle.com` and `googleish.com`; subdomain-suffix is the right semantics.
+
+### Backwards compat
+- None. Test-only release — zero source changes.
+
+### Migration
+- None. `pipx upgrade huntova`.
+
+---
+
 ## v0.1.0a2003 — May 4 2026 — Test-only audit sweep on user-blocklist filter + lead-id helper
 
 ### What we audited
