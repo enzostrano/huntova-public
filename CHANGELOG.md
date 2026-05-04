@@ -6,6 +6,34 @@ Versioning: `0.1.0aNN` alpha increments. Public install path: `pipx install hunt
 
 ---
 
+## 0.1.0a720 — May 4 2026 — SQL-translation invariant audit on `db_driver.py` (`_pg_to_sqlite`) — pin GREATEST→MAX / LEAST→MIN, SERIAL PRIMARY KEY → INTEGER PK AUTOINCREMENT (incl. extra whitespace), FOR UPDATE stripped (case-insensitive), `(xmax = 0) AS <alias>` → `1 AS <alias>` preserving alias and tolerant of whitespace, `%s` → `?` while preserving `%%` literals and `%(name)s` named params, idempotency on second pass, empty-string + None tolerance, multi-replacement single-pass chained, `get_driver()` singleton, SQLite driver `translate_sql`/placeholder contract (BRAIN-161)
+
+### Lockdown (BRAIN-161, db_driver SQL translation)
+
+`_pg_to_sqlite` is the regex pipeline that lets db.py keep its PostgreSQL dialect while running on SQLite in local mode. A single regex regression silently breaks queries against SQLite — `apply_credit_delta` crashed with "no such function: GREATEST" before that translation was added.
+
+19 new tests in `tests/test_db_driver_translation_audit.py` pin every regex hop:
+
+- `GREATEST(...)` → `MAX(...)` (case-insensitive: greatest / Greatest / GREATEST / gReAtEsT).
+- `LEAST(...)` → `MIN(...)`.
+- `SERIAL PRIMARY KEY` → `INTEGER PRIMARY KEY AUTOINCREMENT`, tolerant of multi-space / mixed-case.
+- `FOR UPDATE` stripped, case-insensitive + whitespace-tolerant.
+- `(xmax = 0) AS <alias>` → `1 AS <alias>`, alias preserved through extra whitespace.
+- `%s` positional placeholders → `?`; `%%` literal preserved; `%(name)s` named parameters preserved.
+- Idempotency: second translation pass is a no-op.
+- Empty string and `None` inputs handled without raising.
+- Chained query exercising all 5 rewrites translates correctly in one pass.
+- `get_driver()` returns the same driver instance across calls.
+- SQLite driver's `translate_sql` invokes `_pg_to_sqlite`; `placeholder == "?"`.
+
+No source changes. 19/19 tests pass.
+
+### Files
+- `tests/test_db_driver_translation_audit.py`: new — 19 tests.
+- `cli.py` + `pyproject.toml` + `CHANGELOG.md`. Versions a711-a719 reserved for parallel agents.
+
+---
+
 ## 0.1.0a710 — May 4 2026 — Invariant audit on `runtime.py` (`CAPABILITIES`) — pin `_truthy` case-insensitive accept-set + reject-set, `_resolve` defaults for unknown / blank / whitespace-padded `APP_MODE`, local-mode flag defaults (off-by-default except single_user + public_share), cloud-mode flag defaults (on-by-default), `google_oauth_enabled` tracks `GOOGLE_CLIENT_ID` presence, `frozen=True` mutation block, `to_dict()` field-set, `get_capabilities()` live singleton, `is_local()` / `is_cloud()` agree with mode (BRAIN-160)
 
 ### Lockdown (BRAIN-160, runtime capability invariants)
