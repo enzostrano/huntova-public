@@ -6,6 +6,35 @@ Versioning: `0.1.0aNN` alpha increments. Public install path: `pipx install hunt
 
 ---
 
+## 0.1.0a1600 — May 4 2026 — Audit-sweep batch BRAIN-181..183 — cli_deliverability SPF/DMARC parser invariants (17 tests pinning _check_spf RFC-7208-multiple-records-fail + +all/?all/missing-all warn + -all/~all ok + case-insensitive, _check_dmarc no-record-fail + p=none/quarantine warn + p=reject ok), cli_approve pending-detection + score-band (18 tests pinning _is_pending sent-status filter + audit-wave-28 awaiting-approval-requires-email + fit≥8 path + missing/whitespace email defense + status-priority-over-score, _score_band 8/6/0 boundaries), cli_migrate CSV-import helpers (25 tests pinning _autodetect linkedin-priority audit-wave-27 + first-match-wins + canonical-claimed-once + case-insensitive, _parse_map_overrides parsing + skip-invalid + whitespace strip, _normalise_row contact_name synthesis + fit_score clamp + drop-empty, _make_lead_id stability/uniqueness/seed-priority, _dedup_keys https-strip + name-fallback-without-email + email-makes-name-irrelevant)
+
+### Lockdown bundle (BRAIN-181..183)
+
+60 new tests across 3 modules. Zero source changes.
+
+**BRAIN-181 — cli_deliverability.py SPF/DMARC parsers (17 tests)**
+- `_check_spf` rejects no record, multiple records (RFC 7208 violation), `+all` / `?all` / missing-all (warn); accepts `-all` / `~all` (ok); case-insensitive parsing.
+- `_check_dmarc` rejects no record, warns on `p=none` / `p=quarantine` / unparseable, accepts `p=reject`.
+
+**BRAIN-182 — cli_approve.py (18 tests)**
+- `_is_pending`: already-sent leads filtered (any of email_sent / followed_up / replied / meeting_booked / won); approved/rejected status excluded; awaiting_approval requires contact_email (audit-wave-28 fix); fit≥8 path requires email; missing / whitespace / None email always blocks.
+- `_score_band` boundaries (≥8 high, ≥6 medium, else low); defensive on None / non-numeric / weird types.
+
+**BRAIN-183 — cli_migrate.py CSV import (25 tests)**
+- `_autodetect` linkedin-priority (audit-wave-27 fix — `LinkedIn URL` no longer claimed as `org_website`); first-match-wins; canonical claimed at-most-once; None header skipped; case-insensitive.
+- `_parse_map_overrides`: `key=value` parsing; invalid lines skipped; empty-key / empty-value skipped; whitespace stripped; None iterable defended.
+- `_normalise_row`: contact_name synthesis from first+last; fit_score clamped to 0..10; unparseable fit_score dropped (not stored as garbage); whitespace stripped; empty values dropped (not stored as "").
+- `_make_lead_id`: stable for same input; different for different; seed priority (website > email > org > items-tuple); empty lead doesn't crash.
+- `_dedup_keys`: https-strip + trailing-slash normalisation; name fallback when no email (so two people at same company aren't silently merged); email makes name irrelevant.
+
+### Files
+- `tests/test_cli_deliverability_audit.py`: new — 17 tests.
+- `tests/test_cli_approve_audit.py`: new — 18 tests.
+- `tests/test_cli_migrate_audit.py`: new — 25 tests.
+- `cli.py` + `pyproject.toml` + `CHANGELOG.md`. Versions a1501-a1599 reserved for parallel agents.
+
+---
+
 ## 0.1.0a1500 — May 4 2026 — Audit-sweep batch BRAIN-178..180 — cli_memory.py helper invariants (26 tests pinning _safe_int defensive None/empty/non-numeric/float-truncate, _score_bucket boundary cases, _score_match org_name 3x weighted + case-insensitivity + None handling, _yaml_scalar None→~ + lowercase booleans + reserved-char quoting + multiline block scalar), cli_benchmark.py helper invariants (19 tests pinning _approx_tokens ≥1-on-empty + unknown-provider-default + _est_cost zero-on-unknown + _pct empty/min/max/median/sorts-input + _parse_score none-on-empty/non-JSON + markdown-fence strip + 0..10 clamp + ≥3-of-5-keys-required), cli_logs.py log-level + since-parser (18 tests pinning _level_of error-status priority + regex matching, _parse_since s/m/h/d units + case-insensitive + UTC, _ts_short 19-char truncation + T→space)
 
 ### Lockdown bundle (BRAIN-178..180)
