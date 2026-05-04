@@ -198,7 +198,7 @@ Three things to check:
 - **Subject line.** Round 73's GTM brainstorm flagged "scraper" +
   "leads" + a personalisation token as a near-perfect spam-filter
   match. The bundled subject is `Open-source alternative to Apollo
-  for [Their Agency]` — see `docs/LAUNCH.md` for the locked subject.
+  for [Their Agency]`.
 - **Send velocity.** Stagger 50 sends in batches of 10 every
   10 minutes — Google Workspace flags single-domain bursts.
 

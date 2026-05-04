@@ -71,7 +71,7 @@ A hosted version of Huntova exists at `huntova.com` for users who don't want to 
 
 ### Account deletion
 
-Cloud users can request full deletion via `Account → Delete account` (or by emailing `enzostrano@gmail.com`). Within 30 days we erase: account record, leads, hunt history, drafts, learning data, audit log lines tied to your user_id. Anonymized aggregate counters (total signups, total hunts) survive.
+Cloud users can request full deletion via `Account → Delete account` (or by opening an issue at <https://github.com/enzostrano/huntova-public/issues>). Within 30 days we erase: account record, leads, hunt history, drafts, learning data, audit log lines tied to your user_id. Anonymized aggregate counters (total signups, total hunts) survive.
 
 ---
 
@@ -99,4 +99,4 @@ Material changes are noted in `CHANGELOG.md` and dated. We don't backdate.
 
 ## Contact
 
-For privacy questions or to file a request: **enzostrano@gmail.com**.
+For privacy questions or to file a request: open an issue at <https://github.com/enzostrano/huntova-public/issues>.

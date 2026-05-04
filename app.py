@@ -838,19 +838,41 @@ def humanise_ai_error(exc, provider_name: str = "") -> str:
     the user knows which provider to fix ("Your OPENROUTER account
     is out of credits…").
     """
-    s = str(exc)[:240]
+    raw = str(exc)
+    # a2010 (BRAIN-PROD-8): bumped the keep-buffer from 240 → 800 so
+    # the generic fallback stops cutting provider error strings mid-
+    # sentence. Was visibly truncating the Groq TPM error at "please
+    # reduce your mess" so users couldn't read what to do.
+    s = raw[:800]
+    s_match = raw[:240]  # keep the original short slice for code-detection regex perf
     p = (provider_name or "your AI provider").upper() if provider_name else "your AI provider"
-    s_low = s.lower()
-    if "401" in s or "unauthorized" in s_low or "invalid_api_key" in s_low:
+    s_low = s_match.lower()
+    if "401" in s_match or "unauthorized" in s_low or "invalid_api_key" in s_low:
         return (f"Your {p} API key is invalid or missing. "
                 f"Check Settings → Engine → {p} key, then retry.")
-    if "402" in s or "credit" in s_low or "insufficient" in s_low or "payment" in s_low:
+    if "402" in s_match or "credit" in s_low or "insufficient" in s_low or "payment" in s_low:
         return (f"Your {p} account is out of credits. "
                 f"Top up your provider account, then retry.")
-    if "429" in s or ("rate" in s_low and "limit" in s_low):
+    # a2010 (BRAIN-PROD-8): 413 / too-large / TPM-cap branch. The
+    # backend is doing map-reduce on long crawls now, but if even a
+    # single chunk lands too big for an extreme low-cap provider we
+    # surface a friendly explanation pointing at the provider switch
+    # rather than letting the raw "Request too large for model …"
+    # leak to the user.
+    if ("413" in s_match
+            or "request too large" in s_low
+            or "request was too large" in s_low
+            or "context_length_exceeded" in s_low
+            or "tokens per minute" in s_low
+            or "tokens per day" in s_low):
+        return (f"{p} rejected the request as too large for its rate cap "
+                f"(common on free tiers — Groq qwen3-32b free is 6,000 tokens/min). "
+                f"Switch to Gemini Flash (free, 1M tokens/min) or top up "
+                f"OpenRouter once for higher caps, then retry.")
+    if "429" in s_match or ("rate" in s_low and "limit" in s_low):
         return (f"{p} is rate-limiting. Wait 30-60s and retry, "
                 f"or switch provider in the Engine dropdown.")
-    if "404" in s and "model" in s_low:
+    if "404" in s_match and "model" in s_low:
         return (f"The configured model isn't available on {p}. "
                 f"Check Settings → Engine → preferred model.")
     if "timeout" in s_low or "timed out" in s_low:

@@ -78,4 +78,4 @@ These terms are governed by the laws of the United Kingdom (specifically England
 
 ## 12. Contact
 
-`enzostrano@gmail.com`.
+Open an issue at <https://github.com/enzostrano/huntova-public/issues>.

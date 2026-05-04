@@ -5663,8 +5663,16 @@ body.hv-has-update-banner{padding-top:var(--hv-update-banner-h, 38px)}
               if (nodes[i].nodeType === 3) { pill.removeChild(nodes[i]); }
             }
             pill.appendChild(document.createTextNode(' Configured'));
-            // Clear the input so we don't re-show the just-saved key in plain.
-            if (keyInput) keyInput.value = '';
+            // a2010 (BRAIN-PROD-8): only clear the input after a Save
+            // (alsoTest === false). Was clearing on Test too, which
+            // blew away the user's key the moment they pressed 🔌 Test
+            // — they then couldn't 💾 Save what they'd just verified
+            // because the field was empty, the next Save fired with
+            // "" and the backend treated it as "remove key". Forced
+            // an awkward Save-before-Test order. Now Test verifies
+            // without touching the input, Save is the only path that
+            // clears it.
+            if (keyInput && !alsoTest) keyInput.value = '';
             loadStatus();
             // a331: refresh the provider-config cache so the chat-dock
             // and team-edit Engine dropdowns stop greying out the
@@ -5776,10 +5784,10 @@ body.hv-has-update-banner{padding-top:var(--hv-update-banner-h, 38px)}
     const h = document.createElement('h3'); h.className = 'set-section-h'; h.textContent = 'Outreach & email';
     form.appendChild(h);
 
-    const fromName = _input({ type: 'text', placeholder: 'Enzo Strano' });
+    const fromName = _input({ type: 'text', placeholder: 'Your Name' });
     form.appendChild(_setRow('From name', 'Display name on outbound mail.', fromName));
 
-    const fromEmail = _input({ type: 'email', placeholder: 'enzo@example.com' });
+    const fromEmail = _input({ type: 'email', placeholder: 'you@example.com' });
     form.appendChild(_setRow('From email', 'Defaults to your authenticated SMTP user (a227).', fromEmail));
 
     const booking = _input({ type: 'text', placeholder: 'https://cal.com/your-handle' });

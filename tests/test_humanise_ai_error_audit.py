@@ -102,15 +102,21 @@ def test_provider_uppercased():
     assert "OPENAI" in msg
 
 
-def test_message_truncated_at_240_chars():
+def test_message_truncated_at_800_chars():
     """Error message body capped to keep the user-facing string
     readable. Bug class: a 50KB OpenAI JSON dump getting embedded
-    in the chat would overflow the UI."""
+    in the chat would overflow the UI.
+
+    a2010 (BRAIN-PROD-8): cap raised from 240 → 800 because the prior
+    cap was visibly truncating Groq TPM error strings mid-sentence
+    ("...please reduce your mess"), leaving users unable to read the
+    actionable part of the provider's error. The 800-char cap still
+    bounds the response well under any sane UI overflow risk."""
     long_msg = "x" * 5000
     msg = _humanise(Exception(long_msg), "openai")
-    # The original message portion in the fallback must be capped.
-    # 240 char clip + provider label + classname → bounded.
-    assert len(msg) < 500
+    # Fallback contains provider label + classname + truncated body.
+    # 800 char clip + ~80 chars of label/classname/decoration ≈ ≤900.
+    assert len(msg) < 1100, f"unexpected length {len(msg)}: {msg[:200]}…"
 
 
 def test_returns_string_for_all_error_types():

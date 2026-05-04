@@ -2,7 +2,7 @@
 
 ## Reporting a vulnerability
 
-Email **enzostrano@gmail.com** with:
+Use GitHub's **private vulnerability reporting** at <https://github.com/enzostrano/huntova-public/security/advisories/new> with:
 - A description of the vulnerability and its potential impact
 - Reproduction steps (or a proof-of-concept)
 - The version of Huntova affected (`huntova version`)

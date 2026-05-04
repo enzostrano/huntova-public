@@ -6,6 +6,68 @@ Versioning: `0.1.0aNN` alpha increments. Public install path: `pipx install hunt
 
 ---
 
+## v0.1.0a2011 — May 4 2026 — Brain wizard scan: parallel map-reduce + missing radar-loader CSS (BRAIN-PROD-9)
+
+### Bug fixes (two a2010 follow-ups landed within hours of release)
+
+**1. Brain wizard "Building your ICP profile" appears stuck.**
+a2010 fixed the 413 by switching `_analyse_site_ai_sync` to map-reduce, but the map step ran chunks sequentially. For a multi-page B2B website (typical case ~30 pages, ~80k chars → 9 chunks), nine sequential AI calls at 3-8s each piled into 30-70s of wall-clock work — and the frontend phase-rotator only has 7 phases × 7s = 49s of phases before it pegs at "Building your ICP profile" indefinitely. Looked stuck.
+
+Fix: `concurrent.futures.ThreadPoolExecutor` with `max_workers=min(4, len(chunks))` parallelises the map step. 9 chunks at 4-wide takes about ~3 sequential rounds = ~15-25s wall-time instead of 30-70s. Chunk results are collected via `as_completed` and re-sorted by original index before passing to the reduce step so the positional "across all the case studies…" cues in the analysis prompt stay coherent.
+
+The 4-wide cap is conservative — most providers can handle higher concurrency, but it stays under any free-tier RPM cap (Groq 30 RPM, OpenRouter `:free` 20 RPM) for short-burst windows. Per-chunk failure still fault-tolerant: one failed chunk doesn't abort the scan; the reduce step runs on whatever facts came back successfully.
+
+**2. Wizard scan radar-loader animation not animating.**
+The wizard scan card (`templates/jarvis.html` `_showScanAnim`, line ~4250) builds a radar div with classes `hv-deep-loader-ring`, `hv-deep-loader-sweep`, `hv-deep-loader-core`, etc. — but the CSS for those classes was injected at runtime ONLY by a different code path (`templates/jarvis.html` line ~3950 — the deep-research subagent loader). If the user opened the brain wizard before ever triggering deep-research, the runtime injection never fired and the radar rendered as bare divs with a static 🌐 emoji. Net effect: looks like the loading animation is broken.
+
+Moved the canonical declaration into `static/style.css` so every consumer gets the radar regardless of which card was rendered first. The runtime injection in jarvis.html stays as harmless redundancy (gated by `getElementById('_hvDeepLoaderStyle')`).
+
+### Files
+- `server.py` — `_analyse_site_ai_sync` map step now uses `ThreadPoolExecutor` with bounded concurrency.
+- `static/style.css` — `.hv-deep-loader-*` classes + `hvDeepRing` / `hvDeepSweep` / `hvDeepPulse` / `hvDeepDots` keyframes added.
+- `cli.py` + `pyproject.toml` + `CHANGELOG.md`.
+
+### Tests
+- All 1684 existing tests still pass — no test changes needed since the public behaviour of `_analyse_site_ai_sync` is unchanged (same input → same output, just faster).
+
+---
+
+## v0.1.0a2010 — May 4 2026 — Brain-page TPM rejection fix + Settings test-button no longer wipes API key (BRAIN-PROD-8)
+
+### Bug fixes (two real defects in the dashboard)
+
+**1. Brain-page website scan failed on free-tier providers with low TPM caps.**
+The brain wizard's optional "scan my website" step crawled up to 29 pages, then fed up to 18,000 chars of multi-page content into a single `_analyse_site_ai_sync` call. The full prompt (analysis schema + system message + content + completion budget) landed at ~17.5k tokens. That fit Anthropic / OpenAI / Gemini / paid Groq tiers fine but was rejected with HTTP 413 by **Groq's free tier**, which caps `qwen/qwen3-32b` at **6,000 TPM** (per [Groq's published rate limits](https://console.groq.com/docs/rate-limits)). The user-visible failure was *"Crawled 29 pages successfully via sitemap, but the AI summarisation step failed. Request too large for model `qwen/qwen3-32b` ... please reduce your mess..."* — and the second half of the error was truncated mid-sentence by `humanise_ai_error`'s 240-char cap.
+
+Pro-grade fix is map-reduce, the same pattern used by [LangChain `MapReduceDocumentsChain`](https://python.langchain.com/docs/versions/migrating_chains/map_reduce_chain/), the OpenAI cookbook long-document summarisation recipe, and Anthropic's prompt-caching guidance for multi-document analysis. Single-shot path is preserved for sites small enough to fit; the map-reduce path activates only when the crawl exceeds the safe single-shot budget.
+
+- `_SCAN_SAFE_SINGLE_SHOT_CHARS = 12,000` — fits any provider's per-request budget after schema + system + completion are accounted for.
+- `_SCAN_CHUNK_CHARS = 9,000` with `_SCAN_CHUNK_OVERLAP = 400` — each map-step call lands ~3.5k tokens total, well under Groq's 6k TPM floor and trivial elsewhere.
+- Map step uses a tight extract-only prompt (~600 tokens) and returns a 1.5k-token JSON of facts per chunk.
+- Reduce step concatenates the per-chunk facts into a compressed brief and runs the full `_build_scan_prompt` analysis against the brief.
+- Per-chunk fault tolerance: a single chunk failure doesn't abort the whole scan — partial coverage beats reverting to truncated single-shot.
+
+Net effect: rich multi-page sites (80k+ chars of crawled content) now get every page analysed instead of being truncated at 18k chars. Free-tier providers no longer 413. Quality up; failure mode gone.
+
+`humanise_ai_error` also gains a 413/too-large/TPM-cap branch that returns a friendly message naming the actual cap and pointing at remediation paths (Gemini Flash for free 1M TPM, OpenRouter top-up for paid models). The truncation-cap was raised from 240 → 800 chars so the generic fallback stops cutting provider error strings mid-sentence.
+
+**2. Settings → API keys: pressing 🔌 Test wiped the key field, forcing an awkward Save-before-Test order.**
+Both buttons go through `_doSave(alsoTest)` which posts to `/api/setup/key`. After a successful response the JS cleared `keyInput.value = ''` unconditionally — so pressing Test (which saves AND tests) blew away the user's pasted key, the next Save fired with `""`, and the backend treated it as "remove key" → error. Users had to discover the workaround of saving first, then testing, or every flow lost their key. Now Test verifies without touching the input; only Save (`alsoTest === false`) clears it.
+
+### Tests
+- `tests/test_wizard_prompt_injection_defense.py` — extended to inspect the full scan pipeline (`_analyse_site_ai_sync` + `_build_scan_prompt` + `_extract_chunk_facts_sync` + `_scan_single_shot`) so the BRAIN-77 fence + injection-warning invariants hold post-refactor and any future helper added to the pipeline is force-checked.
+- `tests/test_humanise_ai_error_audit.py::test_message_truncated_at_240_chars` renamed to `test_message_truncated_at_800_chars` with the new cap pinned.
+- 1684 total tests pass.
+
+### Files
+- `server.py` — `_build_scan_prompt`, `_scan_chunk_text`, `_extract_chunk_facts_sync`, `_scan_single_shot` factored out; `_analyse_site_ai_sync` now picks single-shot vs map-reduce by content length.
+- `app.py` — `humanise_ai_error` 413/too-large branch + 800-char fallback cap.
+- `templates/jarvis.html` — `_doSave` only clears the API-key input on Save, not Test.
+- `tests/test_wizard_prompt_injection_defense.py`, `tests/test_humanise_ai_error_audit.py` — updated.
+- `cli.py` + `pyproject.toml` + `CHANGELOG.md`.
+
+---
+
 ## v0.1.0a2009 — May 4 2026 — Test-only audit sweep on invisible-Unicode canonicalizer (BRAIN-85 idempotency cache)
 
 ### What we audited
@@ -440,7 +502,7 @@ Versioning: `0.1.0aNN` alpha increments. Public install path: `pipx install hunt
 47 new tests across 3 modules.
 
 **BRAIN-168 — tui.py sanitization + audit (12 tests, 1 src fix)**
-- `_TAGLINES`: removed the line "default model: Claude. yes, the irony of an AI built using AI is not lost on me." per Enzo's no-AI-mentions standing order. Replaced with "default model: Anthropic Claude. swap to any of 13 supported providers any time." (names a supported provider, doesn't credit AI authorship).
+- `_TAGLINES`: removed the line "default model: Claude. yes, the irony of an AI built using AI is not lost on me." per the no-AI-mentions copy standard. Replaced with "default model: Anthropic Claude. swap to any of 13 supported providers any time." (names a supported provider, doesn't credit AI authorship).
 - Tests pin: no AI-authorship phrases in any tagline; ANSI helpers strip color when stdout isn't a TTY; `open_url` rejects non-http(s) schemes (`file://`, `javascript:`, `ftp://`, bare hostnames); `open_url` honours `HV_NO_BROWSER` and `CI` env vars; `detect_browser_open_support` flags SSH-without-DISPLAY; banner is ASCII-only (mojibake-safe); `Spinner` falls back to plain print on non-TTY (no `\r` carriage-return spam in log files).
 
 **BRAIN-169 — auth.py token + password helpers (17 tests)**
@@ -661,7 +723,7 @@ No source changes. 18/18 tests pass.
 
 ### Bug fix (BRAIN-PROD-5, in-browser update flow — second half of the CSRF parity fix)
 
-Enzo: "the update button still doesnt work in the app by the way... spawns an error". a511 (BRAIN-PROD-1) thought it had fixed this by widening the `_CSRF_COOKIE_HTML_GET_ALLOWLIST` to include `/jarvis` so the `hv_csrf` cookie was actually *set* on the response. It was — but the cookie carried `Secure=True` because `set_csrf_cookie` keyed the Secure flag off `PUBLIC_URL.startswith("https")`, and `PUBLIC_URL` defaults to the cloud production domain (`https://huntova.com`) **even when the local pipx-installed CLI is binding to plain `http://127.0.0.1:5050`**. Browsers that enforce `Secure` strictly on non-HTTPS origins (Firefox <75, Safari, Brave with strict cookies, any user reverse-proxying through HTTP) silently dropped the cookie — the dashboard JS then read `document.cookie` as empty for `hv_csrf`, the auto-injecting fetch wrapper omitted the `X-CSRF-Token` header on the POST to `/api/update/run`, and the server returned `403 {"ok": false, "error": "CSRF validation failed"}`. The user saw the modal flash "✗ Could not start upgrade" — the same generic "spawns an error" surfacing as before.
+Bug report from a maintainer-side test: "the update button still doesn't work in the app — spawns an error." a511 (BRAIN-PROD-1) thought it had fixed this by widening the `_CSRF_COOKIE_HTML_GET_ALLOWLIST` to include `/jarvis` so the `hv_csrf` cookie was actually *set* on the response. It was — but the cookie carried `Secure=True` because `set_csrf_cookie` keyed the Secure flag off `PUBLIC_URL.startswith("https")`, and `PUBLIC_URL` defaults to the cloud production domain **even when the local pipx-installed CLI is binding to plain `http://127.0.0.1:5050`**. Browsers that enforce `Secure` strictly on non-HTTPS origins (Firefox <75, Safari, Brave with strict cookies, any user reverse-proxying through HTTP) silently dropped the cookie — the dashboard JS then read `document.cookie` as empty for `hv_csrf`, the auto-injecting fetch wrapper omitted the `X-CSRF-Token` header on the POST to `/api/update/run`, and the server returned `403 {"ok": false, "error": "CSRF validation failed"}`. The user saw the modal flash "✗ Could not start upgrade" — the same generic "spawns an error" surfacing as before.
 
 Three-layer fix:
 
@@ -687,7 +749,7 @@ Three-layer fix:
 
 ### Bug fix (BRAIN-PROD-6, Settings "clear-and-save" silent no-op)
 
-Enzo reported the Settings panel "feels overally bugged in some places". Audit found the cause: the **Engine** and **Defaults** tabs each had a save handler that only included a field in the POST patch when the input was non-empty. Clearing the model override, temperature, max-leads, or countries field and clicking Save shipped a patch without that key — `api_save_settings` left the prior persisted value untouched, the toast said "Saved", and the next page load re-rendered the old value. Symptom: the form felt buggy because edits were silently ignored.
+User report: the Settings panel "feels overally bugged in some places". Audit found the cause: the **Engine** and **Defaults** tabs each had a save handler that only included a field in the POST patch when the input was non-empty. Clearing the model override, temperature, max-leads, or countries field and clicking Save shipped a patch without that key — `api_save_settings` left the prior persisted value untouched, the toast said "Saved", and the next page load re-rendered the old value. Symptom: the form felt buggy because edits were silently ignored.
 
 Twin fix:
 
@@ -7070,7 +7132,7 @@ All AI-error surfaces (chat, rewrite, scan, research, DNA, wizard-assist, specia
 
 ### Bug fixes
 
-- **`/api/wizard/status` now auto-heals stale top-level fields from `_wizard_answers`** (`server.py:7782-7820`). Pre-a322 the save-progress mapping used the wrong field names, so users could end up with `_wizard_answers.company_name = "SicilyCast"` while top-level `company_name = "Acme"` (the previous run's value). The trained-summary card showed the stale name forever. Now: every wizard status fetch checks for drift between the answers blob and the top-level fields and copies the answers values over when they differ. Idempotent — once they match, the heal is a no-op. Existing-install users no longer need to do a full retrain to recover from the pre-a322 mapping bug.
+- **`/api/wizard/status` now auto-heals stale top-level fields from `_wizard_answers`** (`server.py:7782-7820`). Pre-a322 the save-progress mapping used the wrong field names, so users could end up with `_wizard_answers.company_name = "NewName"` while top-level `company_name = "Acme"` (the previous run's value). The trained-summary card showed the stale name forever. Now: every wizard status fetch checks for drift between the answers blob and the top-level fields and copies the answers values over when they differ. Idempotent — once they match, the heal is a no-op. Existing-install users no longer need to do a full retrain to recover from the pre-a322 mapping bug.
 
 - **Lead detail panel always re-fetches from the server on open** (`templates/jarvis.html:2380-2400`). Previously trusted the cached `_leads` array; during an active hunt a lead's `fit_score`, `email_status`, contact info, etc. could change between list-load and detail-open and the user was looking at minutes-stale data. Now: every `openLeadDetail` does a fresh `/api/leads` call before rendering. Cheap (single-table SELECT, single-user mode) and the user is already paying view-switch latency.
 
@@ -7080,7 +7142,7 @@ All AI-error surfaces (chat, rewrite, scan, research, DNA, wizard-assist, specia
 
 ### Hostinger marketing site
 
-- **Pushed `templates/landing.html` (a325 self-healing version) to `darkred-barracuda-643789.hostingersite.com`** via Hostinger MCP `hosting_deployStaticWebsite`. Verified live: page now serves `<span data-hv-version>v0.1.0a324</span>` baseline + the auto-update script tail. Every visitor's browser hits the GitHub Releases API on load and rewrites the version to whatever the actual latest tag is — Hostinger never needs to be re-deployed for future releases.
+- **Pushed `templates/landing.html` (a325 self-healing version) to the project's Hostinger static-site deployment**. Verified live: page now serves `<span data-hv-version>v0.1.0a324</span>` baseline + the auto-update script tail. Every visitor's browser hits the GitHub Releases API on load and rewrites the version to whatever the actual latest tag is — the static site never needs to be re-deployed for future releases.
 
 ---
 

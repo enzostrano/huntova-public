@@ -2185,4 +2185,76 @@ button:focus-visible,a:focus-visible,select:focus-visible,input:focus-visible,te
 .spinner svg{color:currentColor}
 
 /* Bars variant — pulsing rectangles */
+
+/* a2011 (BRAIN-PROD-9): deep-loader (radar) — used by the brain
+ * wizard scan card AND the deep-research subagent loader. Was
+ * previously injected at runtime as inline <style> in jarvis.html
+ * (line ~3950) but only by the deep-research path. The wizard
+ * scan card referenced the same classes but never ran the
+ * injection, so the radar rendered as bare divs with a static
+ * 🌐 emoji and no animation. Moved the canonical declaration
+ * here so every consumer gets the radar regardless of which
+ * card was rendered first. */
+.hv-deep-loader-ring,
+.hv-deep-loader-ring2 {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  border: 1px solid rgba(0, 229, 204, .35);
+  animation: hvDeepRing 2.4s ease-out infinite;
+}
+.hv-deep-loader-ring2 { animation-delay: 1.2s; }
+.hv-deep-loader-sweep {
+  position: absolute;
+  inset: 8px;
+  border-radius: 50%;
+  background: conic-gradient(from 0deg, rgba(0, 229, 204, 0) 0deg, rgba(0, 229, 204, .55) 80deg, rgba(0, 229, 204, 0) 110deg);
+  mask: radial-gradient(circle, transparent 32px, #000 33px);
+  -webkit-mask: radial-gradient(circle, transparent 32px, #000 33px);
+  animation: hvDeepSweep 2.2s linear infinite;
+}
+.hv-deep-loader-core {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  width: 54px;
+  height: 54px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 24px;
+  background: radial-gradient(circle, rgba(0, 229, 204, .18) 0%, rgba(0, 229, 204, .04) 70%);
+  border: 1px solid rgba(0, 229, 204, .45);
+  box-shadow: 0 0 24px rgba(0, 229, 204, .35);
+  animation: hvDeepPulse 1.6s ease-in-out infinite;
+}
+.hv-deep-dots::after {
+  content: "";
+  display: inline-block;
+  width: 18px;
+  text-align: left;
+  animation: hvDeepDots 1.4s steps(4, end) infinite;
+}
+@keyframes hvDeepRing {
+  0%   { transform: scale(.55); opacity: .9; }
+  100% { transform: scale(1.05); opacity: 0; }
+}
+@keyframes hvDeepSweep {
+  from { transform: rotate(0deg); }
+  to   { transform: rotate(360deg); }
+}
+@keyframes hvDeepPulse {
+  0%, 100% { transform: translate(-50%, -50%) scale(1);    box-shadow: 0 0 18px rgba(0, 229, 204, .30); }
+  50%      { transform: translate(-50%, -50%) scale(1.08); box-shadow: 0 0 32px rgba(0, 229, 204, .55); }
+}
+@keyframes hvDeepDots {
+  0%   { content: ""; }
+  25%  { content: "."; }
+  50%  { content: ".."; }
+  75%  { content: "..."; }
+  100% { content: ""; }
+}
+
 /* END OF STYLESHEET */

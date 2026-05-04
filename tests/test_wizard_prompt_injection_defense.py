@@ -117,16 +117,41 @@ def test_fence_helper_strips_embedded_sentinels():
 
 
 def test_scan_analysis_prompt_uses_fence_helper():
-    """Source-level: `_analyse_site_ai_sync` must call
-    `_fence_external_text` for `site_text` rather than
-    interpolating the raw value."""
-    from server import _analyse_site_ai_sync
-    src = inspect.getsource(_analyse_site_ai_sync)
-    assert "_fence_external_text" in src, (
+    """Source-level: somewhere in the scan AI pipeline (the entry
+    point `_analyse_site_ai_sync`, the prompt builder
+    `_build_scan_prompt`, the map-step extractor
+    `_extract_chunk_facts_sync`, or the single-shot reducer
+    `_scan_single_shot`) `_fence_external_text` must wrap
+    `site_text`/`chunk` rather than interpolating the raw value.
+
+    a2010 (BRAIN-PROD-8): the scan code was factored into a map-reduce
+    pipeline so the fence call now lives in the helper functions.
+    The source-level check inspects the full pipeline so the
+    refactor doesn't weaken the BRAIN-77 invariant — and so any
+    future helper added to the pipeline that handles untrusted
+    site_text either reuses the fence or fails this test."""
+    from server import (
+        _analyse_site_ai_sync,
+        _build_scan_prompt,
+        _extract_chunk_facts_sync,
+        _scan_single_shot,
+    )
+    combined = "\n".join(
+        inspect.getsource(fn)
+        for fn in (
+            _analyse_site_ai_sync,
+            _build_scan_prompt,
+            _extract_chunk_facts_sync,
+            _scan_single_shot,
+        )
+    )
+    assert "_fence_external_text" in combined, (
         "BRAIN-77 regression: scan AI prompt must wrap "
         "site_text in a fence — that's the highest-risk "
         "indirect-injection surface (we crawl arbitrary "
-        "websites and feed the text to the model)."
+        "websites and feed the text to the model). After the "
+        "BRAIN-PROD-8 map-reduce refactor the fence call must "
+        "live in at least one of the scan-pipeline helpers."
     )
 
 
@@ -159,14 +184,20 @@ def test_system_prompt_warns_about_fenced_data():
     """At least one wizard endpoint's system prompt must
     explicitly remind the model that fenced content is
     data-only. Without the system-prompt reminder, the helper
-    is decoration."""
+    is decoration.
+
+    a2010 (BRAIN-PROD-8): scan path is now map-reduce; include the
+    new helpers in the source-level inspection so the warning
+    coverage isn't lost in refactor."""
     src_files = []
     from server import (
-        _analyse_site_ai_sync, api_wizard_generate_phase5,
-        api_wizard_assist,
+        _analyse_site_ai_sync, _build_scan_prompt,
+        _extract_chunk_facts_sync, _scan_single_shot,
+        api_wizard_generate_phase5, api_wizard_assist,
     )
-    for fn in (_analyse_site_ai_sync, api_wizard_generate_phase5,
-               api_wizard_assist):
+    for fn in (_analyse_site_ai_sync, _build_scan_prompt,
+               _extract_chunk_facts_sync, _scan_single_shot,
+               api_wizard_generate_phase5, api_wizard_assist):
         src_files.append(inspect.getsource(fn))
     combined = "\n".join(src_files)
     has_warning = (
