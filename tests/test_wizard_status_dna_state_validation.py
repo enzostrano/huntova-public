@@ -117,16 +117,25 @@ def test_status_endpoint_uses_normalize_helper():
 
 
 def test_agent_control_uses_normalize_helper_for_parity():
-    """Source-level: agent_control must also use the same
-    helper. BRAIN-108's local enum check should be
-    refactored to call the shared helper for DRY + parity."""
+    """Source-level: agent_control must consult the same
+    enum-validation contract as the public read. BRAIN-108
+    pulled the enum literal up to module scope; BRAIN-109
+    introduced the shared `_normalize_dna_state`; BRAIN-120
+    extracted the entire gate behavior into
+    `_dna_state_gate_response`. Any of those satisfies the
+    parity invariant — single source of truth for the
+    state-machine contract."""
     from server import agent_control
     src = inspect.getsource(agent_control)
-    assert "_normalize_dna_state(" in src, (
-        "BRAIN-109 regression: agent_control must call the "
-        "shared `_normalize_dna_state` helper instead of "
-        "duplicating the enum logic. Single source of truth "
-        "for the state-machine contract."
+    assert (
+        "_normalize_dna_state(" in src
+        or "_dna_state_gate_response(" in src
+    ), (
+        "BRAIN-109 regression: agent_control must consult "
+        "the shared dna-state contract. Either via "
+        "`_normalize_dna_state` directly or via the "
+        "extracted `_dna_state_gate_response` (BRAIN-120). "
+        "Inline duplication forfeits the parity guarantee."
     )
 
 

@@ -6,6 +6,85 @@ Versioning: `0.1.0aNN` alpha increments. Public install path: `pipx install hunt
 
 ---
 
+## 0.1.0a489 — May 4 2026 — BRAIN-79's `_dna_state` precondition gate was inline in `agent_control`, leaving the precondition-before-billable ordering invariant unprotected (a future PR adding rate-limiting or quota accounting could insert state mutation before the gate without anything to catch it); extracted the gate to `_dna_state_gate_response(wizard_blob)` helper and added regression tests that codify the ordering at the source level (BRAIN-120)
+
+### Bug fix (BRAIN-120, fail-fast precondition ordering)
+
+`agent_control`'s `start` action gates on the BRAIN-78
+`_dna_state` field (BRAIN-79 + BRAIN-108). The current
+ordering is correct — the dna check runs BEFORE
+`agent_runner.start_agent` (which in cloud mode does
+`check_and_reset_credits`, the billable side effect).
+
+But the invariant was implicit. Nothing in the source
+codified that the gate must stay first. A future PR
+adding rate-limiting or paid-quota accounting to
+`agent_control` could accidentally insert state
+mutation BEFORE the gate, and there'd be no test to
+catch it. Per Huntova engineering review on fail-fast
+precondition ordering: deterministic state-machine
+rejections must run BEFORE any resource-governing side
+effect, AND the invariant must be testable.
+
+Fix: extract the inline 70-line gate into a single
+module-scope helper.
+
+- `_dna_state_gate_response(wizard_blob) -> dict | None`
+  near `_normalize_dna_state`. Returns `None` for
+  ready/unset (the BRAIN-79 happy paths). Returns a
+  blocking response dict matching the existing public
+  shapes (`dna_invalid_state`, `dna_pending`,
+  `dna_failed`) for everything else. Trims `_dna_error`
+  to 200 chars + the offending raw state to 80 chars
+  so a corrupted persisted value can't dump megabytes
+  into every blocked response.
+
+`agent_control` now calls the helper on the start
+branch:
+
+```python
+_w_for_dna = (await db.get_settings(user["id"]) or {}).get("wizard", {}) or {}
+_gate_block = _dna_state_gate_response(_w_for_dna)
+if _gate_block is not None:
+    return _gate_block
+result = await agent_runner.start_agent(...)
+```
+
+The relative position of `_dna_state_gate_response(`
+vs `agent_runner.start_agent(` is now the source-
+level invariant — a regression test asserts the
+former precedes the latter.
+
+Reusable: any future endpoint that needs to fail-
+closed on invalid wizard state can call the same
+helper.
+
+9 new regression tests in
+`test_dna_state_gate_precondition_ordering.py`:
+- Helper exists.
+- Allows ready / unset (legacy installs).
+- Blocks invalid / pending / failed with the
+  documented response shapes.
+- Source-level: agent_control uses the helper AND the
+  helper call appears before
+  `agent_runner.start_agent(`.
+- Defensive: `_dna_error` size-bounded.
+
+Plus three pre-existing BRAIN-108/109 source-level
+tests updated to accept the gate-helper indirection
+(the tests previously grepped for inline tokens that
+moved into the helper — invariant unchanged).
+
+563 / 563 tests passing.
+
+### Files
+
+- `server.py`: new `_dna_state_gate_response(wizard_blob)` module-scope helper near `_normalize_dna_state`. `agent_control`'s start action now calls the helper instead of duplicating the gate inline (~70 lines removed, replaced with a single call).
+- `tests/test_dna_state_gate_precondition_ordering.py`: new — 9 tests guarding the precondition-before-billable invariant.
+- `tests/test_agent_start_dna_state_enum.py` (BRAIN-108) + `tests/test_wizard_status_dna_state_validation.py` (BRAIN-109) + `tests/test_agent_start_dna_gate.py` (BRAIN-79): pre-existing source-level checks updated to accept the gate-helper indirection.
+
+---
+
 ## 0.1.0a488 — May 4 2026 — `_wizard_phase` and `_wizard_cursor` are state-machine coordinates that drive transitions, but the BRAIN-3 monotonic guard had no upper bound (a corrupted persisted 999999 won `max(999999, anything)` forever, locking the wizard); status emitted `phase` raw; cursor-clamp capture used the crashy `int(... or 0)` pattern; new `_WIZARD_PHASE_MAX` + `_normalize_wizard_phase` helper plus `_monotonic_phase` upper-bound clamp (BRAIN-119)
 
 ### Bug fix (BRAIN-119, state-machine coordinate validation)

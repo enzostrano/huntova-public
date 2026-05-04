@@ -63,6 +63,13 @@ def test_agent_control_validates_dna_state_against_enum():
         # (agent_control must consult the allowed enum
         # before deciding to proceed).
         or "_normalize_dna_state(" in src
+        # a489 (BRAIN-120): the entire dna-state gate was
+        # extracted to `_dna_state_gate_response` for the
+        # fail-fast precondition-ordering invariant. The
+        # helper call still gates against the documented
+        # enum (the helper itself is exhaustively tested in
+        # test_dna_state_gate_precondition_ordering).
+        or "_dna_state_gate_response(" in src
     )
     assert has_enum, (
         "BRAIN-108 regression: agent_control must reference "
@@ -82,6 +89,12 @@ def test_agent_control_blocks_invalid_state_explicitly():
         "dna_invalid_state" in src
         or 'blocked": "dna_invalid' in src
         or "'dna_invalid_state'" in src
+        # a489 (BRAIN-120): the invalid branch lives in the
+        # extracted `_dna_state_gate_response` helper. The
+        # gate-helper call in agent_control returns a
+        # response whose `blocked` field is
+        # "dna_invalid_state" for malformed states.
+        or "_dna_state_gate_response(" in src
     )
     assert has_invalid_branch, (
         "BRAIN-108 regression: agent_control must produce a "
@@ -99,7 +112,15 @@ def test_unset_state_still_proceeds():
     src = inspect.getsource(agent_control)
     # The "unset" string must appear in the allowed enum so
     # the validator treats it as legitimate.
-    assert '"unset"' in src or "'unset'" in src, (
+    # a489 (BRAIN-120): "unset" lives in the extracted
+    # `_dna_state_gate_response` helper. That helper is
+    # behaviorally tested (test_helper_allows_unset_state).
+    # The gate-helper call here is sufficient proof.
+    assert (
+        '"unset"' in src
+        or "'unset'" in src
+        or "_dna_state_gate_response(" in src
+    ), (
         "BRAIN-108 regression: `unset` must still be in the "
         "allowed enum so pre-BRAIN-78 installs without the "
         "field aren't suddenly blocked on upgrade."
@@ -111,7 +132,13 @@ def test_ready_state_still_proceeds():
     legitimate trained users must continue to start."""
     from server import agent_control
     src = inspect.getsource(agent_control)
-    assert '"ready"' in src or "'ready'" in src, (
+    # a489 (BRAIN-120): "ready" lives in the extracted
+    # `_dna_state_gate_response` helper.
+    assert (
+        '"ready"' in src
+        or "'ready'" in src
+        or "_dna_state_gate_response(" in src
+    ), (
         "BRAIN-108 regression: `ready` must be in the allowed "
         "enum so the BRAIN-79 happy path still works."
     )
@@ -151,9 +178,15 @@ def test_invalid_state_check_runs_BEFORE_start_agent_call():
     from server import agent_control
     src = inspect.getsource(agent_control)
     start_idx = src.find("agent_runner.start_agent(")
+    # a489 (BRAIN-120): the dna-state validation lives in
+    # the extracted helper. The helper CALL in agent_control
+    # is what runs the validation; its position relative to
+    # start_agent is the invariant.
     invalid_idx = src.find("dna_invalid_state")
     if invalid_idx == -1:
         invalid_idx = src.find("invalid_dna_state")
+    if invalid_idx == -1:
+        invalid_idx = src.find("_dna_state_gate_response(")
     assert start_idx != -1
     assert invalid_idx != -1, "BRAIN-108: invalid branch missing"
     assert invalid_idx < start_idx, (

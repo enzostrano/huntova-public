@@ -92,7 +92,12 @@ def test_agent_control_blocks_when_dna_state_failed():
     from server import agent_control
     src = inspect.getsource(agent_control)
     has_failed_branch = (
-        '"failed"' in src or "'failed'" in src
+        '"failed"' in src
+        or "'failed'" in src
+        # a489 (BRAIN-120): failed branch lives in the
+        # extracted gate helper. The helper call still
+        # produces the failed-state response.
+        or "_dna_state_gate_response(" in src
     )
     assert has_failed_branch, (
         "BRAIN-79 regression: agent start must explicitly "
@@ -100,7 +105,11 @@ def test_agent_control_blocks_when_dna_state_failed():
     )
     # Must reference the error message field so the UI can show it.
     has_error_passthrough = (
-        "_dna_error" in src or "dna_error" in src
+        "_dna_error" in src
+        or "dna_error" in src
+        # a489 (BRAIN-120): the gate helper passes through
+        # `_dna_error` to the public response.
+        or "_dna_state_gate_response(" in src
     )
     assert has_error_passthrough, (
         "BRAIN-79 regression: failed-state response must surface "

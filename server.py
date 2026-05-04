@@ -889,6 +889,92 @@ def _safe_nonneg_int(raw, default: int = 0) -> int:
     return default
 
 
+def _dna_state_gate_response(wizard_blob):
+    """The BRAIN-79 dna-state precondition gate, extracted
+    so `agent_control` and any future endpoint that needs
+    to fail-closed on invalid wizard state can share one
+    contract.
+
+    a489 (BRAIN-120): per Huntova engineering review on
+    fail-fast precondition ordering — deterministic
+    state-machine rejections must run BEFORE any paid-
+    quota / billable-path bookkeeping. Extracting the gate
+    out of the inline `agent_control` body makes the
+    ordering invariant testable at the source level
+    (regression tests can grep for the helper call vs
+    `agent_runner.start_agent` and assert the relative
+    position) and gives any future endpoint a single
+    place to consult.
+
+    Returns `None` when the request should proceed
+    (state is "ready" or "unset" — the latter covers
+    legacy installs without the BRAIN-78 field). Returns
+    a blocking response dict when the request should
+    short-circuit, matching the existing public response
+    shapes (`dna_invalid_state`, `dna_pending`,
+    `dna_failed`).
+    """
+    if not isinstance(wizard_blob, dict):
+        wizard_blob = {}
+    raw_state = wizard_blob.get("_dna_state")
+    normalized = _normalize_dna_state(raw_state)
+    if normalized in ("ready", "unset"):
+        return None
+    if normalized == "invalid":
+        # Trim raw to keep the response bounded — a rogue
+        # persisted value shouldn't dump megabytes into
+        # every blocked response.
+        bad_str = str(raw_state)[:80] if raw_state is not None else ""
+        return {
+            "ok": False,
+            "blocked": "dna_invalid_state",
+            "error": (
+                "Wizard DNA state is corrupted. Open the Brain "
+                "wizard and click Re-train to recover."
+            ),
+            "dna_state": bad_str,
+            "retry_action": "wizard_retrain",
+        }
+    if normalized == "pending":
+        return {
+            "ok": False,
+            "blocked": "dna_pending",
+            "error": (
+                "Agent DNA is still generating. Wait a moment and "
+                "try again — this usually finishes in 10-30s."
+            ),
+            "dna_state": "pending",
+            "dna_started_at": wizard_blob.get("_dna_started_at", ""),
+        }
+    if normalized == "failed":
+        # Persisted error trimmed to 200 chars matching
+        # the BRAIN-78 _failed_mutator's existing trim.
+        err = str(wizard_blob.get("_dna_error") or "")[:200]
+        return {
+            "ok": False,
+            "blocked": "dna_failed",
+            "error": (
+                f"Agent DNA generation failed: {err}. "
+                "Open the Brain wizard and click Re-train to retry."
+            ),
+            "dna_state": "failed",
+            "dna_error": err,
+            "retry_action": "wizard_retrain",
+        }
+    # Defensive — shouldn't reach here given _normalize_dna_state's
+    # closed return set. Fail closed if it ever does.
+    return {
+        "ok": False,
+        "blocked": "dna_invalid_state",
+        "error": (
+            "Wizard DNA state is in an unrecognised value. "
+            "Click Re-train to recover."
+        ),
+        "dna_state": str(normalized)[:80],
+        "retry_action": "wizard_retrain",
+    }
+
+
 def _normalize_dna_state(raw):
     """Normalize a persisted ``_dna_state`` value for any
     public read path.
@@ -11795,71 +11881,23 @@ async def agent_control(request: Request, user: dict = Depends(require_user)):
         # on it. Only "pending" and "failed" block — "ready" and
         # "unset" (legacy installs without the field) proceed
         # normally.
+        # a489 fix (BRAIN-120): fail-fast precondition gate
+        # via the shared `_dna_state_gate_response` helper.
+        # Runs BEFORE `agent_runner.start_agent` so an
+        # invalid / pending / failed dna state never
+        # reaches the billable launch path. Per Huntova
+        # engineering review on fail-fast precondition
+        # ordering: deterministic state-machine rejections
+        # must run before resource-governing side effects.
         try:
             _settings_for_dna = await db.get_settings(user["id"])
             _w_for_dna = (_settings_for_dna or {}).get("wizard", {}) or {}
-            _dna_state = _w_for_dna.get("_dna_state")
-            # a477 fix (BRAIN-108): enum validation on read.
-            # Per Huntova engineering review on state-machine
-            # read-side validation: invalid states must be
-            # handled explicitly and fail closed. Pre-fix, any
-            # value other than "pending"/"failed" fell through
-            # to the proceed path — including typos
-            # ("pendng"), case-mangled values ("READY"), null,
-            # numbers, dicts, etc. A future bug or operator
-            # UPDATE could persist a malformed value and
-            # silently bypass the BRAIN-79 gate.
-            # a478 (BRAIN-109): use the shared
-            # _normalize_dna_state helper so the agent gate
-            # and the public /api/wizard/status response apply
-            # the same enum contract. `None` (field absent on
-            # legacy pre-BRAIN-78 installs) maps to "unset" so
-            # legacy users keep working; out-of-enum values
-            # collapse to "invalid" and fail closed below.
-            _dna_state_normalized = _normalize_dna_state(_dna_state)
-            if _dna_state_normalized == "invalid":
-                # Out-of-enum value. Fail closed: don't proceed
-                # silently. Surface to the operator with the
-                # offending value so they can investigate the
-                # corrupted row.
-                _bad_str = str(_dna_state)[:80]
-                print(f"[AGENT] user={user['id']} start blocked: dna_state outside enum (got={_bad_str!r})")
-                return {
-                    "ok": False,
-                    "blocked": "dna_invalid_state",
-                    "error": (
-                        "Wizard DNA state is corrupted. Open the Brain "
-                        "wizard and click Re-train to recover."
-                    ),
-                    "dna_state": _bad_str,
-                    "retry_action": "wizard_retrain",
-                }
-            if _dna_state_normalized == "pending":
-                print(f"[AGENT] user={user['id']} start blocked: dna_state=pending")
-                return {
-                    "ok": False,
-                    "blocked": "dna_pending",
-                    "error": (
-                        "Agent DNA is still generating. Wait a moment and "
-                        "try again — this usually finishes in 10-30s."
-                    ),
-                    "dna_state": "pending",
-                    "dna_started_at": _w_for_dna.get("_dna_started_at", ""),
-                }
-            if _dna_state_normalized == "failed":
-                _err = _w_for_dna.get("_dna_error", "")
-                print(f"[AGENT] user={user['id']} start blocked: dna_state=failed err={_err[:80]}")
-                return {
-                    "ok": False,
-                    "blocked": "dna_failed",
-                    "error": (
-                        f"Agent DNA generation failed: {_err}. "
-                        "Open the Brain wizard and click Re-train to retry."
-                    ),
-                    "dna_state": "failed",
-                    "dna_error": _err,
-                    "retry_action": "wizard_retrain",
-                }
+            _gate_block = _dna_state_gate_response(_w_for_dna)
+            if _gate_block is not None:
+                _kind = _gate_block.get("blocked", "?")
+                _shown = _gate_block.get("dna_state", "?")
+                print(f"[AGENT] user={user['id']} start blocked: {_kind} (state={_shown!r})")
+                return _gate_block
         except Exception as _dna_check_err:
             # Don't fail-closed on transient DB errors during the
             # gate check — fall through to the existing start path.
