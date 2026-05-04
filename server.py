@@ -936,6 +936,23 @@ def _dna_state_gate_response(wizard_blob):
             "retry_action": "wizard_retrain",
         }
     if normalized == "pending":
+        # a492 (BRAIN-123): consult `_dna_pending_is_stale`
+        # for lease-coherence with the BRAIN-110 flip
+        # mutator. A pending lease whose `_dna_started_at`
+        # is older than `_DNA_PENDING_STALE_AFTER_SEC` is
+        # reclaimable — the flip mutator already treats it
+        # that way. If this gate keeps blocking, we get
+        # split-brain: one path says "stale, recover", the
+        # other says "in flight, block". The user gets
+        # trapped behind a dead marker until something
+        # else (retrain, manual reset) clears it. Per
+        # Huntova engineering review on lease-coherence:
+        # any reader of `_dna_state="pending"` must apply
+        # the same staleness policy. Stale pending →
+        # return None (allow caller to proceed). Fresh
+        # pending → block as before.
+        if _dna_pending_is_stale(wizard_blob.get("_dna_started_at")):
+            return None
         return {
             "ok": False,
             "blocked": "dna_pending",

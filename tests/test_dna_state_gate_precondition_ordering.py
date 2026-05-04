@@ -92,19 +92,24 @@ def test_helper_blocks_invalid_state():
 
 
 def test_helper_blocks_pending_state():
-    """Behavioral: pending state → return blocking
+    """Behavioral: FRESH pending state → return blocking
     response with `blocked: dna_pending` and the
     `dna_started_at` timestamp so the UI can show
-    countdown."""
+    countdown. (BRAIN-123: stale pending is now reclaimed
+    via the lease-staleness check; this test seeds a
+    timestamp from `datetime.now()` so it's guaranteed
+    fresh.)"""
     import server as _s
+    from datetime import datetime
+    fresh = datetime.now().isoformat()
     out = _s._dna_state_gate_response({
         "_dna_state": "pending",
-        "_dna_started_at": "2026-05-04T01:00:00",
+        "_dna_started_at": fresh,
     })
     assert out is not None
     assert out.get("blocked") == "dna_pending"
     assert out.get("dna_state") == "pending"
-    assert out.get("dna_started_at") == "2026-05-04T01:00:00"
+    assert out.get("dna_started_at") == fresh
 
 
 def test_helper_blocks_failed_state():

@@ -6,6 +6,102 @@ Versioning: `0.1.0aNN` alpha increments. Public install path: `pipx install hunt
 
 ---
 
+## 0.1.0a492 — May 4 2026 — `_dna_state_gate_response` blocked unconditionally on `_dna_state="pending"` while the BRAIN-110 flip mutator already reclaimed stale leases via `_dna_pending_is_stale` — split-brain readers of the same persisted state; the gate now consults the same lease-staleness policy so a stale pending lease no longer traps the user behind a dead marker on the agent path (BRAIN-123)
+
+### Bug fix (BRAIN-123, lease-coherence between gate and flip mutator)
+
+BRAIN-111 (a480) introduced
+`_dna_pending_is_stale(started_at_iso)` and integrated
+it into the BRAIN-110 flip mutator: a `_dna_state=
+"pending"` lease whose `_dna_started_at` is older
+than `_DNA_PENDING_STALE_AFTER_SEC` (default 600s)
+gets reclaimed when the user clicks Complete again.
+
+BRAIN-120 (a489) extracted the shared
+`_dna_state_gate_response` helper for
+`agent_control`'s start branch. BRAIN-121 (a490)
+extended it to resume. Neither path consulted the
+staleness check — they both blocked unconditionally
+on "pending".
+
+The split-brain failure scenario:
+
+1. User clicks Complete → DNA goes "pending" with
+   `started_at` = T0.
+2. `_gen_dna()` crashes hard (asyncio cancel + DB
+   transient failure on the BRAIN-111 try/finally
+   interrupt-writeback). Row stays at "pending" with
+   `started_at` = T0 forever.
+3. T0 is now older than the TTL.
+4. User clicks Re-train + Complete again → flip
+   mutator says "stale, reclaim", new generation
+   starts.
+5. ALTERNATIVELY: user just clicks Start (agent).
+   Gate sees "pending" and blocks with HTTP 503
+   "DNA still generating" — even though the lease
+   has been stale for hours.
+
+One reader said the lease was recoverable. Another
+reader said it was in flight. The user got
+contradictory signals depending on which button they
+clicked, with no deterministic recovery path on the
+agent surface.
+
+Per Huntova engineering review on lease-coherence:
+any code path that interprets `_dna_state="pending"`
+must apply the same staleness policy. `pending` is
+not a timeless state; it's a lease, and leases only
+stay coherent when all readers agree on when they
+expire.
+
+Fix: `_dna_state_gate_response`, when state
+normalizes to "pending", now calls
+`_dna_pending_is_stale(_dna_started_at)`. Stale
+pending → return None (allow caller to proceed,
+matching the flip mutator's reclaim semantic).
+Fresh pending → return the existing blocking dict
+(current behavior preserved). One source of truth:
+the same `_DNA_PENDING_STALE_AFTER_SEC` constant
+governs both readers.
+
+Behavior under corrupted/missing `_dna_started_at`:
+fail-open (treat as stale) — the staleness helper
+already does this for the flip mutator, and the
+gate now matches. A row with corrupted timestamp
+no longer permanently blocks the agent path.
+
+`invalid` and `failed` remain unconditionally
+blocking — they're terminal states with no lease-
+expiry semantic, only the wizard retrain path
+clears them.
+
+6 new regression tests in
+`test_dna_gate_consults_stale_lease.py`:
+- Fresh pending still blocks (current behavior
+  preserved).
+- Stale pending allows (reclaim semantic).
+- Pending with missing / unparseable
+  `_dna_started_at` allows (fail-open).
+- `invalid` and `failed` still block.
+- Source-level: gate calls
+  `_dna_pending_is_stale` or references
+  `_DNA_PENDING_STALE_AFTER_SEC`.
+
+Plus one pre-existing BRAIN-120 test updated: it
+seeded a fixed timestamp that became stale under
+the new lease-aware gate. Now seeds via
+`datetime.now()` so the test stays time-independent.
+
+577 / 577 tests passing.
+
+### Files
+
+- `server.py`: `_dna_state_gate_response`'s pending branch now calls `_dna_pending_is_stale` before returning the blocking dict. Stale pending → return None.
+- `tests/test_dna_gate_consults_stale_lease.py`: new — 6 tests guarding the lease-coherence invariant between the gate and the flip mutator.
+- `tests/test_dna_state_gate_precondition_ordering.py`: BRAIN-120 pending-state test updated to seed `_dna_started_at` from `datetime.now()` so it stays fresh under the new lease-aware gate.
+
+---
+
 ## 0.1.0a491 — May 4 2026 — BRAIN-117/118 capped every wizard mutating route but `/agent/control` was still unbounded — the new easiest resource-exhaustion seam on the public surface; control endpoint now invokes `_enforce_body_byte_cap` before `request.json()` for parity (BRAIN-122)
 
 ### Bug fix (BRAIN-122, byte-cap parity at /agent/control)
