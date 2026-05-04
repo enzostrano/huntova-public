@@ -6,6 +6,20 @@ Versioning: `0.1.0aNN` alpha increments. Public install path: `pipx install hunt
 
 ---
 
+## 0.1.0a569 — May 4 2026 — Settings-writer ↔ defaults consistency audit — whitelist still has critical fields, no open-iteration `body.items()` pattern (closed-schema discipline), defaults don't bake real PII (BRAIN-156)
+
+### Lockdown (BRAIN-156, settings writer drift)
+
+`/api/settings` POST persists fields per a whitelist. Drift between the whitelist and DEFAULT_SETTINGS silently drops new toggles. Plus settings handler must NOT have an open-iteration `for k, v in body.items()` pattern that bypasses the whitelist.
+
+5 new tests in `tests/test_settings_writers_audit.py`. No source changes. Test-only release.
+
+### Files
+- `tests/test_settings_writers_audit.py`: new — 5 tests.
+- `cli.py` + `pyproject.toml` + `CHANGELOG.md`. Versions a567/a568 reserved for in-flight bug-fix agents (update button + settings deep-dive).
+
+---
+
 ## 0.1.0a566 — May 4 2026 — `DEFAULT_SETTINGS` shape integrity audit — non-empty dict, all string keys, JSON-serialisable, `wizard` field (if present) is dict-shaped, no leaked function/class objects (BRAIN-155)
 
 ### Lockdown (BRAIN-155, DEFAULT_SETTINGS shape)
