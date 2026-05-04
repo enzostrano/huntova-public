@@ -1,0 +1,74 @@
+[
+  {
+    "name": "huntova-notion",
+    "description": "Push every saved lead to a Notion database row. The default indie-workspace integration.",
+    "author": "huntova-core",
+    "install": "pip install huntova-notion",
+    "homepage": "https://github.com/enzostrano/huntova-plugins/tree/main/notion",
+    "hooks": ["post_save"],
+    "capabilities": ["network", "secrets"],
+    "verified": true,
+    "version": "0.1.0",
+    "license": "MIT"
+  },
+  {
+    "name": "huntova-apollo",
+    "description": "Verify and enrich contacts via Apollo.io. Transforms 'found a website' into 'found a verified person'. User supplies APOLLO_KEY.",
+    "author": "huntova-core",
+    "install": "pip install huntova-apollo",
+    "homepage": "https://github.com/enzostrano/huntova-plugins/tree/main/apollo",
+    "hooks": ["post_qualify"],
+    "capabilities": ["network", "secrets"],
+    "verified": true,
+    "version": "0.1.0",
+    "license": "MIT"
+  },
+  {
+    "name": "huntova-webhook",
+    "description": "Generic POST-on-save webhook. One plugin unlocks Zapier / Make / n8n / Airtable / Discord for everyone.",
+    "author": "huntova-core",
+    "install": "pip install huntova-webhook",
+    "homepage": "https://github.com/enzostrano/huntova-plugins/tree/main/webhook",
+    "hooks": ["post_save"],
+    "capabilities": ["network"],
+    "verified": true,
+    "version": "0.1.0",
+    "license": "MIT"
+  },
+  {
+    "name": "huntova-emailguard",
+    "description": "MX + SMTP handshake via dnspython. Drops leads whose email domain has no working mail server before you waste credits drafting outreach.",
+    "author": "huntova-core",
+    "install": "pip install huntova-emailguard",
+    "homepage": "https://github.com/enzostrano/huntova-plugins/tree/main/emailguard",
+    "hooks": ["post_qualify"],
+    "capabilities": ["network"],
+    "verified": true,
+    "version": "0.1.0",
+    "license": "MIT"
+  },
+  {
+    "name": "huntova-hiring-signal",
+    "description": "Scrapes job boards for 'we're hiring X' posts. Adds timing intelligence — leads with active hiring are 4x more likely to respond.",
+    "author": "huntova-core",
+    "install": "pip install huntova-hiring-signal",
+    "homepage": "https://github.com/enzostrano/huntova-plugins/tree/main/hiring-signal",
+    "hooks": ["pre_score"],
+    "capabilities": ["network"],
+    "verified": true,
+    "version": "0.1.0",
+    "license": "MIT"
+  },
+  {
+    "name": "huntova-wappalyzer",
+    "description": "Detect tech stack from each prospect's homepage; tags the lead with detected platforms.",
+    "author": "community",
+    "install": "pip install huntova-wappalyzer",
+    "homepage": "https://github.com/example/huntova-wappalyzer",
+    "hooks": ["pre_score", "post_qualify"],
+    "capabilities": ["network"],
+    "verified": false,
+    "version": "0.0.4",
+    "license": "Apache-2.0"
+  }
+]
