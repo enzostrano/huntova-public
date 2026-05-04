@@ -6,6 +6,31 @@ Versioning: `0.1.0aNN` alpha increments. Public install path: `pipx install hunt
 
 ---
 
+## v0.1.0a2006 — May 4 2026 — Test-only audit sweep on settings defaults + Stripe products catalog
+
+### What we audited
+- `config.DEFAULT_SETTINGS` — the dict returned by `app.load_settings` when no per-user override exists. Drives every UI default, plugin enable state, SMTP defaults, and the GDPR-relevant `telemetry_opt_in` flag.
+- `config.DATA_RETENTION_DAYS` + `config.TIER_PAGE_LIMITS` — retention window + per-tier page-text capacity.
+- `payments.PRODUCTS` — the source-of-truth pricing catalog Stripe checkout sessions read from.
+
+### Tests added
+- `tests/test_default_settings_audit.py` — 15 tests pinning shape integrity, GDPR Art. 7 affirmative-opt-in (`telemetry_opt_in=False`), plugin enable defaults (dedup-by-domain on; csv-sink + slack-ping off; recipe-adapter + adaptation-rules on), SMTP port 587 default + blank credentials, no real-secret values in defaults (only `*_set` boolean indicators), `default_max_leads=10`, `preferred_temperature=0.2`, theme=`system`, `DATA_RETENTION_DAYS=730` (2-year GDPR default), `TIER_PAGE_LIMITS` increasing-by-tier ordering.
+- `tests/test_payments_products_audit.py` — 15 tests pinning required-key set on every product, positive-int price_cents + credits, 3-char ISO lowercase currency, mode in {`subscription`, `payment`}, subscription products have valid `interval`, growth_monthly + agency_monthly + topup_10/30/75 exist with correct shape, topups are payment-mode + `tier=None`, no zero-or-negative pricing, single-currency consistency across catalog, all products have non-empty name + description.
+
+### What this protects
+- Privacy defaults — a future PR flipping `telemetry_opt_in` to `True` would silently break the landing-page `"0 data sent to huntova"` claim AND violate GDPR Art. 7. Test fails the build.
+- Plugin enable defaults — fresh installs should NOT auto-fire Slack pings (would surprise users); `csv-sink` should NOT auto-export to a hardcoded path. Test pins safe defaults.
+- Pricing accuracy — the topup credit-to-slug match (`topup_10`→10 credits) prevents a bad Stripe price-id mapping from silently delivering 30 credits for the 10-credit pack.
+- Currency consistency — mixing EUR and USD across the same catalog would confuse cart UIs and Stripe localization.
+
+### Backwards compat
+- None. Test-only release — zero source changes.
+
+### Migration
+- None. `pipx upgrade huntova`.
+
+---
+
 ## v0.1.0a2005 — May 4 2026 — Test-only audit sweep on team-prompt builder + db SQL-translation helpers
 
 ### What we audited
