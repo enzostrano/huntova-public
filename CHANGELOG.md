@@ -6,6 +6,27 @@ Versioning: `0.1.0aNN` alpha increments. Public install path: `pipx install hunt
 
 ---
 
+## v0.1.0a2009 — May 4 2026 — Test-only audit sweep on invisible-Unicode canonicalizer (BRAIN-85 idempotency cache)
+
+### What we audited
+- `server._normalize_invisible_unicode` + `_INVISIBLE_UNICODE_RE` — the a512 (BRAIN-137) canonicalizer that strips invisible Unicode (BOM, ZWSP, ZWNJ, ZWJ, bidi overrides, C0 controls except whitespace) then NFC-normalizes. Used by `/api/wizard/complete`'s BRAIN-85 idempotency-cache fingerprint so two semantically-equivalent retries hash identically.
+
+### Tests added
+- `tests/test_invisible_unicode_audit.py` (16 tests) — pin None / empty defensive returns; BOM strip; zero-width space / joiner strip; LRE / PDF / RLO bidi-override strip; LRI / PDI bidi-isolate strip; word-joiner (U+2060) strip; NUL byte strip; C0 controls (0x01-0x08, 0x0b, 0x0c, 0x0e-0x1f, 0x7f) strip; TAB / LF / CR preserved (legitimate whitespace); NFD → NFC composition (`Café` decomposed → `Café` composed); strip-then-NFC ordering pin (a stripped-after-NFC ordering would leave decomposed bases without their marks); two strings differing only by invisible chars canonicalise to the same value (the BRAIN-85 cache-hit invariant).
+
+### What this protects
+- BRAIN-85 idempotency cache — a regression here causes retries to miss the cache and re-spend on the AI provider. Specifically: a buggy client adding a BOM on retry would defeat the SHA256 cache. The "two-strings-collide" test pins the cache-correctness contract directly.
+- Bidi-override security — bidi marks in user-supplied strings can mask the visible content (the classic "innocuous URL displayed as evil URL" attack). Strip protects against that being persisted into the wizard fingerprint cache.
+- Strip-then-NFC ordering — pinning this prevents a future refactor that swaps the order, which would let combining marks slip through after their base char was stripped.
+
+### Backwards compat
+- None. Test-only release — zero source changes.
+
+### Migration
+- None. `pipx upgrade huntova`.
+
+---
+
 ## v0.1.0a2008 — May 4 2026 — Test-only audit sweep on `_safe_nonneg_int` defensive coercer + wizard phase/confidence clamps
 
 ### What we audited

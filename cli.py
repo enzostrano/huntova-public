@@ -22,7 +22,7 @@ import sys
 import webbrowser
 from pathlib import Path
 
-VERSION = "0.1.0a2008"
+VERSION = "0.1.0a2009"
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 5050  # avoid clashing with the cloud's :5000
 
