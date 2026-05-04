@@ -9125,7 +9125,7 @@ async def api_wizard_complete(request: Request, response: Response, user: dict =
     # revision while we were building brain+dossier, abort the commit
     # — derived artifacts based on stale answers must not silently
     # overwrite the user's newer state.
-    _captured_revision = int(_w_snap.get("_wizard_revision", 0) or 0)
+    _captured_revision = _safe_nonneg_int(_w_snap.get("_wizard_revision"))
 
     # a454 fix (BRAIN-85): idempotent short-circuit. Per Huntova
     # engineering review on duplicate-submit BYOK spend. If the
@@ -9158,7 +9158,7 @@ async def api_wizard_complete(request: Request, response: Response, user: dict =
     _complete_fingerprint = _hashlib.sha256(
         _canonical.encode("utf-8")
     ).hexdigest()
-    _captured_epoch = int(_w_snap.get("_wizard_epoch", 0) or 0)
+    _captured_epoch = _safe_nonneg_int(_w_snap.get("_wizard_epoch"))
     _prior_fingerprint = _w_snap.get("_last_complete_fingerprint") or ""
     _prior_epoch = int(_w_snap.get("_last_complete_epoch", -1) or -1)
     _prior_dna_state = _w_snap.get("_dna_state", "unset")
@@ -9299,8 +9299,8 @@ async def api_wizard_complete(request: Request, response: Response, user: dict =
         # Honor BRAIN-14 (revision) + BRAIN-81 (epoch) guards. A
         # stale tab that lost a race shouldn't smuggle a flip past
         # the same checks that protect every other write.
-        _cur_rev = int(w.get("_wizard_revision", 0) or 0)
-        _cur_epoch = int(w.get("_wizard_epoch", 0) or 0)
+        _cur_rev = _safe_nonneg_int(w.get("_wizard_revision"))
+        _cur_epoch = _safe_nonneg_int(w.get("_wizard_epoch"))
         if _cur_epoch != _captured_epoch:
             _flip_stale["value"] = True
             _flip_stale["kind"] = "wizard_reset"
@@ -9556,7 +9556,7 @@ async def api_wizard_complete(request: Request, response: Response, user: dict =
         # `_generate_training_dossier`), abort. The user's newer answers
         # would otherwise be silently overwritten by stale derived
         # artifacts.
-        _cur_revision = int(w.get("_wizard_revision", 0) or 0)
+        _cur_revision = _safe_nonneg_int(w.get("_wizard_revision"))
         if _cur_revision != _captured_revision:
             _stale["value"] = True
             return cur  # leave row unchanged
@@ -9705,7 +9705,7 @@ async def api_wizard_complete(request: Request, response: Response, user: dict =
     # resurrect derived state into a wiped wizard. Now: epoch
     # mismatch → discard the durable write (SSE event still
     # fires, best-effort, for any listener that's still around).
-    _dna_spawn_epoch = int(w.get("_wizard_epoch", 0) or 0)
+    _dna_spawn_epoch = _safe_nonneg_int(w.get("_wizard_epoch"))
     async def _gen_dna():
         _ctx = get_or_create_context(user["id"], user.get("email", ""), user.get("tier", "free"))
         # a480 (BRAIN-111): track whether a terminal state
@@ -9731,7 +9731,7 @@ async def api_wizard_complete(request: Request, response: Response, user: dict =
                 # BRAIN-82: bail if the wizard was reset since
                 # spawn. Don't resurrect derived state into a
                 # wiped wizard.
-                _cur_epoch = int(_w.get("_wizard_epoch", 0) or 0)
+                _cur_epoch = _safe_nonneg_int(_w.get("_wizard_epoch"))
                 if _cur_epoch != _dna_spawn_epoch:
                     print(f"[DNA] reset detected mid-generation (spawn_epoch={_dna_spawn_epoch}, cur_epoch={_cur_epoch}); discarding ready-state write")
                     return c
@@ -9764,7 +9764,7 @@ async def api_wizard_complete(request: Request, response: Response, user: dict =
                 # BRAIN-82: same epoch gate as ready — don't
                 # persist a misleading "failed" state on a
                 # wizard that no longer exists.
-                _cur_epoch = int(_w.get("_wizard_epoch", 0) or 0)
+                _cur_epoch = _safe_nonneg_int(_w.get("_wizard_epoch"))
                 if _cur_epoch != _dna_spawn_epoch:
                     print(f"[DNA] reset detected mid-generation (spawn_epoch={_dna_spawn_epoch}, cur_epoch={_cur_epoch}); discarding failed-state write")
                     return c
@@ -9801,7 +9801,7 @@ async def api_wizard_complete(request: Request, response: Response, user: dict =
                 def _interrupt_mutator(c: dict) -> dict:
                     c = {**DEFAULT_SETTINGS, **(c or {})}
                     _w = dict(c.get("wizard", {}))
-                    _cur_epoch = int(_w.get("_wizard_epoch", 0) or 0)
+                    _cur_epoch = _safe_nonneg_int(_w.get("_wizard_epoch"))
                     if _cur_epoch != _dna_spawn_epoch:
                         return c
                     # Only write if the lease still belongs
@@ -9921,7 +9921,7 @@ async def api_wizard_reset(request: Request, response: Response, user: dict = De
         # fresh wizard. The epoch ratchet says "this isn't a
         # newer revision, this is a NEW WIZARD EPOCH".
         _prior_w = cur.get("wizard") or {}
-        _prior_epoch = int(_prior_w.get("_wizard_epoch", 0) or 0)
+        _prior_epoch = _safe_nonneg_int(_prior_w.get("_wizard_epoch"))
         # Full wipe — clears all wizard state including:
         #   _wizard_answers, _wizard_phase, _wizard_confidence,
         #   _wizard_revision (BRAIN-14), _interview_complete,
@@ -10000,8 +10000,8 @@ async def api_wizard_save_progress(request: Request, response: Response, user: d
     def _mutator(current):
         s = {**DEFAULT_SETTINGS, **(current or {})}
         w = dict(s.get("wizard") or {})
-        _cur_rev = int(w.get("_wizard_revision", 0) or 0)
-        _cur_epoch = int(w.get("_wizard_epoch", 0) or 0)
+        _cur_rev = _safe_nonneg_int(w.get("_wizard_revision"))
+        _cur_epoch = _safe_nonneg_int(w.get("_wizard_epoch"))
         _stale["current_epoch"] = _cur_epoch
         # a442 (BRAIN-81): epoch check first — distinct from
         # revision check. If client's epoch < server's epoch,
@@ -12620,7 +12620,7 @@ async def admin_wizard_reset(user_id: int, request: Request, user: dict = Depend
         # stale clients see a generation change. Same pattern
         # as the user-facing reset's _reset_mutator (BRAIN-81).
         _prior_w = cur.get("wizard") or {}
-        _prior_epoch = int(_prior_w.get("_wizard_epoch", 0) or 0)
+        _prior_epoch = _safe_nonneg_int(_prior_w.get("_wizard_epoch"))
         cur["wizard"] = {"_wizard_epoch": _prior_epoch + 1}
         return cur
 

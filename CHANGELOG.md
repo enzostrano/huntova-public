@@ -6,6 +6,85 @@ Versioning: `0.1.0aNN` alpha increments. Public install path: `pipx install hunt
 
 ---
 
+## 0.1.0a485 — May 4 2026 — BRAIN-115 hardened the public read of `_wizard_revision`/`_wizard_epoch` but the WRITE side (BRAIN-14 stale-write guard, BRAIN-81 epoch guard, BRAIN-88 flip mutator, save-progress, reset, admin reset, DNA spawn-epoch capture) still used the crashy `int(... or 0)` pattern; corrupted persisted values 500'd 13 mutating-handler call sites instead of producing a controlled 409 conflict; every write-path capture now uses `_safe_nonneg_int` (BRAIN-116)
+
+### Bug fix (BRAIN-116, write-side concurrency-token validation)
+
+A concurrency token is part of the WRITE contract, not
+just a display field. BRAIN-115 (a484) hardened the
+read side of `_wizard_revision` and `_wizard_epoch` on
+`/api/wizard/status` so the public emission can't 500
+the heartbeat or leak garbage. But the WRITE side —
+the actual conflict-control surface — was still
+captured via the legacy crashy pattern at 13 sites:
+
+```python
+_captured_revision = int(_w_snap.get("_wizard_revision", 0) or 0)
+_cur_rev = int(w.get("_wizard_revision", 0) or 0)
+```
+
+When the persisted value isn't a clean positive int:
+- `int("banana")` raises `ValueError`. The handler 500s
+  on save-progress / complete / reset, instead of
+  producing the controlled 409 conflict the optimistic-
+  concurrency contract is supposed to surface.
+- A negative int passes through. The compare-and-swap
+  decision (`_cur_rev != _captured_revision`) operates
+  on garbage. False accepts (lost updates) or false
+  failures (legitimate writes rejected) become possible
+  at the moment of mutation.
+
+Per Huntova engineering review on optimistic-concurrency
+write paths: read-side hardening without write-side
+hardening leaves the conflict-control surface exposed.
+Every server path that reads `_wizard_revision` or
+`_wizard_epoch` for a compare-or-write decision must
+normalize via the same non-negative validator.
+
+Fix: migrate every write-side capture to
+`_safe_nonneg_int`. 13 sites in 5 handlers + 1 admin
+escape hatch:
+
+- `api_wizard_complete`: `_captured_revision`,
+  `_captured_epoch` (entry capture); `_cur_rev`,
+  `_cur_epoch` (BRAIN-88 flip mutator); `_cur_revision`
+  (final merge mutator); `_dna_spawn_epoch` (DNA
+  spawn capture); `_cur_epoch` ×3 (DNA ready/failed/
+  interrupt mutators).
+- `api_wizard_save_progress`: `_cur_rev`, `_cur_epoch`
+  (stale-write guard inside merge_settings).
+- `api_wizard_reset`: `_prior_epoch` (epoch ratchet
+  inside the reset mutator).
+- `admin_wizard_reset`: `_prior_epoch` (operator
+  escape hatch — must work on a corrupted row).
+
+Behavior under corruption: a string like `"banana"`
+normalizes to 0 in both captured + cur reads. The
+compare-and-swap sees `0 != 0` is False and the write
+proceeds. The next bump (`+1`) writes a valid int,
+self-repairing the row on the first successful write.
+Either way the user gets a working flow instead of a
+500.
+
+6 new regression tests in
+`test_wizard_revision_write_side_validation.py`:
+- Source-level: each of the 4 mutating handlers
+  contains zero remaining `int(... _wizard_revision ...)`
+  / `int(... _wizard_epoch ...)` patterns AND uses
+  `_safe_nonneg_int(...)` somewhere.
+- `_dna_spawn_epoch` capture line uses the helper.
+- Behavioral: `_safe_nonneg_int("banana")` normalizes
+  to 0 so compare-and-swap proceeds rather than 500.
+
+528 / 528 tests passing.
+
+### Files
+
+- `server.py`: 13 write-side captures of `_wizard_revision` / `_wizard_epoch` migrated from `int(... or 0)` to `_safe_nonneg_int(...)`. Spans `api_wizard_complete` (and its closures), `api_wizard_save_progress`, `api_wizard_reset`, `admin_wizard_reset`, `_gen_dna` background task closures.
+- `tests/test_wizard_revision_write_side_validation.py`: new — 6 tests guarding the write-side concurrency-token contract.
+
+---
+
 ## 0.1.0a484 — May 4 2026 — `/api/wizard/status` emitted `_wizard_revision` (and adjacent monotonic counters) via `int(w.get(KEY, 0) or 0)`, which 500s the request on a non-numeric persisted value, leaks negatives raw, and silently coerces bools/floats; corrupted optimistic-concurrency token poisons the client's stale-write detection forever; new `_safe_nonneg_int` helper validates-and-normalizes every public emission (BRAIN-115)
 
 ### Bug fix (BRAIN-115, optimistic-concurrency token validation)
