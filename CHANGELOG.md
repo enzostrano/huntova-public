@@ -6,6 +6,34 @@ Versioning: `0.1.0aNN` alpha increments. Public install path: `pipx install hunt
 
 ---
 
+## 0.1.0a840 — May 4 2026 — Landing-page version self-healer hardened (LANDING-1)
+
+### Bug fixes (LANDING-1, version self-healer + 416-stale baseline)
+
+Audit of `templates/landing.html` self-healer (introduced in a325) caught three real failure modes:
+
+1. **No HTTP status check.** The fetch chain called `r.json()` without checking `r.ok`. When GitHub rate-limits (HTTP 403, body `{"message":"API rate limit exceeded for…"}`) or 5xxs, the JSON parses fine, no `tag_name` is present, and the chain silently no-ops — leaving the page on whatever was hardcoded at deploy time. Worse, there was no back-off, so every page-load re-hammered the same rate-limited endpoint.
+
+2. **416-version-stale fallback.** The hardcoded baseline (`v0.1.0a324`) was 416 releases behind tip when this audit ran. Any visitor whose fetch failed (corporate firewall sharing a NAT-rate-limited IP, regional DNS hiccup, GitHub 5xx, JS disabled) saw a year-old version label.
+
+3. **No tag-format validation.** A malformed `tag_name` would render literally — `vNaN`, `vundefined`, a stray HTML body — straight into the trust strip.
+
+Fix:
+
+- Self-healer now checks `r.ok` before `.json()`; bails to negative-cache path on any non-2xx.
+- Tag validated against `/^v?\d+\.\d+(?:\.\d+)?(?:[a-z]+\d+)?$/` (length ≤ 32) before painting.
+- On any hard failure, writes `hvLandingLatestFailUntil = Date.now() + 15min` to localStorage. Subsequent loads inside the window short-circuit before the fetch.
+- Hardcoded baseline bumped from `v0.1.0a324` → `v0.1.0a840` at `templates/landing.html:531`, `:722`, `:771`.
+- `server.py:_read_landing_with_version` substitution map extended to include the new baseline so Python-served pages keep healing at render time.
+
+### Tests
+
+10 new tests in `tests/test_landing_self_healer.py` pin: no-ancient-baseline (renderable content only — comments stripped), `r.ok` guard, tag-shape regex, negative-cache slot, JS parse via `node --check`, install URL stability, OG/Twitter meta contract, localStorage try/catch, server-side substitution map.
+
+Suite: **883 passing** (was 873) on the a620 baseline; on top of a630 the suite still passes locally.
+
+---
+
 ## 0.1.0a630 — May 4 2026 — SSE reconnect-resume via Last-Event-ID + per-user replay ring buffer (BRAIN-158)
 
 ### Bug fix (BRAIN-158, SSE event-bus durability under reconnect)

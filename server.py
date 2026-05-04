@@ -2482,9 +2482,20 @@ def _read_landing_with_version() -> str:
             # static Hostinger-deployed copy by hitting the GitHub
             # Releases API on page load — see <script data-hv-version-
             # autoupdate>.
-            for _stale in ("v0.1.0a184", "v0.1.0a324"):
+            # a840: extend the baseline list so historical hardcoded
+            # values keep healing at render time even if a future
+            # template bump rolls forward without updating this map.
+            for _stale in (
+                "v0.1.0a184",
+                "v0.1.0a324",
+                "v0.1.0a840",
+            ):
                 html = html.replace(_stale, f"v{v}")
-            for _stale in ("0.1.0a184", "0.1.0a324"):
+            for _stale in (
+                "0.1.0a184",
+                "0.1.0a324",
+                "0.1.0a840",
+            ):
                 html = html.replace(_stale, v)
     except Exception:
         pass

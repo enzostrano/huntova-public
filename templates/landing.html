@@ -528,7 +528,7 @@ a:hover{color:#fff}
 
   <!-- hero -->
   <header class="hero">
-    <span class="hero-badge"><span class="dot"></span> <span data-hv-version>v0.1.0a324</span> · local-first BYOK</span>
+    <span class="hero-badge"><span class="dot"></span> <span data-hv-version>v0.1.0a840</span> · local-first BYOK</span>
 
     <div class="hero-mark">
       <svg viewBox="0 0 120 120" aria-hidden="true">
@@ -719,7 +719,7 @@ a:hover{color:#fff}
           <span class="label">illustrative — your terminal output will vary</span>
         </div>
 <div class="demo-body"><span class="p">$</span> <span class="c">curl -fsSL https://github.com/enzostrano/huntova-public/releases/latest/download/install.sh | sh</span>
-<span class="o">→ pipx installed huntova <span data-hv-version>v0.1.0a324</span></span>
+<span class="o">→ pipx installed huntova <span data-hv-version>v0.1.0a840</span></span>
 
 <span class="p">$</span> <span class="c">huntova</span>
 <span class="o">  ↳ no provider configured — running onboard wizard</span>
@@ -768,7 +768,7 @@ a:hover{color:#fff}
       <div class="trust-cell"><div class="trust-num">10</div><div class="trust-l">bundled playbooks</div></div>
       <div class="trust-cell"><div class="trust-num">AGPL-3.0</div><div class="trust-l">open source license</div></div>
       <div class="trust-cell"><div class="trust-num">100%</div><div class="trust-l">runs on your machine</div></div>
-      <div class="trust-cell"><div class="trust-num" data-hv-version>v0.1.0a324</div><div class="trust-l">latest release</div></div>
+      <div class="trust-cell"><div class="trust-num" data-hv-version>v0.1.0a840</div><div class="trust-l">latest release</div></div>
     </div>
   </section>
 
@@ -910,45 +910,94 @@ a:hover{color:#fff}
 })();
 </script>
 
-<!-- a325: live version self-healer for the static Hostinger deploy.
-     The Python server already substitutes the version when /landing
-     is served from the local app. But the marketing site at
+<!-- a325 + a840: live version self-healer for the static Hostinger
+     deploy. The Python server already substitutes the version when
+     /landing is served from the local app. But the marketing site at
      darkred-barracuda-643789.hostingersite.com is a static export —
      no Python — so it would freeze on whatever version was hardcoded
      at deploy time. This snippet hits the GitHub Releases API on
      page load and rewrites every [data-hv-version] element to the
-     real latest tag. Cached in localStorage for 6h so we don't
-     hammer GitHub on repeat visits. Soft-fails silently — visitors
-     never see an error if the API is down or rate-limited. -->
+     real latest tag.
+
+     a840 hardening: previously the fetch chain (1) didn't check
+     response.ok, so a 403/429/5xx body parsed as JSON would short-
+     circuit on `if (!tag) return;` and leave the hardcoded baseline
+     visible (and 416 versions stale at the time of the audit), and
+     (2) had no tag-format validation, so a malformed `tag_name`
+     could render literally inside the trust strip ("vundefined" /
+     "vNaN" / "vprerelease-test" classes of bug). Fixed:
+
+       • response.ok check before .json()
+       • tag must match /^v?\d+\.\d+(\.\d+)?(?:[a-z]+\d+)?$/
+       • on failure we keep whatever was hardcoded and back off for
+         15 min via a negative-cache slot so we don't re-hit GitHub
+         on every navigation when rate-limited.
+       • the hardcoded baseline (v0.1.0a840) was bumped from a324
+         to the current latest tag so a fail-closed page is at most
+         a few releases stale, not 400+.
+-->
 <script data-hv-version-autoupdate>
 (function(){
   var els = document.querySelectorAll('[data-hv-version]');
   if (!els.length) return;
   var CACHE_KEY = 'hvLandingLatest';
-  var CACHE_TTL = 6 * 3600 * 1000;
+  var FAIL_KEY  = 'hvLandingLatestFailUntil';
+  var CACHE_TTL = 6 * 3600 * 1000;       // success TTL
+  var FAIL_TTL  = 15 * 60 * 1000;        // back-off after a hard fail
+  // matches v0.1.0a324, 0.1.0, 1.2.3rc1, v2.0, v0.1.0a840 … rejects
+  // garbage like "vNaN", "<html…", "API rate limit exceeded".
+  var TAG_RE = /^v?\d+\.\d+(?:\.\d+)?(?:[a-z]+\d+)?$/;
+
+  function isValidTag(t){
+    if (!t || typeof t !== 'string') return false;
+    if (t.length > 32) return false;
+    return TAG_RE.test(t);
+  }
   function paint(tag){
-    if (!tag) return;
+    if (!isValidTag(tag)) return false;
     var s = String(tag);
     var withV = s.charAt(0) === 'v' ? s : ('v' + s);
     for (var i = 0; i < els.length; i++) {
       els[i].textContent = withV;
     }
+    return true;
   }
+
+  // 1. recent success → paint from cache, done.
   try {
     var cached = JSON.parse(localStorage.getItem(CACHE_KEY) || 'null');
     if (cached && cached.tag && (Date.now() - cached.t) < CACHE_TTL) {
-      paint(cached.tag);
-      return;
+      if (paint(cached.tag)) return;
     }
   } catch (e) {}
+
+  // 2. recent failure → back off, leave the hardcoded baseline.
+  try {
+    var failUntil = parseInt(localStorage.getItem(FAIL_KEY) || '0', 10);
+    if (failUntil && Date.now() < failUntil) return;
+  } catch (e) {}
+
+  function noteFail(){
+    try { localStorage.setItem(FAIL_KEY, String(Date.now() + FAIL_TTL)); } catch (e) {}
+  }
+
   fetch('https://api.github.com/repos/enzostrano/huntova-public/releases/latest', {
     headers: { 'Accept': 'application/vnd.github+json' },
-  }).then(function(r){ return r.json(); }).then(function(d){
-    var tag = d && d.tag_name;
-    if (!tag) return;
-    paint(tag);
-    try { localStorage.setItem(CACHE_KEY, JSON.stringify({ tag: tag, t: Date.now() })); } catch (e) {}
-  }).catch(function(){ /* silent — keep whatever the page shipped with */ });
+  }).then(function(r){
+    if (!r || !r.ok) { noteFail(); return null; }
+    return r.json().catch(function(){ noteFail(); return null; });
+  }).then(function(d){
+    if (!d) return;
+    var tag = d.tag_name;
+    if (!isValidTag(tag)) { noteFail(); return; }
+    if (!paint(tag))      { noteFail(); return; }
+    try {
+      localStorage.setItem(CACHE_KEY, JSON.stringify({ tag: tag, t: Date.now() }));
+      localStorage.removeItem(FAIL_KEY);
+    } catch (e) {}
+  }).catch(function(){
+    noteFail(); /* silent — keep whatever the page shipped with */
+  });
 })();
 </script>
 </body>
