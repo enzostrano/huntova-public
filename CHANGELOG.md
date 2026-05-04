@@ -6,6 +6,90 @@ Versioning: `0.1.0aNN` alpha increments. Public install path: `pipx install hunt
 
 ---
 
+## 0.1.0a484 — May 4 2026 — `/api/wizard/status` emitted `_wizard_revision` (and adjacent monotonic counters) via `int(w.get(KEY, 0) or 0)`, which 500s the request on a non-numeric persisted value, leaks negatives raw, and silently coerces bools/floats; corrupted optimistic-concurrency token poisons the client's stale-write detection forever; new `_safe_nonneg_int` helper validates-and-normalizes every public emission (BRAIN-115)
+
+### Bug fix (BRAIN-115, optimistic-concurrency token validation)
+
+`_wizard_revision` is the optimistic-concurrency token
+(BRAIN-14). Save-progress and complete capture it on
+load and the server bumps it on success — clients
+detect "stale copy" by comparing their captured
+revision to the server's current one. The contract
+requires it to be a non-negative monotonic integer.
+
+The pre-fix status endpoint emitted:
+
+```python
+"wizard_revision": int(w.get("_wizard_revision", 0) or 0),
+```
+
+Three concrete failure modes when the persisted value
+isn't a clean positive int:
+
+1. **String / list / dict** → `int("banana")` raises
+   `ValueError`. The `/api/wizard/status` request 500s.
+   Every client-side fetch throws — the entire wizard
+   UI breaks because the status endpoint is the
+   keep-alive heartbeat. `int(...)` over arbitrary
+   user-influenced values is a known footgun.
+2. **Negative integer** → `int(-3) == -3`. Flows
+   through to the client, which now uses `-3` as its
+   optimistic-concurrency baseline. The next save-
+   progress sends `_captured_revision=-3`, the server's
+   stale-write guard `_cur_rev != -3` is true forever,
+   every save 409s "stale_revision" with no recovery
+   path.
+3. **Boolean True / floats** → silent coercion masks
+   data-quality corruption. `int(True) == 1`,
+   `int(3.7) == 3`. Operator never notices the row is
+   corrupt.
+
+Per Huntova engineering review on response-contract
+enums + optimistic-concurrency tokens (parity with
+BRAIN-109 DNA-state validation): every PUBLIC read of
+a version-token / monotonic counter must validate-
+and-normalize before emission. Read-side response
+validation matters as much as write-side.
+
+Fix: new module-scope `_safe_nonneg_int(raw,
+default=0)` helper near `_normalize_dna_state`. Returns
+a non-negative `int` for any input — strings parse if
+clean, floats truncate (clamped at 0), bools fall
+through to default (data-quality corruption signal),
+negatives clamp to 0, anything that can't coerce →
+`default`. Caller can override `default` for legacy-
+compat scenarios.
+
+`/api/wizard/status` now emits all five monotonic
+counters via the helper — `wizard_revision`,
+`wizard_epoch`, `wizard_cursor`, `train_count`,
+`train_attempts`. They share the same crashy
+`int(... or 0)` pattern and the same failure modes,
+so fixing them in one pass closes the response-
+contract gap uniformly.
+
+13 new regression tests in
+`test_wizard_revision_public_emission_validation.py`:
+- Helper exists at module scope.
+- Helper passes clean ints, clamps negatives, parses
+  string ints, returns default on corrupt strings /
+  None / "" / containers / objects.
+- Helper truncates floats and floors negative floats
+  to 0; bool inputs map to default.
+- Helper respects caller-provided default.
+- Source-level: status endpoint emits
+  `wizard_revision`, `wizard_epoch`, `wizard_cursor`,
+  `train_count`, `train_attempts` via the helper.
+
+522 / 522 tests passing.
+
+### Files
+
+- `server.py`: new `_safe_nonneg_int(raw, default=0)` module-scope helper near `_normalize_dna_state`. `/api/wizard/status` migrates `wizard_revision`, `wizard_epoch`, `wizard_cursor`, `train_count`, `train_attempts` to the helper.
+- `tests/test_wizard_revision_public_emission_validation.py`: new — 13 tests guarding the optimistic-concurrency-token public-emission contract.
+
+---
+
 ## 0.1.0a483 — May 4 2026 — Destructive wizard endpoints (`/api/wizard/reset`, `/api/wizard/start-retrain`) relied solely on the double-submit CSRF token; missing the OWASP "combine token + Origin verification" defense-in-depth that catches subdomain-takeover, header-injection, and future-regression CSRF paths; CSRFMiddleware now enforces a same-origin gate after the token check via `_is_trusted_origin` + `_WIZARD_DESTRUCTIVE_ORIGIN_GATED_PATHS` (BRAIN-114)
 
 ### Bug fix (BRAIN-114, defense-in-depth Origin gate)

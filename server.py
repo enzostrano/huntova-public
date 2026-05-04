@@ -734,6 +734,57 @@ def _dna_pending_is_stale(started_at_iso, now=None):
     return age > _DNA_PENDING_STALE_AFTER_SEC
 
 
+def _safe_nonneg_int(raw, default: int = 0) -> int:
+    """Coerce `raw` to a non-negative integer for safe
+    public emission. Returns `default` when the value
+    can't be coerced cleanly; clamps negatives to 0
+    (or `default` when `default` is itself negative —
+    the caller knows what they want).
+
+    a484 (BRAIN-115): every public read of an optimistic-
+    concurrency token (`_wizard_revision`,
+    `_wizard_epoch`, `_wizard_cursor`) and audit counter
+    (`_train_count`, `_train_attempts`) must validate-
+    and-normalize. The pre-fix pattern
+    `int(w.get(KEY, 0) or 0)` had three failure modes:
+    - String / list / dict raw → `int()` raises →
+      status request 500s → entire wizard UI breaks.
+    - Negative int raw → flows through as -3 (corrupting
+      the client's optimistic-concurrency baseline).
+    - Bool / float → silent coercion that masks
+      underlying data corruption.
+
+    Per Huntova engineering review on response-contract
+    enums + optimistic-concurrency tokens: read-side
+    response validation matters as much as write-side
+    validation.
+    """
+    if raw is None:
+        return default
+    if isinstance(raw, bool):
+        # bool is a subclass of int; treat True/False as
+        # data-quality corruption rather than 1/0.
+        return default
+    if isinstance(raw, int):
+        return max(0, raw) if default >= 0 else (raw if raw >= 0 else default)
+    if isinstance(raw, float):
+        try:
+            v = int(raw)
+        except (ValueError, OverflowError, TypeError):
+            return default
+        return max(0, v) if default >= 0 else (v if v >= 0 else default)
+    if isinstance(raw, str):
+        s = raw.strip()
+        if not s:
+            return default
+        try:
+            v = int(s)
+        except (ValueError, TypeError):
+            return default
+        return max(0, v) if default >= 0 else (v if v >= 0 else default)
+    return default
+
+
 def _normalize_dna_state(raw):
     """Normalize a persisted ``_dna_state`` value for any
     public read path.
@@ -10773,13 +10824,21 @@ async def api_wizard_status(user: dict = Depends(require_user)):
         # a442 (BRAIN-81): expose the wizard reset-epoch token
         # so clients can capture it on load and pass it back
         # with save-progress. Mismatch → reset boundary detected.
-        "wizard_epoch": int(w.get("_wizard_epoch", 0) or 0),
-        "wizard_revision": int(w.get("_wizard_revision", 0) or 0),
+        # a484 (BRAIN-115): emit monotonic counters via
+        # _safe_nonneg_int so a corrupted persisted value
+        # (string, list, negative, bool) normalizes to 0
+        # instead of 500'ing the request or leaking
+        # garbage that poisons the client's optimistic-
+        # concurrency baseline.
+        "wizard_epoch": _safe_nonneg_int(w.get("_wizard_epoch")),
+        "wizard_revision": _safe_nonneg_int(w.get("_wizard_revision")),
         # a456 (BRAIN-87): cursor — currently-viewed question
         # index. Distinct from phase (monotonic max). Client
         # uses this on reload so backward navigation survives.
         # Falls back to phase for legacy state without cursor.
-        "wizard_cursor": int(w.get("_wizard_cursor", w.get("_wizard_phase", 0)) or 0),
+        "wizard_cursor": _safe_nonneg_int(
+            w.get("_wizard_cursor", w.get("_wizard_phase", 0))
+        ),
         # a459 (BRAIN-90): persisted phase-5 dynamic question
         # schema so the client can rehydrate `_BRAIN_QUESTIONS`
         # on reload without re-spending on a fresh
@@ -10791,8 +10850,8 @@ async def api_wizard_status(user: dict = Depends(require_user)):
         # `train_attempts` includes BRAIN-85 short-circuit
         # hits — accepted retrain intent regardless of whether
         # execution ran. Operator dashboard can show the gap.
-        "train_count": int(w.get("_train_count", 0) or 0),
-        "train_attempts": int(w.get("_train_attempts", 0) or 0),
+        "train_count": _safe_nonneg_int(w.get("_train_count")),
+        "train_attempts": _safe_nonneg_int(w.get("_train_attempts")),
     }
 
 
