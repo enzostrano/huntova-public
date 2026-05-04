@@ -6,6 +6,88 @@ Versioning: `0.1.0aNN` alpha increments. Public install path: `pipx install hunt
 
 ---
 
+## 0.1.0a483 — May 4 2026 — Destructive wizard endpoints (`/api/wizard/reset`, `/api/wizard/start-retrain`) relied solely on the double-submit CSRF token; missing the OWASP "combine token + Origin verification" defense-in-depth that catches subdomain-takeover, header-injection, and future-regression CSRF paths; CSRFMiddleware now enforces a same-origin gate after the token check via `_is_trusted_origin` + `_WIZARD_DESTRUCTIVE_ORIGIN_GATED_PATHS` (BRAIN-114)
+
+### Bug fix (BRAIN-114, defense-in-depth Origin gate)
+
+The CSRFMiddleware enforces double-submit cookie
+validation (matching `hv_csrf` cookie ↔ `X-CSRF-Token`
+header) on every non-exempt POST. Combined with
+SameSite=Lax on the session + CSRF cookies, the
+mainline browser-CSRF threat is already mitigated: a
+malicious site can't trigger
+`/api/wizard/reset` against an authenticated user
+because the cookies don't ride on cross-site POSTs.
+
+But destructive endpoints — the ones that wipe
+persistent state on success — deserve defense in
+depth:
+- A subdomain takeover or future cookie-policy
+  regression could let a same-site attacker bypass
+  SameSite.
+- Header-injection or proxy bugs could leak the CSRF
+  cookie into a request the user didn't initiate.
+- Future middleware changes could accidentally widen
+  the exempt list and remove the token check entirely.
+
+Per OWASP CSRF Prevention Cheat Sheet: combine
+token-based defenses with strict Origin verification
+on destructive endpoints. Browser-originated POSTs
+always carry `Origin`. Same-origin POSTs carry our
+PUBLIC_URL or a localhost host. CLI/curl scripts don't
+send Origin at all (allowed). An Origin that is set
+AND points to an attacker domain is the smoking gun.
+
+Fix: three module-scope additions near the existing
+CSRF infrastructure.
+- `_WIZARD_DESTRUCTIVE_ORIGIN_GATED_PATHS = {
+  "/api/wizard/reset", "/api/wizard/start-retrain"}`
+  enumerates the routes that get the extra Origin gate.
+  Auditable as a single set rather than scattered
+  across endpoint bodies.
+- `_is_trusted_origin(origin) -> bool` accepts empty
+  Origin (CLI/curl), localhost variants on any port,
+  and origins matching PUBLIC_URL (cloud mode). All
+  other set Origins reject. Stricter than the older
+  `_is_local_origin` because it also accepts cloud
+  PUBLIC_URL.
+- `CSRFMiddleware`: after the token check passes, if
+  the path is in the destructive set AND
+  `_is_trusted_origin(Origin)` is False, return 403
+  `{"ok": false, "error": "bad_origin"}`. Same
+  status + error_kind shape used by the existing
+  exempt-path Origin rejection so clients can branch
+  uniformly.
+
+The token check still runs first; the Origin gate is
+purely additive. Browser-originated same-origin POSTs
+from the live UI are unaffected. CLI scripts (no Origin)
+remain unaffected. Only browser-originated cross-origin
+POSTs that somehow have a valid CSRF token would be
+caught — exactly the class this gate is designed for.
+
+9 new regression tests in
+`test_wizard_destructive_origin_enforcement.py`:
+- Helper exists at module scope.
+- Helper accepts empty / localhost / [::1] /
+  PUBLIC_URL Origins.
+- Helper rejects evil.com and prefix-match traps
+  (huntova.com.evil.com).
+- Destructive-paths set is documented and contains
+  reset + start-retrain.
+- Source-level: middleware references the set, calls
+  the helper, returns 403 on failure with the
+  documented `bad_origin` error kind.
+
+509 / 509 tests passing.
+
+### Files
+
+- `server.py`: new `_WIZARD_DESTRUCTIVE_ORIGIN_GATED_PATHS` set + `_is_trusted_origin(origin)` helper at module scope near the CSRF infrastructure. CSRFMiddleware extended with a destructive-path Origin gate after the existing `validate_csrf` check.
+- `tests/test_wizard_destructive_origin_enforcement.py`: new — 9 tests guarding the defense-in-depth Origin contract.
+
+---
+
 ## 0.1.0a482 — May 4 2026 — BRAIN-112's RateLimit-* headers fired only on 429s, so clients could only learn the budget by accidentally exceeding it; success responses now carry the same triple via `_burst_rate_headers` + `_attach_burst_rate_headers`, turning rate-limit metadata into a continuous client-facing control surface instead of a punishment-only signal (BRAIN-113)
 
 ### Bug fix (BRAIN-113, RateLimit-* on success path)

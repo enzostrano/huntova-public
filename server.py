@@ -337,6 +337,54 @@ CSRF_EXEMPT_PATHS = {
 # verification (HMAC, Bearer token, anonymous public access). For
 # these, the CSRFMiddleware doesn't need to also enforce Origin —
 # the endpoint's own auth check is sufficient.
+# a483 (BRAIN-114): destructive wizard endpoints get an
+# extra Origin gate enforced by CSRFMiddleware AFTER the
+# CSRF token check passes. Per OWASP CSRF cheat sheet:
+# defense-in-depth — even if the double-submit token
+# somehow rides along (subdomain takeover, header
+# injection, future regression), a browser-originated
+# cross-origin POST will still carry an attacker Origin
+# that this gate rejects. Same-origin browser POSTs and
+# CLI/curl scripts (no Origin header at all) pass.
+_WIZARD_DESTRUCTIVE_ORIGIN_GATED_PATHS = {
+    "/api/wizard/reset",
+    "/api/wizard/start-retrain",
+}
+
+
+def _is_trusted_origin(origin) -> bool:
+    """True if `origin` is empty (CLI/curl), a localhost
+    host on any port (browser-from-local-UI), or matches
+    PUBLIC_URL (browser-from-cloud-UI). False otherwise.
+
+    Used by destructive wizard endpoints (BRAIN-114) and
+    can be reused by any other defense-in-depth Origin
+    gate. Stricter than `_is_local_origin` because it
+    accepts cloud PUBLIC_URL — that helper was authored
+    pre-cloud-mode and intentionally only accepts local.
+    """
+    if not origin:
+        # Empty Origin → not a browser → CLI / curl /
+        # cli_remote / install.sh. Allow.
+        return True
+    o = str(origin).strip().lower().rstrip("/")
+    for prefix in (
+        "http://127.0.0.1", "http://localhost",
+        "https://127.0.0.1", "https://localhost",
+        "http://[::1]", "https://[::1]",
+    ):
+        if o == prefix or o.startswith(prefix + ":") or o.startswith(prefix + "/"):
+            return True
+    try:
+        from config import PUBLIC_URL as _pub
+        pub = str(_pub or "").strip().lower().rstrip("/")
+        if pub and (o == pub or o.startswith(pub + "/")):
+            return True
+    except Exception:
+        pass
+    return False
+
+
 _CSRF_EXEMPT_ALSO_ORIGIN_EXEMPT = {
     "/auth/signup", "/auth/login", "/auth/logout",
     "/auth/forgot-password", "/auth/reset-password",
@@ -378,6 +426,23 @@ class CSRFMiddleware(BaseHTTPMiddleware):
         # Validate CSRF token on all other POST routes
         if not validate_csrf(request):
             return JSONResponse({"ok": False, "error": "CSRF validation failed"}, status_code=403)
+        # a483 (BRAIN-114): defense-in-depth Origin gate on
+        # destructive wizard endpoints. The double-submit
+        # token + SameSite=Lax on session/CSRF cookies
+        # already blocks browser-originated cross-origin
+        # POSTs. This extra Origin check is layered defense
+        # for subdomain-takeover scenarios, header injection,
+        # and future regressions — destructive endpoints
+        # warrant the extra rigor. Per Huntova engineering
+        # review on CSRF + OWASP CSRF Prevention Cheat Sheet:
+        # combine token-based defenses with strict Origin
+        # verification on destructive endpoints.
+        if request.url.path in _WIZARD_DESTRUCTIVE_ORIGIN_GATED_PATHS:
+            if not _is_trusted_origin(request.headers.get("origin") or ""):
+                return JSONResponse(
+                    {"ok": False, "error": "bad_origin"},
+                    status_code=403,
+                )
         return await call_next(request)
 
 app.add_middleware(CSRFMiddleware)
