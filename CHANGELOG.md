@@ -6,6 +6,86 @@ Versioning: `0.1.0aNN` alpha increments. Public install path: `pipx install hunt
 
 ---
 
+## 0.1.0a486 — May 4 2026 — Wizard mutating endpoints had key-count + list-count caps but no top-level body byte cap; a single oversized field value (e.g. 10 MB string) passed every shape gate and forced parse + merge work; new `_WIZARD_BODY_BYTES_MAX` constant + `_enforce_body_byte_cap` helper reject 413 before any json/merge work on `/api/wizard/save-progress` and `/api/wizard/complete` (BRAIN-117)
+
+### Bug fix (BRAIN-117, OWASP API4:2023 unrestricted resource consumption)
+
+BRAIN-98 (a463) caps `_wizard_answers` at 150 keys.
+BRAIN-102 / BRAIN-103 cap `_knowledge` and
+`_phase5_questions` lengths. BRAIN-13 clips per-field
+strings AFTER parsing. None of these constrained the
+top-level request payload size in BYTES.
+
+A client could POST `/api/wizard/save-progress` with:
+
+```json
+{ "answers": { "outreach_tone": "<10 MB blob>" } }
+```
+
+Single key. Passes BRAIN-73 closed-schema. Passes
+BRAIN-98 (only 1 answer key). The server still:
+- Allocates + parses the 10 MB JSON.
+- Merges the giant string into the row before BRAIN-13
+  per-field clipping kicks in.
+- Triggers a needless DB round-trip on
+  `merge_settings` with the bloated blob in scope.
+
+That's exactly the OWASP API4:2023 unrestricted-
+resource-consumption hole: limits exist, but not on
+the dimension that actually drives worst-case request
+cost.
+
+Per Huntova engineering review on resource consumption:
+the byte ceiling complements (does not replace) shape-
+based caps. Reject early, before parse, before merge,
+before any expensive coercion.
+
+Fix: two module-scope additions near the daily-quota
+constants.
+
+- `_WIZARD_BODY_BYTES_MAX` (default 256 KiB,
+  env-overridable via `HV_WIZARD_BODY_BYTES_MAX`).
+  Real wizard payloads (BRAIN-13 4 KB per-field clip
+  × ~10 fields = ~40 KB worst case + JSON overhead)
+  fit comfortably under the cap.
+- `_enforce_body_byte_cap(request, max_bytes)` — async
+  helper that does a two-stage check: Content-Length
+  header first (cheap, no body read) then actual
+  `await request.body()` length (catches lying or
+  missing Content-Length on chunked uploads). Returns
+  (body_bytes, None) on OK, or (None,
+  JSONResponse(413)) on overrun. Body shape:
+  `{ok:false, error_kind: "payload_too_large",
+  max_bytes: N}` — predictable error_kind for clients.
+
+`/api/wizard/save-progress` and `/api/wizard/complete`
+both call the helper BEFORE `request.json()` so an
+oversize body short-circuits without paying parse cost.
+Order: rate-check → byte-cap → json parse → merge
+work. Daily-quota check stays before byte-cap because
+quota is the cheaper denial — but for both endpoints
+the byte-cap runs strictly before the expensive parse.
+
+9 new regression tests in
+`test_wizard_payload_byte_cap.py`:
+- Constant exists, sanity bounds.
+- Helper exists at module scope.
+- Behavioral: rejects via Content-Length header (no
+  body read), rejects via actual body length (lying
+  or missing CL), accepts under-cap, handles malformed
+  Content-Length safely.
+- Source-level: save-progress + complete call the
+  helper, helper call precedes `request.json()`.
+
+537 / 537 tests passing.
+
+### Files
+
+- `server.py`: new `_WIZARD_BODY_BYTES_MAX` constant + `_enforce_body_byte_cap(request, max_bytes)` async helper near the daily-quota constants. `api_wizard_save_progress` and `api_wizard_complete` invoke the helper before `request.json()`.
+- `tests/test_wizard_payload_byte_cap.py`: new — 9 tests guarding the byte-cap contract.
+
+---
+
 ## 0.1.0a485 — May 4 2026 — BRAIN-115 hardened the public read of `_wizard_revision`/`_wizard_epoch` but the WRITE side (BRAIN-14 stale-write guard, BRAIN-81 epoch guard, BRAIN-88 flip mutator, save-progress, reset, admin reset, DNA spawn-epoch capture) still used the crashy `int(... or 0)` pattern; corrupted persisted values 500'd 13 mutating-handler call sites instead of producing a controlled 409 conflict; every write-path capture now uses `_safe_nonneg_int` (BRAIN-116)
 
 ### Bug fix (BRAIN-116, write-side concurrency-token validation)

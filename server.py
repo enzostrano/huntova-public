@@ -675,6 +675,77 @@ _PHASE5_DAILY_MAX = int(os.environ.get("HV_WIZARD_PHASE5_DAILY_MAX") or "50")
 _COMPLETE_DAILY_MAX = int(os.environ.get("HV_WIZARD_COMPLETE_DAILY_MAX") or "30")
 _ASSIST_DAILY_MAX = int(os.environ.get("HV_WIZARD_ASSIST_DAILY_MAX") or "200")
 
+# a486 (BRAIN-117): top-level request-body byte cap on
+# mutating wizard endpoints. OWASP API4:2023 unrestricted
+# resource consumption — key-count caps (BRAIN-98 = 150
+# keys) and list-count caps (BRAIN-102 = 50 items,
+# BRAIN-103 = 5 items) constrain shape but NOT size. A
+# client can send a body with a single key whose value is
+# 10 MB, pass every shape gate, and still force the
+# server to allocate + parse + serialize that blob into
+# the row. The byte cap closes the "few keys, huge body"
+# exhaustion path.
+#
+# 256 KiB default. Real wizard payloads (BRAIN-13 4 KB
+# per-field clip × ~10 fields = ~40 KB worst case + JSON
+# overhead) fit comfortably. Env-overridable via
+# HV_WIZARD_BODY_BYTES_MAX.
+_WIZARD_BODY_BYTES_MAX = int(
+    os.environ.get("HV_WIZARD_BODY_BYTES_MAX") or str(256 * 1024)
+)
+
+
+async def _enforce_body_byte_cap(request, max_bytes: int):
+    """Reject oversize wizard request bodies BEFORE any
+    json parse / merge / model work. Returns
+    (body_bytes, None) on OK, (None, JSONResponse(413))
+    on overrun.
+
+    Two-stage check:
+    1. Content-Length header (cheap, no body read). A
+       lying or missing header falls through to stage 2.
+    2. Actual `await request.body()` length. Catches
+       chunked uploads or clients that under-declare.
+
+    Once `request.body()` runs, the bytes are cached on
+    the Starlette Request so a subsequent
+    `request.json()` reuses them — no double-read cost.
+    """
+    cl = request.headers.get("content-length")
+    if cl is not None:
+        try:
+            declared = int(str(cl).strip())
+        except (ValueError, TypeError):
+            declared = -1
+        if declared > max_bytes:
+            return None, JSONResponse(
+                {
+                    "ok": False,
+                    "error": (
+                        f"Request body too large "
+                        f"(max {max_bytes} bytes)."
+                    ),
+                    "error_kind": "payload_too_large",
+                    "max_bytes": int(max_bytes),
+                },
+                status_code=413,
+            )
+    body = await request.body()
+    if len(body) > max_bytes:
+        return None, JSONResponse(
+            {
+                "ok": False,
+                "error": (
+                    f"Request body too large "
+                    f"(max {max_bytes} bytes)."
+                ),
+                "error_kind": "payload_too_large",
+                "max_bytes": int(max_bytes),
+            },
+            status_code=413,
+        )
+    return body, None
+
 # a478 (BRAIN-109): single source of truth for the wizard
 # DNA state-machine enum. BRAIN-108 introduced this set
 # locally inside agent_control to guard the BRAIN-79 agent
@@ -9011,6 +9082,12 @@ async def api_wizard_complete(request: Request, response: Response, user: dict =
             ),
             "complete_daily_quota_exceeded",
         )
+    # a486 (BRAIN-117): byte-cap BEFORE json parse so a
+    # huge POST is rejected without paying parse cost or
+    # entering merge_settings. OWASP API4:2023.
+    _body_bytes, _too_large = await _enforce_body_byte_cap(request, _WIZARD_BODY_BYTES_MAX)
+    if _too_large is not None:
+        return _too_large
     body = await request.json()
     raw_profile = body.get("profile", {}) or {}
     raw_history = body.get("history", []) or []
@@ -9951,6 +10028,13 @@ async def api_wizard_save_progress(request: Request, response: Response, user: d
         return _rate_limit_429(user["id"], "wizard_save_progress", "Too many saves. Wait a moment.")
     # a482 (BRAIN-113): success path RateLimit-* headers.
     _attach_burst_rate_headers(response, user["id"], "wizard_save_progress")
+    # a486 (BRAIN-117): byte-cap BEFORE json parse so a
+    # 10 MB POST is rejected in microseconds without
+    # paying parse cost. OWASP API4:2023 unrestricted
+    # resource consumption.
+    _body_bytes, _too_large = await _enforce_body_byte_cap(request, _WIZARD_BODY_BYTES_MAX)
+    if _too_large is not None:
+        return _too_large
     body = await request.json()
     answers = body.get("answers", {})
     phase = body.get("phase", 0)
