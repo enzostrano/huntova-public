@@ -5092,6 +5092,15 @@ async def api_setup_key(request: Request):
              "message": "Could not verify local-mode gate; refusing keychain write."},
             status_code=503,
         )
+    # a521 (BRAIN-140): byte-cap BEFORE json parse,
+    # parity with the BRAIN-117/118/122 wizard + agent
+    # body-cap surface. Real setup/key payloads are
+    # tiny ({provider, key, test?}); the 256 KiB cap
+    # is generous + bounds parse cost on hostile
+    # bodies.
+    _body_bytes, _too_large = await _enforce_body_byte_cap(request, _WIZARD_BODY_BYTES_MAX)
+    if _too_large is not None:
+        return _too_large
     try:
         body = await request.json()
     except Exception:
@@ -7101,6 +7110,16 @@ async def api_get_settings(user: dict = Depends(require_user)):
 
 @app.post("/api/settings")
 async def api_save_settings(request: Request, user: dict = Depends(require_user)):
+    # a521 (BRAIN-140): byte-cap BEFORE json parse,
+    # parity with the BRAIN-117/118/122 wizard + agent
+    # body-cap surface. Settings POST has a wide
+    # surface (booking_url, prompts, custom fields...)
+    # — the 256 KiB cap fits real payloads with
+    # generous headroom and rejects hostile bodies
+    # before parse.
+    _body_bytes, _too_large = await _enforce_body_byte_cap(request, _WIZARD_BODY_BYTES_MAX)
+    if _too_large is not None:
+        return _too_large
     body = await request.json()
     s = await db.get_settings(user["id"])
     s = {**DEFAULT_SETTINGS, **s}

@@ -6,6 +6,60 @@ Versioning: `0.1.0aNN` alpha increments. Public install path: `pipx install hunt
 
 ---
 
+## 0.1.0a521 — May 4 2026 — BRAIN-117/118/122 capped wizard + agent mutating endpoints; `/api/setup/key` (first-run keychain writes) and `/api/settings` (general settings POST) were the remaining adjacent-AI-surface oversize-body ingress vectors — both now invoke `_enforce_body_byte_cap(request, _WIZARD_BODY_BYTES_MAX)` before `request.json()` for parity (BRAIN-140)
+
+### Bug fix (BRAIN-140, byte-cap parity at /api/setup/key + /api/settings)
+
+BRAIN-117 (a486) capped /api/wizard/save-progress +
+complete. BRAIN-118 (a487) extended to scan + phase5
++ assist. BRAIN-122 (a491) extended to /agent/control.
+The settings POST surface was the next adjacent
+mutating endpoint with `request.json()` and no byte
+cap.
+
+`/api/setup/key` accepts {provider, key, test?} for
+first-run keychain writes. Real payloads are tiny —
+a provider slug + an API key string. The 256 KiB
+cap fits with massive headroom but rejects hostile
+oversize bodies before parse cost lands on the
+keychain backend.
+
+`/api/settings` accepts the general settings POST
+(booking_url, prompts, custom fields, sequence
+templates, etc.). Wider surface area than setup/key
+but still well under 256 KiB for any legitimate
+payload.
+
+Per Huntova engineering review on adjacent-AI-
+surface parity: every mutating endpoint that accepts
+user-supplied JSON and can trigger meaningful server
+work must enforce the same top-level body byte cap
+before `request.json()` runs.
+
+Fix: both handlers now call `_enforce_body_byte_cap(
+request, _WIZARD_BODY_BYTES_MAX)` before parse.
+Order: rate-check (where applicable) → byte-cap →
+json parse → mutator work. Same shared constant the
+wizard + agent surface uses, so operator tuning
+applies uniformly.
+
+6 new regression tests in
+`tests/test_settings_byte_cap.py`:
+- Source-level: each handler calls
+  `_enforce_body_byte_cap`.
+- Source-level: each call precedes `request.json()`.
+- Source-level: each uses the shared
+  `_WIZARD_BODY_BYTES_MAX` constant.
+
+721 / 721 tests passing.
+
+### Files
+
+- `server.py`: `api_setup_key` + `api_save_settings` invoke `_enforce_body_byte_cap` before `request.json()`.
+- `tests/test_settings_byte_cap.py`: new — 6 tests guarding the byte-cap parity invariant.
+
+---
+
 
 ## 0.1.0a520 — May 4 2026 — Team-of-agents specialist prompts were one-liner stubs that ignored most of the wizard answers; user reported "Team of agents in settings should be prefilled with what he understood from wizard and accordingly prefilled it 30x current text to train the agents perfectly" — `_build_team_prompt_addendum` now produces 200-300 word persona-style briefs per role that interpolate the FULL wizard payload (business_description, target_clients, services, industries, buyer_roles, geographies, outreach_tone, value_propositions, differentiators, pain_points_addressed, example_good_clients, exclusions); `_team_brain_for` was widened to surface the rich paragraph fields (not just the structured lists); the `prompt_addendum` DB cap was raised from 4000 to 8000 chars to fit the new richer text; the existing "Reseed from brain" button on the Team tab regenerates every role's prompt from the latest wizard answers on demand (BRAIN-PROD-4)
 
