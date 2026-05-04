@@ -6,6 +6,43 @@ Versioning: `0.1.0aNN` alpha increments. Public install path: `pipx install hunt
 
 ---
 
+## 0.1.0a511 — May 4 2026 — Update button returned "CSRF validation failed" 403 for users on /jarvis (BRAIN-PROD-1)
+
+### Bug fix (BRAIN-PROD-1, in-browser update flow CSRF parity)
+
+The dashboard "Update" button (a324's one-click `pipx upgrade huntova`
+flow) was returning an error toast instead of starting the upgrade.
+Symptom from a user report: clicking **Install now** on the update
+banner immediately surfaced "Could not start upgrade" — `/api/update/run`
+came back as `403 {"ok": false, "error": "CSRF validation failed"}`.
+
+Root cause: `CSRFMiddleware.dispatch` only set the `hv_csrf` cookie
+on a tight allowlist of HTML entry points (`/`, `/landing`,
+`/dashboard`, `/hunts`, `/agent`, `/ops`, `/account`). The canonical
+chat-first dashboard URL `/jarvis` (plus `/leads`, `/setup`,
+`/plugins`, `/demo` — all of which serve real HTML) was missing from
+the allowlist. A user who deep-linked or refreshed on `/jarvis`
+ended up without an `hv_csrf` cookie. The auto-fetch wrapper in
+`templates/jarvis.html` then submitted POSTs without the
+`X-CSRF-Token` header, and the double-submit check rejected every
+mutation — including the update endpoint.
+
+Fix: extracted the cookie-set route list to a module-level
+`_CSRF_COOKIE_HTML_GET_ALLOWLIST` tuple in `server.py` and added the
+missing `/jarvis`, `/leads`, `/setup`, `/plugins`, `/demo` entries
+so every HTML entry point sets the CSRF cookie when missing.
+
+Regression coverage: `tests/test_update_button.py` asserts
+(1) `/jarvis` is in the allowlist, (2) `/api/update/run` returns
+the `{ok, job_id, reused}` shape the frontend polling loop expects,
+(3) `CSRFMiddleware.dispatch` reads the canonical tuple instead of
+inlining a hardcoded list — so a future copy-paste edit can't undo
+the fix silently.
+
+Files: `server.py:418`, `tests/test_update_button.py`.
+
+---
+
 ## 0.1.0a509 — May 4 2026 — Settings → Engine "preferred provider" picker was a write-only ghost: the form persisted to the user_settings DB row, but `providers.get_provider()` reads `preferred_provider` from `~/.config/huntova/config.toml` via `_load_local_settings()` and never touches the DB in local mode — so the only writer that actually mattered was `/api/setup/key` (the Keys tab), which forces `preferred_provider` to whichever slug the user just saved a key for, regardless of their Engine pick; symptom was "I selected Anthropic but chat says my OpenAI account is out of credits" — new shared `_write_preferred_provider_to_config_toml` helper, called from BOTH `/api/settings` POST and `/api/setup/key`, restores the contract that Engine selections actually drive the chat dispatcher (BRAIN-PROD-2)
 
 ### Bug fix (BRAIN-PROD-2, Engine selection now reaches the chat dispatcher)

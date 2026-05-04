@@ -415,13 +415,38 @@ _CSRF_EXEMPT_ALSO_ORIGIN_EXEMPT = {
 }
 
 
+_CSRF_COOKIE_HTML_GET_ALLOWLIST = (
+    "/", "/landing", "/dashboard", "/hunts", "/agent", "/ops",
+    "/account",
+    # a511 (BRAIN-PROD-1): /jarvis serves the same chat-first
+    # dashboard as /, but was missing from the cookie-set allowlist.
+    # Users who deep-linked or refreshed on /jarvis (or its
+    # legacy variants) ended up without an `hv_csrf` cookie, so
+    # the in-browser update flow's POST to /api/update/run came
+    # back as 403 {"error": "CSRF validation failed"} — the
+    # "Update button returns error" report from Huntova users.
+    # Adding the missing routes ensures the cookie is set on
+    # every HTML entry point the dashboard is served from.
+    # Per Huntova engineering review on update-flow CSRF parity.
+    "/jarvis", "/leads", "/setup", "/plugins", "/demo",
+)
+
+
 class CSRFMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request, call_next):
         # Only validate POST/PUT/DELETE/PATCH
         if request.method in ("GET", "HEAD", "OPTIONS"):
             response = await call_next(request)
-            # Set CSRF cookie on page loads if missing
-            if not request.cookies.get(CSRF_COOKIE_NAME) and request.url.path in ("/", "/landing", "/dashboard", "/hunts", "/agent", "/ops", "/account"):
+            # Set CSRF cookie on page loads if missing.
+            # a511 (BRAIN-PROD-1): widened the allowlist to include
+            # /jarvis + other HTML entry points. The previous tight
+            # allowlist meant any deep-link or refresh that landed on
+            # /jarvis left the user without an hv_csrf cookie, which
+            # made every subsequent POST fail with "CSRF validation
+            # failed" — surfaced as the "Update button returns error"
+            # bug report. See _CSRF_COOKIE_HTML_GET_ALLOWLIST above.
+            if (not request.cookies.get(CSRF_COOKIE_NAME)
+                    and request.url.path in _CSRF_COOKIE_HTML_GET_ALLOWLIST):
                 set_csrf_cookie(response)
             return response
         # Skip exempt paths
