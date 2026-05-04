@@ -884,45 +884,206 @@ def check_robots_txt(url):
     # The agent uses polite delays (0.4s between URLs) and identifies as HuntovaBot.
     return True
 
+GDPR_AUDIT_JSON = os.path.join(BASE_DIR, "gdpr_audit.json")
+
+
+def _parse_iso_utc(value):
+    """Parse ISO-8601 to a tz-aware UTC datetime. Returns None on
+    falsy / unparseable input. Naive timestamps are treated as UTC.
+
+    GDPR-PURGE-1 fix: `purge_expired_leads` previously did a raw
+    string compare (`l['found_date'] > cutoff`). That works only when
+    every value carries the same `+00:00` (or `Z`) suffix at the same
+    precision. A naive ISO string like "2024-01-01T00:00:00" sorts
+    BEFORE the same instant as "2024-01-01T00:00:00+00:00" because
+    the suffix-less form is shorter — meaning "uncertain" leads got
+    silently classified as expired and purged. server.py already
+    paid for this lesson once (bug #41 — naive vs aware in
+    /api/dashboard recent_leads). Centralise the helper instead of
+    re-deriving it.
+    """
+    if not value:
+        return None
+    try:
+        s = str(value).replace("Z", "+00:00")
+        dt = datetime.fromisoformat(s)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt
+    except Exception:
+        return None
+
+
+def _record_gdpr_audit(action, identifier, before, after, extra=None):
+    """Append a tamper-evident-ish row to gdpr_audit.json.
+
+    GDPR-PURGE-3: compliance demonstration (Art. 30 — Records of
+    Processing). The privacy page promises an audit trail of data
+    operations; without writing it down we can't actually produce it
+    on a regulator request. Local-mode-only — cloud has admin_audit_log.
+    """
+    try:
+        if _ctx():  # cloud / per-user mode handles audit via DB layer
+            return
+        rows = _safe_read(GDPR_AUDIT_JSON, [])
+        if not isinstance(rows, list):
+            rows = []
+        row = {
+            "ts": datetime.now(timezone.utc).isoformat(),
+            "action": action,
+            "identifier_hash": hashlib.sha256(
+                (identifier or "").lower().encode("utf-8")
+            ).hexdigest()[:16],
+            "deleted": int(before - after) if (before is not None and after is not None) else None,
+            "before": before,
+            "after": after,
+        }
+        if extra:
+            row.update(extra)
+        rows.append(row)
+        # Keep at most 5000 audit rows — large enough for a year of
+        # weekly purges + ad-hoc erasures, small enough to stay cheap.
+        if len(rows) > 5000:
+            rows = rows[-5000:]
+        _atomic_write(GDPR_AUDIT_JSON, rows)
+    except Exception:
+        pass
+
+
 def purge_expired_leads():
-    """Auto-delete leads older than DATA_RETENTION_DAYS (GDPR Article 5(1)(e))."""
+    """Auto-delete leads older than DATA_RETENTION_DAYS (GDPR Article 5(1)(e)).
+
+    GDPR-PURGE-1 fix wave:
+    1. `_parse_iso_utc` instead of lexicographic string compare so
+       naive timestamps don't get silently dropped.
+    2. Inverted archive policy: previously `archived_date or found_date
+       or "" > cutoff` meant any archived lead with a missing/empty
+       date was kept (empty string is never > cutoff is False, so it
+       got DELETED — not kept — opposite of the active-leads branch
+       which keeps unknowns). Use `_parse_iso_utc` and align the two
+       branches: unknown date ⇒ keep (treat as recent).
+    3. After a purge, rebuild seen-history fingerprints so emails that
+       were in fingerprint form (when `lead_dedupe_key=email`) get
+       wiped too.
+    """
     try:
         from datetime import timedelta
         leads = load_leads()
-        cutoff = (datetime.now(timezone.utc) - timedelta(days=DATA_RETENTION_DAYS)).isoformat()
-        active = [l for l in leads if not l.get("found_date") or l["found_date"] > cutoff]
+        cutoff_dt = datetime.now(timezone.utc) - timedelta(days=DATA_RETENTION_DAYS)
+
+        def _keep(lead, key):
+            dt = _parse_iso_utc(lead.get(key))
+            # No parseable date ⇒ keep (we can't prove it's expired).
+            return dt is None or dt > cutoff_dt
+
+        active = [l for l in leads if _keep(l, "found_date")]
         purged = len(leads) - len(active)
         if purged > 0:
             save_leads_file(active)
             emit_log(f"GDPR: Purged {purged} leads older than {DATA_RETENTION_DAYS} days", "save")
-        # Also purge archive
+
+        # Also purge archive — prefer archived_date, fall back to found_date.
         archived = _safe_read(ARCHIVED_JSON, [])
-        archived = [l for l in archived if (l.get("archived_date") or l.get("found_date") or "") > cutoff]
-        _atomic_write(ARCHIVED_JSON, archived)
+        if isinstance(archived, list):
+            def _keep_arch(l):
+                dt = (_parse_iso_utc(l.get("archived_date"))
+                      or _parse_iso_utc(l.get("found_date")))
+                return dt is None or dt > cutoff_dt
+            archived_kept = [l for l in archived if _keep_arch(l)]
+            arch_purged = len(archived) - len(archived_kept)
+            if arch_purged:
+                _atomic_write(ARCHIVED_JSON, archived_kept)
+
+        # Rebuild seen-history from surviving leads if dedupe_key=email
+        # (in which case the fingerprint is `email:foo@bar.com` plain-
+        # text). Domain/url modes don't store PII so leaving stale
+        # fingerprints is fine.
+        try:
+            _mode = (load_settings().get("lead_dedupe_key") or "domain").strip().lower()
+        except Exception:
+            _mode = "domain"
+        if purged > 0 and _mode == "email":
+            _new_fps = set()
+            for l in active:
+                _new_fps.add(make_fingerprint(l))
+                _new_fps.add(make_fingerprint_legacy(l))
+            global _seen_urls, _seen_fps
+            _seen_fps = _new_fps
+            save_seen_history()
+
+        _record_gdpr_audit(
+            "purge_expired",
+            f"retention_days={DATA_RETENTION_DAYS}",
+            before=len(leads),
+            after=len(active),
+        )
     except Exception as e:
         try: emit_log(f"GDPR purge error: {e}", "warn")
         except Exception: pass
 
+
+def _email_domain(email):
+    """Lowercase domain part of an email, or '' if not parseable."""
+    if not email or "@" not in email:
+        return ""
+    return email.split("@", 1)[1].strip().lower()
+
+
 def gdpr_erasure(identifier):
-    """GDPR Article 17 — Right to Erasure. Delete ALL data matching email or domain."""
+    """GDPR Article 17 — Right to Erasure. Delete ALL data matching email or domain.
+
+    GDPR-PURGE-2 fix wave:
+    1. Domain-erasure now ALSO deletes leads where the contact_email
+       sits on that domain — previously a lead with
+       `org_website=https://acme.com` and `contact_email=ceo@acme.com`
+       got deleted (matched on org_website), but a referral lead with
+       `org_website=https://referrer.com` + `contact_email=ceo@acme.com`
+       (the data-subject's email) kept the email.
+    2. Domain-erasure scrubs leads whose `_all_emails_found` contains
+       an email on the target domain (parity with email path which
+       already checks _all_emails_found).
+    3. Wizard data scrub: if the user's wizard contains the identifier
+       in any free-text field, replace it with `[redacted]`. The
+       wizard is settings.json::wizard — these fields can hold pasted
+       lead/contact info. Scrubbing keeps the agent functional.
+    4. Audit log record (Art. 30 demonstration).
+    """
     leads = load_leads()
-    archived = _safe_read(ARCHIVED_JSON, [])
+    archived = _safe_read(ARCHIVED_JSON, []) or []
     before_count = len(leads) + len(archived)
-    if "@" in identifier:
-        # Erase by email
-        email = identifier.lower().strip()
+    ident = (identifier or "").strip()
+    is_email = "@" in ident
+
+    if is_email:
+        email = ident.lower()
         leads = [l for l in leads if (l.get("contact_email") or "").lower() != email
                  and email not in [e.lower() for e in (l.get("_all_emails_found") or [])]]
-        archived = [l for l in archived if (l.get("contact_email") or "").lower() != email]
+        archived = [l for l in archived if (l.get("contact_email") or "").lower() != email
+                    and email not in [e.lower() for e in (l.get("_all_emails_found") or [])]]
     else:
-        # Erase by domain
-        domain = identifier.lower().replace("www.","").strip()
-        leads = [l for l in leads if urlparse(l.get("org_website") or "").netloc.lower().replace("www.","") != domain
-                 and urlparse(l.get("url") or "").netloc.lower().replace("www.","") != domain]
-        archived = [l for l in archived if urlparse(l.get("org_website") or "").netloc.lower().replace("www.","") != domain]
+        domain = ident.lower().replace("www.", "").lstrip(".")
+
+        def _matches_domain(l):
+            if urlparse(l.get("org_website") or "").netloc.lower().replace("www.", "") == domain:
+                return True
+            if urlparse(l.get("url") or "").netloc.lower().replace("www.", "") == domain:
+                return True
+            # Contact-email on the target domain.
+            if _email_domain(l.get("contact_email") or "") == domain:
+                return True
+            # Any harvested email on the target domain.
+            for e in (l.get("_all_emails_found") or []):
+                if _email_domain(e) == domain:
+                    return True
+            return False
+
+        leads = [l for l in leads if not _matches_domain(l)]
+        archived = [l for l in archived if not _matches_domain(l)]
+
     after_count = len(leads) + len(archived)
     save_leads_file(leads)
     _atomic_write(ARCHIVED_JSON, archived)
+
     # Rebuild seen history from remaining leads. Prefer the per-user
     # thread-local set if a ctx is active so concurrent gdpr_erasure
     # calls (theoretical at MAX_CONCURRENT_AGENTS=1, but adopting the
@@ -939,7 +1100,55 @@ def gdpr_erasure(identifier):
         global _seen_urls, _seen_fps
         _seen_fps = _new_fps
     save_seen_history()
-    return {"deleted": before_count - after_count, "remaining": len(leads)}
+
+    # Wizard scrub — only in single-user / local mode. Cloud wizard
+    # data lives per-user in DB; the cloud admin GDPR path is
+    # `db.gdpr_erasure` which has its own surface.
+    wizard_redactions = 0
+    try:
+        if not _ctx():
+            settings = load_settings() or {}
+            wiz = settings.get("wizard") or {}
+            if isinstance(wiz, dict) and wiz:
+                changed = False
+                token_lower = ident.lower()
+                for k, v in list(wiz.items()):
+                    if isinstance(v, str) and token_lower in v.lower():
+                        wiz[k] = re.sub(re.escape(ident), "[redacted]",
+                                        v, flags=re.IGNORECASE)
+                        wizard_redactions += 1
+                        changed = True
+                    elif isinstance(v, list):
+                        new_list = []
+                        list_changed = False
+                        for item in v:
+                            if isinstance(item, str) and token_lower in item.lower():
+                                new_list.append(re.sub(re.escape(ident),
+                                                        "[redacted]", item,
+                                                        flags=re.IGNORECASE))
+                                list_changed = True
+                            else:
+                                new_list.append(item)
+                        if list_changed:
+                            wiz[k] = new_list
+                            wizard_redactions += 1
+                            changed = True
+                if changed:
+                    settings["wizard"] = wiz
+                    save_settings(settings)
+    except Exception:
+        pass
+
+    _record_gdpr_audit(
+        "erasure_email" if is_email else "erasure_domain",
+        ident,
+        before=before_count,
+        after=after_count,
+        extra={"wizard_redactions": wizard_redactions} if wizard_redactions else None,
+    )
+
+    return {"deleted": before_count - after_count, "remaining": len(leads),
+            "wizard_redactions": wizard_redactions}
 
 def load_master_leads(): return _safe_read(MASTER_LEADS_JSON, [])
 

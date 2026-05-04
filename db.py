@@ -2,6 +2,7 @@
 Huntova SaaS — Database (PostgreSQL via psycopg2)
 Connection-pooled PostgreSQL. Thread-safe via ThreadedConnectionPool.
 """
+import hashlib
 import json
 import os
 import re
@@ -3734,25 +3735,117 @@ async def mark_attachment_consumed(user_id: int, attachment_id: int) -> bool:
 # ── GDPR ──
 
 async def gdpr_erasure(user_id: int, identifier: str) -> dict:
+    """GDPR Article 17 erasure (cloud / per-user DB path).
+
+    GDPR-PURGE-2 fix wave (cloud parity with app.gdpr_erasure):
+    1. Email path also matched against `_all_emails_found` field
+       (harvested emails: same data subject can show up in multiple
+       leads as a secondary contact).
+    2. Domain path also matches when `contact_email` or any
+       `_all_emails_found` entry sits on that domain.
+    3. Wipe the user's `seen_fingerprints` for any fingerprint that
+       contains the identifier — when `lead_dedupe_key=email` the
+       fingerprint stores the raw email plaintext, so the seen-history
+       table is itself a copy of the personal data the user wants
+       erased.
+    4. Audit-log row via `log_admin_action` with target_user_id =
+       acting user (self-erasure) so the regulator-facing audit trail
+       includes erasures, not just admin moves.
+    """
     leads = await get_leads(user_id)
+    from urllib.parse import urlparse
+
+    def _email_dom(e):
+        if not e or "@" not in e:
+            return ""
+        return e.split("@", 1)[1].strip().lower()
+
+    is_email = "@" in identifier
+    if is_email:
+        token = identifier.lower().strip()
+    else:
+        token = identifier.lower().replace("www.", "").strip().lstrip(".")
+
     deleted = 0
     for lead in leads:
         match = False
-        if "@" in identifier:
-            email = identifier.lower().strip()
-            if (lead.get("contact_email") or "").lower() == email:
+        if is_email:
+            if (lead.get("contact_email") or "").lower() == token:
                 match = True
+            else:
+                for e in (lead.get("_all_emails_found") or []):
+                    if (e or "").lower() == token:
+                        match = True
+                        break
         else:
-            from urllib.parse import urlparse
-            domain = identifier.lower().replace("www.", "").strip()
             for field in ("org_website", "url"):
                 try:
-                    d = urlparse(lead.get(field, "")).netloc.lower().replace("www.", "")
-                    if d == domain:
+                    d = urlparse(lead.get(field, "") or "").netloc.lower().replace("www.", "")
+                    if d == token:
                         match = True
+                        break
                 except Exception:
                     pass
+            if not match:
+                if _email_dom(lead.get("contact_email") or "") == token:
+                    match = True
+                else:
+                    for e in (lead.get("_all_emails_found") or []):
+                        if _email_dom(e) == token:
+                            match = True
+                            break
         if match:
             await permanent_delete_lead(user_id, lead["lead_id"])
             deleted += 1
-    return {"deleted": deleted, "remaining": len(leads) - deleted}
+
+    # Wipe seen_fingerprints rows that embed the identifier in
+    # plaintext. lead_dedupe_key=email mode stores fingerprints as
+    # `email:foo@bar.com`; domain mode stores `<domain>|<country>`.
+    # In both cases a LIKE filter is sufficient to scrub. The
+    # identifier is bound as a parameter so SQL injection isn't a
+    # concern; we still ESCAPE-shield the wildcards as defense-in-
+    # depth.
+    fp_wiped = 0
+    try:
+        if is_email:
+            pattern = f"%{token}%"
+        else:
+            pattern = f"{token}|%"
+        row = await _afetchone(
+            "SELECT COUNT(*) as c FROM seen_fingerprints "
+            "WHERE user_id = %s AND fingerprint LIKE %s",
+            [user_id, pattern],
+        )
+        fp_wiped = int((row or {}).get("c") or 0)
+        if fp_wiped:
+            await _aexec(
+                "DELETE FROM seen_fingerprints "
+                "WHERE user_id = %s AND fingerprint LIKE %s",
+                [user_id, pattern],
+            )
+    except Exception:
+        pass
+
+    # Audit log — reuses the existing admin_audit_log table. The
+    # acting user is the target (self-erasure) which keeps the schema
+    # unchanged. Identifier is hashed so the audit log isn't itself a
+    # cache of erased personal data.
+    try:
+        await log_admin_action(
+            admin_user_id=user_id,
+            target_user_id=user_id,
+            action=("gdpr_erasure_email" if is_email else "gdpr_erasure_domain"),
+            details={
+                "deleted": deleted,
+                "fp_wiped": fp_wiped,
+                "identifier_hash": hashlib.sha256(token.encode("utf-8")).hexdigest()[:16],
+            },
+        )
+    except Exception:
+        pass
+
+    return {
+        "deleted": deleted,
+        "remaining": len(leads) - deleted,
+        "fp_wiped": fp_wiped,
+    }

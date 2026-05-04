@@ -1751,6 +1751,9 @@ async def startup():
     # as the process. The loop itself is infinite + per-iteration
     # try/except, so this is the only failure mode left.
     app.state.session_cleanup_task = asyncio.create_task(_session_cleanup_loop())
+    # GDPR-PURGE-1 fix: wire data-retention purge that previously lived
+    # only in app.py's __main__ block (dead under `huntova serve`).
+    app.state.gdpr_retention_task = asyncio.create_task(_gdpr_retention_loop())
 
 
 # a273: module-level strong-ref set for fire-and-forget background tasks.
@@ -1861,6 +1864,49 @@ async def _session_cleanup_loop():
         except Exception:
             pass
         await asyncio.sleep(3600)
+
+
+async def _gdpr_retention_loop():
+    """GDPR-PURGE-1 fix: periodic data-retention purge.
+
+    Previously `purge_expired_leads` lived in app.py's `if __name__ ==
+    '__main__'` startup block — i.e. only ran when someone invoked
+    `python app.py` directly. Under `huntova serve` (the only path
+    real users take) the function existed but was never called, so
+    every install accumulated leads forever despite the privacy page
+    promising 2-year retention.
+
+    Run once on boot, then every 24h. Local mode only — cloud has
+    per-user retention enforced by db.permanent_delete_lead callers
+    + the admin GDPR endpoint.
+    """
+    try:
+        from runtime import CAPABILITIES as _CAPS
+    except Exception:
+        return
+    try:
+        # Run once on boot (after a short delay so first-paint isn't
+        # blocked by JSON I/O).
+        await asyncio.sleep(30)
+        if _CAPS.single_user_mode:
+            try:
+                from app import purge_expired_leads as _purge
+                await asyncio.to_thread(_purge)
+            except Exception as e:
+                print(f"[gdpr] startup purge failed: {e}")
+        # Then every 24h.
+        while True:
+            await asyncio.sleep(86400)
+            if _CAPS.single_user_mode:
+                try:
+                    from app import purge_expired_leads as _purge
+                    await asyncio.to_thread(_purge)
+                except Exception as e:
+                    print(f"[gdpr] daily purge failed: {e}")
+    except asyncio.CancelledError:
+        raise
+    except Exception:
+        pass
 
 
 # ═══════════════════════════════════════════════════════════════

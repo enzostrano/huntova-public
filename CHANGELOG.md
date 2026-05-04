@@ -6,6 +6,102 @@ Versioning: `0.1.0aNN` alpha increments. Public install path: `pipx install hunt
 
 ---
 
+## 0.1.0a1130 — May 4 2026 — GDPR-PURGE-1/2/3: data-retention purge actually runs + erasure scrubs every PII surface
+
+GDPR + data-retention audit. Three load-bearing fixes for the privacy
+posture promised on `/privacy` but not actually enforced by the code,
+plus 14 regression tests.
+
+**GDPR-PURGE-1 — `purge_expired_leads` was dead code under `huntova serve`**
+
+`app.purge_expired_leads()` was only called inside `app.py`'s
+`if __name__ == "__main__"` block (app.py:1019). Under the actual
+entry path (`huntova serve` → `server.py` imports `app`), the
+function existed but never fired. Privacy page promised
+`Data retention — configurable, default 2 years` (server.py:2590);
+reality was infinite retention.
+
+Fix: server.py launches a `_gdpr_retention_loop` task on startup
+(server.py:1855) that calls `purge_expired_leads` once at boot
+(after a 30s delay so first-paint isn't blocked by JSON I/O) and
+then every 24h. Task is stashed on `app.state.gdpr_retention_task`
+to keep a strong ref — same lesson the `_session_cleanup_loop`
+already learned (long-tail bug #42).
+
+**GDPR-PURGE-1b — string-compare on ISO timestamps drops naive dates silently**
+
+The cutoff comparison was lexicographic: `l["found_date"] > cutoff`
+where both sides are raw ISO strings. That works only when every
+lead's `found_date` carries the same timezone suffix at the same
+precision. A naive ISO string like `2024-01-01T00:00:00` sorts
+inconsistently with the tz-aware cutoff `2024-01-01T00:00:00+00:00`
+because the suffix tilts the order even when the underlying instant
+matches. server.py paid for this lesson once already (bug #41 — naive
+vs aware in `/api/dashboard` recent_leads). Centralised the fix into
+`app._parse_iso_utc()` and rewrote `purge_expired_leads` to do
+datetime compares on parsed values.
+
+**GDPR-PURGE-1c — archive-purge branch was the OPPOSITE of active-purge branch**
+
+Active branch: `not l.get("found_date") or l["found_date"] > cutoff`
+→ unknown date ⇒ KEEP. Archive branch:
+`(l.get("archived_date") or l.get("found_date") or "") > cutoff`
+→ unknown date ⇒ empty string ⇒ never > cutoff ⇒ DELETE. Two
+opposite policies on the same compliance question. Aligned both:
+unknown date ⇒ keep (purging on uncertainty is data loss).
+
+**GDPR-PURGE-2 — erasure scrubs every PII surface**
+
+`app.gdpr_erasure` and `db.gdpr_erasure` had multiple data-leak paths
+where the data subject's email survived a "right to erasure" request:
+
+- Domain-erasure (e.g. "delete everything related to acme.com") only
+  matched `org_website` / `url` netloc. A referral lead with
+  `org_website=https://referrer.com` and `contact_email=ceo@acme.com`
+  kept the email. Now matches `contact_email` AND every entry in
+  `_all_emails_found` by email-domain.
+- Cloud `db.gdpr_erasure` ignored `_all_emails_found` entirely — the
+  list of harvested emails on a lead, harvested from contact pages
+  during qualify. A second occurrence of the data subject as a
+  secondary contact survived the erasure.
+- Cloud `db.gdpr_erasure` didn't wipe `seen_fingerprints` rows. Under
+  `lead_dedupe_key=email` the fingerprint stores the raw email
+  plaintext (`email:foo@bar.com` — see `app.make_fingerprint`
+  app.py:1591), so the seen-history table is itself a copy of the
+  personal data the user wants erased. Re-discovering the same lead
+  from search results would have re-populated leads from a stale
+  fingerprint. Now wipes by `LIKE` filter (parameter-bound, so safe).
+- Wizard data: users frequently paste contact emails / names into
+  free-text wizard fields ("we sell to ceo@acme.com and others") to
+  shape ICP. Erasure now scrubs `settings["wizard"]` free-text
+  strings + list items in-place, replacing matches with `[redacted]`.
+  Redact-in-place vs nuking the whole wizard so the agent stays
+  functional.
+
+**GDPR-PURGE-3 — audit trail for compliance demonstration**
+
+Privacy page promised `Audit trail — full logging of data operations`
+(server.py:2590). Pre-fix: zero rows written when an erasure ran.
+Local mode now appends to `gdpr_audit.json` (rolling 5000-row cap).
+Cloud mode now writes to the existing `admin_audit_log` table via
+`log_admin_action`. **Identifier is hashed (sha256, 16 hex)** so the
+audit log itself doesn't become a cache of erased personal data —
+which is exactly what a regulator audit would look at next.
+
+**Tests:** 14 invariant tests in `test_gdpr_purge_audit.py`. Pinned
+behaviours: server.py wires the retention loop, `_parse_iso_utc`
+exists and handles naive/Z/+00:00, expired leads get dropped,
+recent naive-ISO leads do NOT get dropped, missing-date leads are
+kept, archive branch matches active branch, email-erasure unchanged,
+domain-erasure scrubs `contact_email` + `_all_emails_found`,
+local audit row is written + identifier is hashed, wizard free-text
+gets redacted, cloud parity for `_all_emails_found` +
+seen_fingerprints + admin_audit_log.
+
+1042 tests pass (was 1028).
+
+---
+
 ## 0.1.0a1000 — May 4 2026 — Audit-sweep batch BRAIN-168..170 — tui.py sanitization (1 standing-order violation removed: tagline that revealed AI authorship; replaced with neutral provider-naming) + 12 invariant tests on ANSI strip-on-non-TTY / open_url scheme + CI + HV_NO_BROWSER gates / SSH-no-display detection / ASCII-only banner; auth.py token + password helpers (17 tests pinning bcrypt format + random-salt + verify_password defensive empties + generate_token uniqueness/url-safety + bug-#72 verification token user_id binding + bug-#70 reset token password_hash fingerprint binding + SECRET_KEY rotation invalidation); app.humanise_ai_error invariants (18 tests pinning 401/402/429/404/timeout classification across all 8 call-sites — chat dispatcher, wizard/scan, research, DNA gen, wizard-assist, lead-rewrite, specialist team, provider init — plus 240-char message cap, no-traceback-leak, provider-label-in-every-branch)
 
 ### Lockdown bundle (BRAIN-168..170)
