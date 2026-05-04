@@ -6,6 +6,20 @@ Versioning: `0.1.0aNN` alpha increments. Public install path: `pipx install hunt
 
 ---
 
+## 0.1.0a566 — May 4 2026 — `DEFAULT_SETTINGS` shape integrity audit — non-empty dict, all string keys, JSON-serialisable, `wizard` field (if present) is dict-shaped, no leaked function/class objects (BRAIN-155)
+
+### Lockdown (BRAIN-155, DEFAULT_SETTINGS shape)
+
+`DEFAULT_SETTINGS` is the row template every `merge_settings` mutator starts from. A typo or accidental mutation can silently break every wizard write path. Blanket regression test codifies the invariants.
+
+5 new tests in `tests/test_default_settings_shape_audit.py`. No source changes.
+
+### Files
+- `tests/test_default_settings_shape_audit.py`: new — 5 tests.
+- `cli.py` + `pyproject.toml` + `CHANGELOG.md`.
+
+---
+
 ## 0.1.0a565 — May 4 2026 — CSRF middleware path-set lattice integrity audit — `_CSRF_EXEMPT_ALSO_ORIGIN_EXEMPT` ⊆ `CSRF_EXEMPT_PATHS`; `_WIZARD_DESTRUCTIVE_ORIGIN_GATED_PATHS` ∩ `CSRF_EXEMPT_PATHS` = ∅; critical wizard mutators NOT exempt; BRAIN-114 destructive paths still gated (BRAIN-154)
 
 ### Lockdown (BRAIN-154, CSRF path-set lattice)
