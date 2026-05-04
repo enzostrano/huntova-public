@@ -6,6 +6,23 @@ Versioning: `0.1.0aNN` alpha increments. Public install path: `pipx install hunt
 
 ---
 
+## 0.1.0a561 — May 4 2026 — Inverse of BRAIN-149 — comprehensive audit catching every `@app.get` route that ALSO accepts POST/PUT/DELETE/PATCH (dual-method routes silently allow state mutation behind read URLs that caching layers + link-previews treat as read-only); 4 regression tests (test file landed standalone earlier; this release formally tags BRAIN-150) (BRAIN-150)
+
+### Lockdown (BRAIN-150, blanket GET-route audit)
+
+BRAIN-149 (a532) caught POST routes accepting GET. The inverse: a GET route also accepting POST silently allows state mutation behind a "read" endpoint. Caching layers + link previews + scrapers treat the URL as read-only — a stray POST poisons subsequent reader caches.
+
+Blanket audit on `app.routes`: every GET must NOT accept POST/PUT/DELETE/PATCH. Sanity bound: 20+ GET routes expected. Critical reads (`/api/wizard/status`, `/agent/events`, `/api/runtime`) explicitly enumerated for router-regression detection.
+
+The test file `tests/test_global_get_route_audit.py` was committed standalone in commit `d518727` to avoid version-bump races with parallel agents shipping a533+. This release formally bumps cli.py + pyproject.toml + CHANGELOG to a561 to tag BRAIN-150 with a release.
+
+### Files
+
+- `tests/test_global_get_route_audit.py` (already committed standalone in d518727).
+- `cli.py` (VERSION → a561) + `pyproject.toml` (version → a561) + `CHANGELOG.md`.
+
+---
+
 ## 0.1.0a560 — May 4 2026 — Per-event SSE payload byte cap on `UserEventBus.emit` — a malformed or oversized lead/log/thought emission could produce a single 50 KiB+ SSE frame the frontend EventSource fails to parse, breaking the live feed for the rest of the run; new `_SSE_EVENT_BYTES_MAX` (32 KiB) + `_clip_sse_event_payload` helper replace oversized frames with a tiny `{_truncated: true, reason: "event_oversize", type: …}` marker, exempt `screenshot` (intentionally large) (BRAIN-147)
 
 ### Bug fix (BRAIN-147, SSE-frame size hygiene)
