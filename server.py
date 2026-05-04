@@ -12686,11 +12686,29 @@ async def api_lead_feedback(request: Request, response: Response, user: dict = D
                 # would silently keep stale DNA while the SSE on the next
                 # line claimed `dna_updated: ok`. Log so the discrepancy
                 # is debuggable.
+                # BRAIN-PROD-7 (a586): only hot-load when an agent is
+                # actively running. Pre-fix: if the agent had stopped
+                # between feedback save (which started this _refine
+                # coroutine) and DNA generation completing, the
+                # coroutine wrote `_cached_dna` + `_dna_dirty` onto a
+                # quiescent context. The next agent run regenerates
+                # DNA at startup but the dirty flag persisted, so the
+                # next run's first batch boundary swapped its fresh
+                # DNA for the stale refine result. Now: gate on
+                # `agent_running` — if no live hunt, the DB save above
+                # is sufficient (next run loads from DB anyway).
                 try:
-                    _ctx._cached_dna = dna
-                    _ctx._dna_dirty = True  # the hunt loop checks + clears this
-                except Exception as _hot_err:
-                    print(f"[DNA] hot-load to ctx failed for user {user['id']}: {type(_hot_err).__name__}: {_hot_err}", flush=True)
+                    _is_running = bool(getattr(_ctx, "agent_running", False))
+                except Exception:
+                    _is_running = False
+                if _is_running:
+                    try:
+                        _ctx._cached_dna = dna
+                        _ctx._dna_dirty = True  # the hunt loop checks + clears this
+                    except Exception as _hot_err:
+                        print(f"[DNA] hot-load to ctx failed for user {user['id']}: {type(_hot_err).__name__}: {_hot_err}", flush=True)
+                else:
+                    print(f"[DNA] Refine completed but no live agent — skipping hot-load (DB write only) for user {user['id']}", flush=True)
                 print(f"[DNA] Auto-refined for user {user['id']} (v{dna.get('version',1)}, {total} feedback items)")
                 try:
                     _ctx.bus.emit("dna_updated", {"ok": True, "trigger": "feedback_refine",

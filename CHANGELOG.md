@@ -6,6 +6,44 @@ Versioning: `0.1.0aNN` alpha increments. Public install path: `pipx install hunt
 
 ---
 
+## 0.1.0a620 — May 4 2026 — Agent-runner concurrency + AGENT-DNA replay-safety hardening (BRAIN-PROD-7)
+
+### Bug fixes (BRAIN-PROD-7, agent-runner restart-safety + DNA hot-load gating)
+
+Audit covered the agent-thread lifecycle in `agent_runner.py`, the AGENT-DNA cache on `ctx._cached_dna` in `app.py`, and the wizard→DNA bridge in `server.py`. Two real defects + a defensive hardening sweep landed:
+
+1. **`_dna_dirty` flag bled across runs.** The feedback-refine background coroutine in `api_lead_feedback` sets `ctx._cached_dna = dna` and `ctx._dna_dirty = True` to signal the running hunt's batch loop to swap in fresh DNA. The hunt loop reads + clears the flag at every batch boundary. If the hunt stopped before the next batch boundary (user clicked Stop, agent crashed, hit max_leads), the dirty flag stayed `True` on the user's context. The `_run_agent_thread` finally block already cleared `_cached_dna`, `seen_urls`, etc., but missed `_dna_dirty`. Result: the next run's first batch boundary saw `dirty=True`, read its OWN fresh `_cached_dna` (just regenerated at run startup), emitted a misleading "Hot-loaded refined DNA mid-hunt" log on a clean baseline, and — if the prior run's `_refine()` coroutine completed between runs — could swap the new run's fresh DNA for a stale refine result.
+
+2. **`_refine()` background coroutine wrote DNA state onto a quiescent context.** The coroutine in `api_lead_feedback._refine` runs fire-and-forget via `_spawn_bg()`. DNA generation takes 10-30s. If the user clicked Stop or the agent finished between feedback save and `_refine` completing, the coroutine still wrote `_cached_dna` + `_dna_dirty` onto the user's context. The DB save was correct; the in-memory writes stranded state on a context whose owning agent had already gone idle. Next run picked up the strand.
+
+Twin fix:
+
+1. `agent_runner._run_agent_thread` finally block resets `ctx._dna_dirty = False` alongside the existing `_cached_dna = None`. Pinned by 14 new regression tests.
+
+2. `server.api_lead_feedback._refine` gates its hot-load writes on `_ctx.agent_running`. If no live hunt, the DB save is sufficient — the next run loads from DB at startup. Logs the skip path so a future debug session can see why the hot-load didn't fire.
+
+### Lease-TTL boundary semantics — pinned strict-expiry comparison
+
+The `_dna_pending_is_stale` helper in `server.py` uses `age > _DNA_PENDING_STALE_AFTER_SEC` (strict greater-than). This is the canonical lease-coherence rule: at exactly `ttl`, the lease is still inside its valid window; only at `ttl + epsilon` is it reclaimable. Inclusive comparison (`age >= ttl`) invites two contenders — one expiring, one claiming — to both believe they own the boundary instant. Validated against external lease-pattern guidance on TTL boundary conditions. Pinned by source-level + behavioural tests so a future refactor can't silently flip the operator.
+
+### Restart-safety + cancellation guarantees — regression-pinned
+
+- `MAX_CONCURRENT_AGENTS == 1` is load-bearing — pinned (subagent slot accounting, SearXNG rate-limit headroom, per-user thread-local agent-ctrl all assume single-agent).
+- `AgentRunner.is_running` self-cleans dead thread entries (OS kill / OOM ghosts) so a user is never permanently locked out of restart.
+- `start_agent` + `_process_queue` honour a pending `action="stop"` on a queued user instead of clobbering the ctrl and spawning the agent anyway (re-pins bug-#64 + bug-#65 fixes).
+- `_check_stop()` in `app.py` consults the thread-local `subagent_cancel_event` so Cancel in the Agent panel halts the 14-page deep-research crawl mid-flight.
+- `HV_DNA_PENDING_STALE_SEC` env override is the single source of truth for lease-TTL — pinned so operators tuning the value find it where they expect.
+
+14 new tests in `tests/test_brain_prod7_concurrency_replay_safety.py` cover the lease-TTL boundary (4 tests, including source-level `> not >=` pin), `_dna_dirty` clearing in finally, `_refine` agent_running gate, ghost-thread self-clean, queue stop-honoring, MAX_CONCURRENT_AGENTS=1 invariant, fail-open recovery for missing/corrupted timestamps, and env-override contract. Total suite: 856 passing on the worktree baseline; the rebased build inherits the parent's 869 plus the 14 new for an effective 883.
+
+### Files
+- `agent_runner.py`: clear `ctx._dna_dirty = False` in `_run_agent_thread` finally (line ~462).
+- `server.py`: gate `_refine()` hot-load writes on `_ctx.agent_running` in `api_lead_feedback` (server.py:12659-12683).
+- `tests/test_brain_prod7_concurrency_replay_safety.py`: new — 14 regression tests.
+- `cli.py` + `pyproject.toml` + `CHANGELOG.md`.
+
+---
+
 ## 0.1.0a610 — May 4 2026 — Chat attachment race: image upload-vs-send race silently dropped attachments; AI replied as if blind with zero user-visible signal (BRAIN-CHAT-1)
 
 ### Bug fix (BRAIN-CHAT-1, chat surface stability — image attachment race condition)

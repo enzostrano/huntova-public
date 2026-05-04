@@ -461,6 +461,24 @@ class AgentRunner:
             ctx._cached_dna = None
             ctx._user_settings = None
             ctx._run_log = []
+            # BRAIN-PROD-7 (a586): clear `_dna_dirty` so a background
+            # `_refine()` coroutine that writes the flag AFTER this
+            # run ends doesn't bleed into the next run's batch loop.
+            # The hot-load reader in app.py treats the flag as "true
+            # = refined DNA waiting for me", but the next run's
+            # `run_agent_scoped()` already regenerates DNA at the
+            # top — a leftover dirty flag causes a misleading
+            # "Hot-loaded refined DNA mid-hunt" emit on a clean
+            # baseline, and worse, can cause the next run to swap
+            # its fresh DNA for a stale refine result mid-hunt
+            # (the refine coroutine completes between clear and
+            # next batch). Per Huntova engineering review on
+            # restart-safety: every replay-safe context flag must
+            # be reset at run-end.
+            try:
+                ctx._dna_dirty = False
+            except Exception:
+                pass
             # Process queue
             self._process_queue()
 
