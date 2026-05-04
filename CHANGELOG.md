@@ -6,6 +6,20 @@ Versioning: `0.1.0aNN` alpha increments. Public install path: `pipx install hunt
 
 ---
 
+## 0.1.0a570 — May 4 2026 — Blanket invariant audit on the BRAIN-* helper family — every defensive helper (`_safe_nonneg_int`, `_normalize_dna_state`, `_clip_to_byte_budget`, `_idempotency_key_clean`, `_normalize_phase5_prefill`, `_normalize_wizard_phase`, `_dna_pending_is_stale`, etc.) handles None / non-string / non-list input without raising — protects every status-emit + every persist path against TypeError on corrupt rows (BRAIN-157)
+
+### Lockdown (BRAIN-157, helper defensiveness sweep)
+
+Every BRAIN-* normalize/clip/coerce helper must defensively handle None and non-expected types. A single unhandled TypeError on a hot-path helper takes down the request — and these helpers are called by `/api/wizard/status` (heartbeat), every save flow, and the agent-control gate.
+
+10 new tests in `tests/test_helper_invariants_audit.py`. No source changes.
+
+### Files
+- `tests/test_helper_invariants_audit.py`: new — 10 tests.
+- `cli.py` + `pyproject.toml` + `CHANGELOG.md`.
+
+---
+
 ## 0.1.0a569 — May 4 2026 — Settings-writer ↔ defaults consistency audit — whitelist still has critical fields, no open-iteration `body.items()` pattern (closed-schema discipline), defaults don't bake real PII (BRAIN-156)
 
 ### Lockdown (BRAIN-156, settings writer drift)
