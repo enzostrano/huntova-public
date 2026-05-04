@@ -585,6 +585,27 @@
     clearStatus(el('key-status'));
   });
 
+  // a590 (BRAIN-PROD-7): map server-side `test_error_kind` to a
+  // wizard-friendly "next action" CTA. The classified label appears
+  // in the red error card so the user knows whether to (a) re-paste
+  // a key, (b) top up their account, (c) wait + retry, or (d) check
+  // their network. Was: every probe failure rendered as a tiny
+  // "⚠ probe failed: <stack trace>" suffix on the green "saved"
+  // banner — and the wizard auto-advanced to step 3 anyway, so the
+  // user never realised their key was wrong until their first hunt
+  // blew up with a cryptic provider error several minutes later.
+  function _kindCtaLabel(kind, providerSlug){
+    var prov = (providerSlug || '').toUpperCase();
+    if (kind === 'auth')       return 'Wrong key. Re-paste or get a fresh ' + prov + ' key.';
+    if (kind === 'credits')    return 'Out of credits. Top up your ' + prov + ' account.';
+    if (kind === 'rate_limit') return 'Rate-limited. Wait 30-60s and try again.';
+    if (kind === 'model_404')  return 'Model not available on ' + prov + '. Pick a different provider.';
+    if (kind === 'timeout')    return prov + ' timed out. Retry or switch provider.';
+    if (kind === 'network')    return 'Network unreachable. Check your connection.';
+    if (kind === 'init')       return 'Provider config invalid. Check the base URL.';
+    return 'Probe failed.';
+  }
+
   el('key-save').addEventListener('click', function(){
     var p = BY_SLUG[state.selectedProvider];
     if (!p) return;
@@ -610,20 +631,55 @@
     }).then(function(r){ return r.json().catch(function(){ return {ok:false, message:'unexpected response'}; }); })
       .then(function(d){
         if (d && d.ok){
-          el('key-input').classList.remove('bad');
-          el('key-input').classList.add('ok');
-          var msg = '✓ saved to ' + (d.backend || 'keychain');
-          if (d.test_passed) msg += ' · live probe ok (' + (d.test_response || '').slice(0,40) + ')';
-          else if (d.test_passed === false) msg += ' · ⚠ probe failed: ' + (d.test_message || 'unknown');
-          setStatus(el('key-status'), 'ok', msg);
+          // a590: distinguish three save-side outcomes:
+          //   (1) probe succeeded — green, auto-advance to step 3.
+          //   (2) probe never ran (do_test=false) — green, advance.
+          //   (3) probe explicitly failed — RED, do NOT auto-advance.
+          //       Show classified CTA + a "Continue anyway" button so
+          //       the user can override (e.g. provider was down at
+          //       probe time but the key is fine).
           state.configured[p.slug] = true;
           renderProviders();
-          setTimeout(function(){
-            el('card-key').style.display = 'none';
-            el('card-done').style.display = '';
-            setStep(3);
-            refreshFs();
-          }, 800);
+          var probeTrulyFailed = (d.test_passed === false);
+          if (!probeTrulyFailed){
+            el('key-input').classList.remove('bad');
+            el('key-input').classList.add('ok');
+            var msg = '✓ saved to ' + (d.backend || 'keychain');
+            if (d.test_passed) msg += ' · live probe ok (' + (d.test_response || '').slice(0,40) + ')';
+            setStatus(el('key-status'), 'ok', msg);
+            setTimeout(function(){
+              el('card-key').style.display = 'none';
+              el('card-done').style.display = '';
+              setStep(3);
+              refreshFs();
+            }, 800);
+          } else {
+            el('key-input').classList.remove('ok');
+            el('key-input').classList.add('bad');
+            // Compose a two-line message: classified next-action +
+            // the humanised explanation from the server.
+            var cta = _kindCtaLabel(d.test_error_kind || 'other', p.slug);
+            var detail = d.test_message || 'unknown error';
+            setStatus(el('key-status'), 'error', cta + ' — ' + detail);
+            el('key-save').disabled = false;
+            // Offer an explicit "Continue anyway" escape hatch so we
+            // don't hard-block users whose provider is mid-incident.
+            var status = el('key-status');
+            var hatch = document.createElement('button');
+            hatch.type = 'button';
+            hatch.className = 'btn btn-ghost';
+            hatch.style.marginLeft = '12px';
+            hatch.style.padding = '4px 12px';
+            hatch.style.fontSize = '12px';
+            hatch.textContent = 'Continue anyway →';
+            hatch.addEventListener('click', function(){
+              el('card-key').style.display = 'none';
+              el('card-done').style.display = '';
+              setStep(3);
+              refreshFs();
+            });
+            status.appendChild(hatch);
+          }
         } else {
           el('key-input').classList.remove('ok');
           el('key-input').classList.add('bad');

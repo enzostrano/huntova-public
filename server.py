@@ -5298,6 +5298,15 @@ async def api_setup_key(request: Request):
     test_passed = None
     test_response = ""
     test_message = ""
+    # a590 (BRAIN-PROD-7): classify probe failure so the wizard can
+    # show the user the *next action* instead of a raw stack trace.
+    # `test_error_kind` is one of: "auth" (401), "credits" (402),
+    # "rate_limit" (429), "model_404" (404 + model in body), "timeout",
+    # "network", "init" (provider import/config failed), "other".
+    # Frontend uses this to (a) pick a friendly tone, (b) decide
+    # whether to refuse auto-advance to step 3, (c) show a "Get a new
+    # key" / "Top up account" / "Try again in 30s" CTA.
+    test_error_kind = ""
     if do_test:
         try:
             from providers import get_provider
@@ -5321,13 +5330,42 @@ async def api_setup_key(request: Request):
                 _emsg = str(e)
                 if key and len(key) >= 8:
                     _emsg = _emsg.replace(key, "***redacted***")
-                test_message = f"{type(e).__name__}: {_emsg[:120]}"
+                # a590: route through humanise_ai_error so the user
+                # sees "Your ANTHROPIC API key is invalid or missing.
+                # Check Settings → Engine → ANTHROPIC key, then retry."
+                # instead of "AuthenticationError: Error code: 401 -
+                # {'error': {'message': 'invalid x-api-key'…}}".
+                try:
+                    from app import humanise_ai_error
+                    test_message = humanise_ai_error(e, provider_name=provider)
+                except Exception:
+                    test_message = f"{type(e).__name__}: {_emsg[:160]}"
+                # Classify so the frontend can render a targeted CTA.
+                _low = _emsg.lower()
+                if "401" in _emsg or "unauthorized" in _low or "invalid_api_key" in _low or "invalid x-api-key" in _low:
+                    test_error_kind = "auth"
+                elif "402" in _emsg or "credit" in _low or "insufficient" in _low or "payment" in _low:
+                    test_error_kind = "credits"
+                elif "429" in _emsg or ("rate" in _low and "limit" in _low):
+                    test_error_kind = "rate_limit"
+                elif "404" in _emsg and "model" in _low:
+                    test_error_kind = "model_404"
+                elif "timeout" in _low or "timed out" in _low:
+                    test_error_kind = "timeout"
+                elif "connection" in _low or "dns" in _low or "name resolution" in _low or "unreachable" in _low:
+                    test_error_kind = "network"
+                else:
+                    test_error_kind = "other"
         except RuntimeError as e:
             test_passed = False
             _emsg = str(e)
             if key and len(key) >= 8:
                 _emsg = _emsg.replace(key, "***redacted***")
-            test_message = f"provider init: {_emsg[:120]}"
+            # Provider init failures (missing module, bad config) — keep
+            # the technical detail since the user likely has to look at
+            # config.toml or env vars rather than the provider account.
+            test_message = f"Provider init failed: {_emsg[:160]}"
+            test_error_kind = "init"
     return {
         "ok": True,
         "provider": provider,
@@ -5335,6 +5373,7 @@ async def api_setup_key(request: Request):
         "test_passed": test_passed,
         "test_response": test_response,
         "test_message": test_message,
+        "test_error_kind": test_error_kind,
     }
 
 

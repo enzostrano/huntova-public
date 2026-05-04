@@ -6,6 +6,30 @@ Versioning: `0.1.0aNN` alpha increments. Public install path: `pipx install hunt
 
 ---
 
+## 0.1.0a701 — May 4 2026 — Setup wizard probe-failure UX: classified errors + no-silent-advance (BRAIN-PROD-7)
+
+### Bug fix (BRAIN-PROD-7, first-run wizard silently advances on bad key)
+
+The `huntova serve` first-run wizard at `/setup` runs a 1-token "respond OK" probe after saving the API key. Before a590, **any probe failure** — wrong key (401), out of credits (402), rate limited (429), wrong model (404), timeout, network down — surfaced as a tiny "⚠ probe failed: AuthenticationError: Error code: 401 - {'error': {'message': 'invalid x-api-key'…}}" suffix tacked onto the GREEN "✓ saved" banner, and **the wizard auto-advanced to step 3 anyway**. Users routinely reached the dashboard with a wrong / empty / exhausted key and only discovered it minutes later when their first hunt blew up with a cryptic provider error several screens removed from where they could fix it.
+
+Twin fix (server + template):
+
+1. **Server** (`server.api_setup_key`): probe-failure exception handler now routes through `humanise_ai_error(e, provider_name=provider)` (the same helper that BRAIN-A338..A344 wired into chat / wizard-scan / research / DNA / wizard-assist) so the user sees "Your ANTHROPIC API key is invalid or missing. Check Settings → Engine → ANTHROPIC key, then retry." instead of a raw stack trace. The response payload also gains a new `test_error_kind` field — one of `auth` / `credits` / `rate_limit` / `model_404` / `timeout` / `network` / `init` / `other` — so the frontend can render a targeted next-action CTA.
+
+2. **Frontend** (`templates/setup.html`): the auto-advance to step 3 is now gated on `d.test_passed !== false`. When the probe explicitly fails the wizard renders a RED status banner with the classified CTA ("Wrong key. Re-paste or get a fresh ANTHROPIC key.", "Out of credits. Top up your OPENROUTER account.", "Rate-limited. Wait 30-60s and try again.", etc.) plus the humanised explanation, and offers a "Continue anyway →" escape hatch for users whose provider is mid-incident. The user can re-paste or override; no silent step-3 jump.
+
+8 new tests in `tests/test_setup_key_probe_classification.py` pin (a) the server calls `humanise_ai_error`, (b) every error kind is emitted, (c) `test_error_kind` ships in the JSON payload, (d) the template auto-advance is guarded by `probeTrulyFailed`, (e) every kind has a CTA label, (f) the "Continue anyway" escape hatch exists, (g) `humanise_ai_error` is still importable from `app`, (h) `test_error_kind` defaults to empty string so the frontend `||` fallback works.
+
+### Files
+- `server.py`: probe-failure handler classifies + humanises (server.py:5298-5371).
+- `templates/setup.html`: `_kindCtaLabel` helper + `probeTrulyFailed` gate + escape hatch (templates/setup.html:586-700).
+- `tests/test_setup_key_probe_classification.py`: 8 regression tests.
+
+### Known issues
+- None new. P2 / P3 list from a585 carries over.
+
+---
+
 ## 0.1.0a585 — May 4 2026 — Settings audit: clearing model override / temperature / max-leads / countries no longer silently no-ops (BRAIN-PROD-6)
 
 ### Bug fix (BRAIN-PROD-6, Settings "clear-and-save" silent no-op)
