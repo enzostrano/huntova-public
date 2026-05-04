@@ -6,6 +6,45 @@ Versioning: `0.1.0aNN` alpha increments. Public install path: `pipx install hunt
 
 ---
 
+## 0.1.0a522 — May 4 2026 — Adjacent-AI-surface parity for `/api/lead-feedback` (BRAIN-139)
+
+`/api/lead-feedback` accepts user-authored brain-shaping input and can
+trigger DNA refinement plus learning-profile rebuild — same risk
+class as the wizard mutating endpoints — but it lacked the three
+front-door guarantees BRAIN-91 (per-route burst buckets), BRAIN-113
+(success-path RateLimit-* headers) and BRAIN-117 (top-level body byte
+cap) gave the wizard surface. The endpoint had only a custom 5-min
+DB-windowed counter (10 feedback per 5 min) — useful as a
+daily-quota class limit, but it engages AFTER auth + JSON parse +
+ownership check, has no `Retry-After` / `RateLimit-*` hints, and
+leaves the endpoint reading `await request.json()` directly with no
+top-level byte cap. After every adjacent surface adopted the same
+front-door pattern (wizard endpoints in BRAIN-117/118,
+`/agent/control` in BRAIN-122, `/api/setup/key` + `/api/settings`
+in BRAIN-140), this endpoint became the easiest remaining seam
+for a 10 MB POST or a hammering client.
+
+This release adds a dedicated `lead_feedback` bucket to
+`_RATE_BUCKETS` (60 s window / 20 calls — feedback is cheap but not
+unlimited), wires `_check_ai_rate(user, bucket="lead_feedback")` +
+`_rate_limit_429(...)` on the burst-block path,
+`_attach_burst_rate_headers(response, ...)` on the success path so
+multi-tab clients learn the budget proactively, and
+`_enforce_body_byte_cap(request, _WIZARD_BODY_BYTES_MAX)` BEFORE
+`await request.json()` so an oversize POST is rejected in
+microseconds. The existing 5-min DB-windowed counter is preserved —
+burst + daily-quota class limits are complementary, not redundant.
+Eleven new regression tests in
+`tests/test_lead_feedback_hardening.py` cover the bucket
+registration, the source-level invariants (helper calls, parameter
+ordering, presence of the legacy 5-min counter) and behavioral
+contracts (oversize body returns 413 before any json parse;
+rapid-fire fires 429 with `Retry-After` + `RateLimit-Limit` /
+`RateLimit-Remaining: 0` / `RateLimit-Reset` headers; success path
+attaches the same RateLimit-* triple). 721 → 732 tests now passing
+(BRAIN-139).
+
+
 ## 0.1.0a521 — May 4 2026 — BRAIN-117/118/122 capped wizard + agent mutating endpoints; `/api/setup/key` (first-run keychain writes) and `/api/settings` (general settings POST) were the remaining adjacent-AI-surface oversize-body ingress vectors — both now invoke `_enforce_body_byte_cap(request, _WIZARD_BODY_BYTES_MAX)` before `request.json()` for parity (BRAIN-140)
 
 ### Bug fix (BRAIN-140, byte-cap parity at /api/setup/key + /api/settings)
@@ -58,7 +97,6 @@ applies uniformly.
 - `server.py`: `api_setup_key` + `api_save_settings` invoke `_enforce_body_byte_cap` before `request.json()`.
 - `tests/test_settings_byte_cap.py`: new — 6 tests guarding the byte-cap parity invariant.
 
----
 
 
 ## 0.1.0a520 — May 4 2026 — Team-of-agents specialist prompts were one-liner stubs that ignored most of the wizard answers; user reported "Team of agents in settings should be prefilled with what he understood from wizard and accordingly prefilled it 30x current text to train the agents perfectly" — `_build_team_prompt_addendum` now produces 200-300 word persona-style briefs per role that interpolate the FULL wizard payload (business_description, target_clients, services, industries, buyer_roles, geographies, outreach_tone, value_propositions, differentiators, pain_points_addressed, example_good_clients, exclusions); `_team_brain_for` was widened to surface the rich paragraph fields (not just the structured lists); the `prompt_addendum` DB cap was raised from 4000 to 8000 chars to fit the new richer text; the existing "Reseed from brain" button on the Team tab regenerates every role's prompt from the latest wizard answers on demand (BRAIN-PROD-4)
