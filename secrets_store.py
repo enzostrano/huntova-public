@@ -312,6 +312,40 @@ def _backend_label() -> str:
     return "plaintext-file"
 
 
+def _sweep_lower_tiers(name: str) -> None:
+    """BRAIN-163: when a higher tier writes a fresh secret, sweep
+    stale copies in lower tiers. Without this, a user who first ran
+    without `keyring` (secret landed in Fernet file or plaintext) and
+    later installed `keyring` would have `set_secret` only update the
+    keychain — leaving the OLD key in the Fernet/plaintext fallback.
+    If keyring later breaks (libsecret daemon dies, user uninstalls
+    the package), `get_secret` falls through to Fernet/plaintext and
+    silently returns the STALE pre-rotation value. Mirrors the
+    delete_secret a289+a291 sweep pattern: best-effort, log on
+    failure, never raise."""
+    import sys as _sys
+    if _try_fernet():
+        try:
+            data = _fernet_read()
+            if name in data:
+                data.pop(name, None)
+                _fernet_write(data)
+        except _FernetUnreadable:
+            print(f"[secrets] WARN: skipping Fernet sweep for {name!r} on "
+                  f"set — existing file is unreadable", file=_sys.stderr)
+        except Exception as _e:
+            print(f"[secrets] WARN: Fernet stale-sweep failed for {name!r}: "
+                  f"{type(_e).__name__}: {_e}", file=_sys.stderr)
+    try:
+        data = _plain_read()
+        if name in data:
+            data.pop(name, None)
+            _plain_write(data)
+    except Exception as _e:
+        print(f"[secrets] WARN: plaintext stale-sweep failed for {name!r}: "
+              f"{type(_e).__name__}: {_e}", file=_sys.stderr)
+
+
 def set_secret(name: str, value: str) -> None:
     kr = _try_keyring()
     if kr is not None:
@@ -320,6 +354,9 @@ def set_secret(name: str, value: str) -> None:
         if name not in idx:
             idx.append(name)
             _kr_index_write(kr, idx)
+        # BRAIN-163: sweep stale Fernet + plaintext copies so a future
+        # keyring failure doesn't fall back to a pre-rotation value.
+        _sweep_lower_tiers(name)
         return
     if _try_fernet():
         # _fernet_read now raises _FernetUnreadable if the existing
@@ -329,6 +366,17 @@ def set_secret(name: str, value: str) -> None:
         data = _fernet_read()
         data[name] = value
         _fernet_write(data)
+        # BRAIN-163: sweep stale plaintext copy. (Fernet is the active
+        # tier here so we only sweep tier-3.)
+        try:
+            pdata = _plain_read()
+            if name in pdata:
+                pdata.pop(name, None)
+                _plain_write(pdata)
+        except Exception as _e:
+            import sys as _sys
+            print(f"[secrets] WARN: plaintext stale-sweep failed for {name!r}: "
+                  f"{type(_e).__name__}: {_e}", file=_sys.stderr)
         return
     # Last-ditch: plaintext with permission lock + warning.
     print("[secrets] warning: storing key in plaintext (install `keyring` or `cryptography`)")

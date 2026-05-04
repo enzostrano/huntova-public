@@ -6,6 +6,62 @@ Versioning: `0.1.0aNN` alpha increments. Public install path: `pipx install hunt
 
 ---
 
+## 0.1.0a740 — May 4 2026 — Two real-bug fixes batched: (1) provider override-vs-keyless-local parity so `push_provider_override("ollama"|"lmstudio"|"llamafile")` from the chat selector or multi-agent fan-out actually returns the local provider instead of silently picking Anthropic (BRAIN-162); (2) `set_secret` sweeps stale lower-tier copies (Fernet + plaintext) so a future keyring failure can't fall back to a pre-rotation key value (BRAIN-163). Plus prior BRAIN-159/160/161 audit-sweep test pins (policy surface parity, runtime invariants, db_driver SQL translation).
+
+### Bug fix (BRAIN-162, provider override parity)
+
+The chat surface lets users pick "Ollama" / "LM Studio" / "Llamafile" from the Engine selector — the dispatcher calls `push_provider_override(slug)` to bind the next AI call to that provider. Local providers run on `localhost` with no auth by default, and `_build()` already accepts `api_key="no-key"` for them.
+
+Until this fix, the override branch in `get_provider()` only returned when `_key_for(override)` was truthy — which is `None` for unkeyed local providers — so the override silently fell through to `preferred_provider` (which DID handle keyless local providers correctly per audit wave 26) or to the default priority order (which picks Anthropic if its key is set). Net effect: chat selector says "Ollama" but the next reply comes from Anthropic.
+
+The fix mirrors the preferred-branch carve-out:
+
+```python
+if override and override in _DEFAULT_ORDER:
+    key = _key_for(override, settings)
+    if key:
+        return _build(override, key, settings)
+    if override in _LOCAL_PROVIDERS:
+        return _build(override, "no-key", settings)
+```
+
+Cloud providers without a key still fall through (their key is genuinely required). Invalid override slugs are still no-ops (preserving prior behaviour from a289).
+
+### Tests
+
+9 new tests in `tests/test_provider_override_keyless_local.py`:
+- override → ollama / lmstudio / llamafile each yield the matching provider when no key is set.
+- override → openai (cloud) without key falls through to anthropic.
+- override → ollama with HV_OLLAMA_KEY set still uses the key (password-protected local server).
+- preferred-branch carve-out for local providers still works after the override fix (regression pin).
+- default order picks anthropic when no override + no preferred set.
+- invalid override slug is a no-op; preferred still resolves.
+- clearing override (push_provider_override(None)) returns resolution to preferred.
+
+### Files
+- `providers.py` (override branch in `get_provider`): +9 lines for the local-provider carve-out.
+- `tests/test_provider_override_keyless_local.py`: new — 9 tests.
+
+### Bug fix (BRAIN-163, secrets_store stale-tier sweep on set_secret)
+
+When a higher-tier backend (`keyring`) writes a fresh secret, lower tiers (Fernet file, plaintext file) used to keep their pre-rotation copy. If the higher tier later broke (libsecret daemon dies, user uninstalls the keyring package), `get_secret` would fall through to the lower tier and silently return the **stale pre-rotation value** — the user thought they rotated their API key but the agent kept using the old one. Same root issue closed for `delete_secret` in a289/a291.
+
+Fix mirrors the `delete_secret` multi-tier sweep pattern: every `set_secret` call to a higher tier now calls `_sweep_lower_tiers(name)`, which best-effort-clears the same name from Fernet + plaintext. Errors are logged to stderr (matching the a291 pattern), never raised.
+
+5 new tests in `tests/test_secrets_store_stale_sweep.py`:
+- Keyring-active set sweeps stale plaintext copy.
+- Fernet-active set sweeps stale plaintext copy.
+- Other-name secrets in plaintext stay intact.
+- Sweep skips missing plaintext file (fresh install).
+- Keyring-active set without Fernet backend doesn't crash.
+
+### Files
+- `secrets_store.py`: new `_sweep_lower_tiers` helper; `set_secret` keyring + Fernet branches now call it.
+- `tests/test_secrets_store_stale_sweep.py`: new — 5 tests.
+- `cli.py` + `pyproject.toml` + `CHANGELOG.md`.
+
+---
+
 ## 0.1.0a720 — May 4 2026 — SQL-translation invariant audit on `db_driver.py` (`_pg_to_sqlite`) — pin GREATEST→MAX / LEAST→MIN, SERIAL PRIMARY KEY → INTEGER PK AUTOINCREMENT (incl. extra whitespace), FOR UPDATE stripped (case-insensitive), `(xmax = 0) AS <alias>` → `1 AS <alias>` preserving alias and tolerant of whitespace, `%s` → `?` while preserving `%%` literals and `%(name)s` named params, idempotency on second pass, empty-string + None tolerance, multi-replacement single-pass chained, `get_driver()` singleton, SQLite driver `translate_sql`/placeholder contract (BRAIN-161)
 
 ### Lockdown (BRAIN-161, db_driver SQL translation)

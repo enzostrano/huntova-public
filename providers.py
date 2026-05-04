@@ -469,6 +469,16 @@ def get_provider(user_settings: dict[str, Any] | None = None) -> Provider:
         key = _key_for(override, settings)
         if key:
             return _build(override, key, settings)
+        # BRAIN-162: parity with the `preferred` branch below — local
+        # providers (ollama / lmstudio / llamafile) intentionally don't
+        # require a key. The previous override branch only returned
+        # when `_key_for` was truthy, so `push_provider_override("ollama")`
+        # from the chat AI selector or a multi-agent fan-out was
+        # silently dropped when no HV_OLLAMA_KEY was set, and the
+        # caller got Anthropic with zero feedback. Treat local-provider
+        # overrides as keyless so the explicit override wins.
+        if override in _LOCAL_PROVIDERS:
+            return _build(override, "no-key", settings)
     preferred = (settings.get("preferred_provider") or "").strip().lower()
 
     # If a preference is set AND has a key, use it.
