@@ -1,0 +1,663 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Huntova — first-run setup</title>
+<meta name="description" content="Pick your AI provider, paste an API key, run your first hunt — all from the browser.">
+<link rel="preconnect" href="https://api.fontshare.com">
+<link rel="preconnect" href="https://cdn.fontshare.com" crossorigin>
+<link href="https://api.fontshare.com/v2/css?f[]=clash-display@600,500&f[]=satoshi@400,500,700&f[]=jetbrains-mono@400,500&display=swap" rel="stylesheet">
+<style>
+  :root{
+    /* Aligned with landing.html — same dark navy + electric teal +
+       violet gradient palette so the install flow feels like one
+       continuous surface. */
+    --bg-deep:#050810;
+    --bg:#0a0e18; --bg2:#0c1220; --panel:#111a2e;
+    --line:rgba(255,255,255,.07); --line2:rgba(255,255,255,.14);
+    --ink:#eef0f5; --mute:#9aa0ad; --dim:#6b7388;
+    --acc:#00e5cc; --acc2:#7c5cff; --acc-warm:#ff6b6b; --acc-amber:#ffb454;
+    --green:#00e5cc; --red:#ff6b6b; --orange:#ffb454;
+    --grad:linear-gradient(135deg,#00e5cc 0%,#7c5cff 100%);
+    --grad-warm:linear-gradient(135deg,#ff6b6b 0%,#ffb454 30%,#00e5cc 70%,#7c5cff 100%);
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;padding:0;background:var(--bg-deep);color:var(--ink);
+    font-family:'Satoshi',-apple-system,BlinkMacSystemFont,sans-serif;
+    line-height:1.6;-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility;
+    min-height:100vh;overflow-x:hidden;position:relative}
+  a{color:inherit;text-decoration:none}
+  code,pre,kbd{font-family:'JetBrains Mono','SF Mono',Menlo,Consolas,monospace}
+  ::selection{background:var(--acc);color:var(--bg-deep)}
+
+  /* Atmosphere — subtle, less busy than the landing because this
+     is a functional surface where the user is reading + typing. */
+  .starfield,.aurora{position:fixed;inset:0;pointer-events:none;z-index:0}
+  .starfield{
+    background-image:
+      radial-gradient(1px 1px at 20% 30%,rgba(255,255,255,.6),transparent),
+      radial-gradient(1px 1px at 80% 70%,rgba(255,255,255,.5),transparent),
+      radial-gradient(1px 1px at 50% 50%,rgba(255,255,255,.4),transparent),
+      radial-gradient(1px 1px at 90% 20%,rgba(255,255,255,.6),transparent),
+      radial-gradient(1px 1px at 15% 85%,rgba(255,255,255,.5),transparent);
+    background-size:600px 600px,400px 400px,500px 500px,300px 300px,400px 400px;
+    opacity:.35
+  }
+  .aurora{
+    background:
+      radial-gradient(ellipse 800px 400px at 12% 12%,rgba(255,107,107,.10),transparent 60%),
+      radial-gradient(ellipse 900px 500px at 88% 80%,rgba(0,229,204,.08),transparent 65%),
+      radial-gradient(ellipse 500px 350px at 50% 100%,rgba(124,92,255,.06),transparent 70%);
+  }
+
+  .nav{position:sticky;top:0;z-index:50;background:rgba(5,8,16,.7);
+    backdrop-filter:saturate(150%) blur(14px);border-bottom:1px solid var(--line)}
+  .nav-inner{max-width:1080px;margin:0 auto;padding:14px 22px;display:flex;align-items:center;justify-content:space-between;gap:18px}
+  .brand{display:flex;align-items:center;gap:10px;font-family:'Clash Display',sans-serif;font-weight:600;letter-spacing:-.01em;font-size:17px}
+  .brand-mark{width:28px;height:28px;display:inline-flex;align-items:center;justify-content:center}
+  .brand-mark svg{width:100%;height:100%}
+  .nav-step{font-size:13px;color:var(--mute);font-family:'JetBrains Mono',monospace;letter-spacing:.02em}
+  main{max-width:880px;margin:0 auto;padding:56px 22px 96px;position:relative;z-index:1}
+
+  .steps{display:flex;align-items:center;gap:0;margin-bottom:36px;padding:0;list-style:none}
+  .step{display:flex;align-items:center;gap:9px;font-size:12.5px;color:var(--dim);font-weight:500}
+  .step.on{color:var(--ink)}
+  .step.done{color:var(--acc)}
+  .step .num{width:26px;height:26px;border-radius:50%;border:1px solid var(--line2);
+    display:grid;place-items:center;font-size:11px;font-family:'JetBrains Mono',monospace;font-weight:600}
+  .step.on .num{border-color:var(--acc);background:var(--grad);color:var(--bg-deep);box-shadow:0 0 16px rgba(0,229,204,.4)}
+  .step.done .num{border-color:var(--acc);background:var(--acc);color:var(--bg-deep)}
+  .step-bar{flex:1;height:1px;background:var(--line);margin:0 14px}
+
+  .hero{margin-bottom:32px}
+  .kicker{display:inline-flex;align-items:center;gap:8px;padding:6px 14px;
+    border:1px solid var(--line2);border-radius:999px;font-size:11.5px;
+    color:var(--mute);letter-spacing:.06em;text-transform:uppercase;
+    margin-bottom:18px;background:rgba(255,255,255,.025);font-weight:500}
+  .kicker .pip{width:6px;height:6px;border-radius:50%;background:var(--acc);
+    box-shadow:0 0 12px var(--acc);animation:pulse 2s infinite}
+  @keyframes pulse{50%{opacity:.4}}
+  h1{font-family:'Clash Display',sans-serif;font-weight:600;
+    font-size:clamp(36px,5.5vw,52px);line-height:1.02;letter-spacing:-.025em;
+    margin:0 0 14px;background:var(--grad-warm);-webkit-background-clip:text;
+    background-clip:text;-webkit-text-fill-color:transparent}
+  .lede{font-size:17px;color:var(--mute);max-width:640px;margin:0;line-height:1.6}
+
+  .card{background:rgba(12,18,32,.72);backdrop-filter:blur(14px);
+    border:1px solid var(--line);border-radius:16px;padding:28px 26px;margin-bottom:18px;
+    transition:border-color .25s ease,transform .25s ease}
+  .card-label{font-size:11px;letter-spacing:.14em;color:var(--acc);
+    text-transform:uppercase;font-weight:600;margin:0 0 14px;
+    display:inline-flex;align-items:center;gap:10px}
+  .card-label::before{content:'';width:24px;height:1px;background:var(--acc);display:inline-block}
+  .card h2{font-family:'Clash Display',sans-serif;font-size:24px;font-weight:600;
+    margin:0 0 10px;letter-spacing:-.012em;line-height:1.2}
+  .card p{margin:0 0 18px;font-size:14.5px;color:var(--mute);line-height:1.7}
+
+  /* Tabs (Cloud / Local / Custom) */
+  .tabs{display:flex;gap:4px;background:rgba(255,255,255,.02);
+    border:1px solid var(--line);border-radius:12px;padding:4px;margin-bottom:18px}
+  .tab{flex:1;padding:9px 14px;font-size:13px;font-weight:500;color:var(--mute);
+    border:none;background:transparent;cursor:pointer;border-radius:8px;
+    font-family:inherit;transition:all .2s ease}
+  .tab:hover{color:var(--ink)}
+  .tab.on{background:rgba(0,229,204,.08);color:var(--acc);
+    border:1px solid rgba(0,229,204,.2);box-shadow:0 1px 2px rgba(0,0,0,.3)}
+  .tab-section{display:none}
+  .tab-section.on{display:block}
+
+  /* Provider grid */
+  .providers{display:grid;grid-template-columns:1fr;gap:10px}
+  @media(min-width:640px){.providers{grid-template-columns:1fr 1fr}}
+  .prov{position:relative;display:flex;flex-direction:column;gap:6px;
+    padding:16px 16px;background:rgba(255,255,255,.02);
+    border:1px solid var(--line);border-radius:12px;cursor:pointer;
+    transition:transform .25s cubic-bezier(.2,.8,.2,1),
+               border-color .25s ease,background .25s ease,
+               box-shadow .25s ease;
+    text-align:left;font-family:inherit;color:var(--ink)}
+  .prov:hover{border-color:var(--line2);background:rgba(255,255,255,.04);transform:translateY(-1px)}
+  .prov.selected{border-color:var(--acc);background:rgba(0,229,204,.07);
+    box-shadow:0 0 0 3px rgba(0,229,204,.16),0 8px 24px -8px rgba(0,229,204,.25)}
+  .prov.disabled{opacity:.4;cursor:not-allowed}
+  .prov-name{font-family:'Clash Display',sans-serif;font-size:14.5px;font-weight:600;
+    letter-spacing:-.005em;display:flex;align-items:center;justify-content:space-between;gap:8px}
+  .prov-tag{font-size:9.5px;padding:2px 7px;border-radius:6px;letter-spacing:.06em;
+    text-transform:uppercase;font-weight:600;font-family:'JetBrains Mono',monospace}
+  .prov-tag-default{background:rgba(0,229,204,.15);color:var(--acc)}
+  .prov-tag-quality{background:rgba(124,92,255,.15);color:#a48bff}
+  .prov-tag-broad{background:rgba(255,180,84,.15);color:var(--acc-amber)}
+  .prov-tag-local{background:rgba(0,229,204,.15);color:var(--acc)}
+  .prov-tag-fast{background:rgba(255,213,77,.15);color:#ffd54d}
+  .prov-tag-cheap{background:rgba(124,92,255,.15);color:#a48bff}
+  .prov-meta{font-size:12.5px;color:var(--mute);line-height:1.55}
+  .prov-saved{position:absolute;top:8px;right:10px;font-size:9.5px;color:var(--acc);
+    font-family:'JetBrains Mono',monospace;font-weight:600;letter-spacing:.04em}
+  .prov-detected{position:absolute;top:8px;right:10px;font-size:9.5px;color:#a48bff;
+    font-family:'JetBrains Mono',monospace;font-weight:600;letter-spacing:.04em}
+
+  /* Key entry */
+  .keyrow{display:flex;flex-direction:column;gap:8px;margin-top:8px}
+  .keyrow label{font-size:12px;color:var(--mute)}
+  .keyrow .row{display:flex;gap:8px}
+  .key-input{flex:1;background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:12px 14px;color:var(--ink);font-family:ui-monospace,monospace;font-size:13px;outline:none;transition:border-color .15s,box-shadow .15s}
+  .key-input::placeholder{color:var(--dim)}
+  .key-input:focus{border-color:var(--acc);box-shadow:0 0 0 3px rgba(124,92,255,.18)}
+  .key-input.ok{border-color:var(--green)}
+  .key-input.bad{border-color:var(--red)}
+  .key-link{display:inline-block;font-size:12px;color:var(--acc2);text-decoration:none;border-bottom:1px dotted rgba(164,139,255,.3)}
+  .key-link:hover{border-bottom-color:var(--acc2)}
+
+  /* Custom endpoint extras */
+  .custom-fields{display:none;flex-direction:column;gap:8px}
+  .custom-fields.on{display:flex}
+  .field-row{display:flex;flex-direction:column;gap:4px}
+  .field-row label{font-size:11.5px;color:var(--mute);font-weight:500}
+
+  /* Btn */
+  .btn{display:inline-flex;align-items:center;gap:8px;padding:12px 22px;
+    border-radius:10px;font-weight:600;font-size:14px;border:1px solid transparent;
+    cursor:pointer;font-family:inherit;
+    transition:transform .25s cubic-bezier(.2,.8,.2,1),
+               box-shadow .25s ease,filter .15s ease,border-color .15s ease}
+  .btn-primary{background:var(--grad);color:var(--bg-deep);
+    box-shadow:0 12px 32px -12px rgba(0,229,204,.55)}
+  .btn-primary:hover:not(:disabled){transform:translateY(-2px);
+    box-shadow:0 18px 48px -12px rgba(0,229,204,.7);filter:brightness(1.05)}
+  .btn-primary:disabled{opacity:.4;cursor:not-allowed;transform:none;box-shadow:none;filter:saturate(.5)}
+  .btn-ghost{background:transparent;color:var(--ink);border-color:var(--line2)}
+  .btn-ghost:hover{border-color:var(--acc);background:rgba(0,229,204,.04);transform:translateY(-1px)}
+  .btn-row{display:flex;gap:12px;align-items:center;margin-top:18px;flex-wrap:wrap}
+
+  /* Status */
+  .status{margin-top:10px;padding:10px 14px;border-radius:10px;font-size:13px;display:none;line-height:1.5}
+  .status.show{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+  .status.is-ok{background:rgba(61,220,151,.06);border:1px solid rgba(61,220,151,.3);color:#bcf2d6}
+  .status.is-error{background:rgba(255,100,100,.06);border:1px solid rgba(255,100,100,.3);color:#ffb0b0}
+  .status.is-loading{background:var(--bg2);border:1px solid var(--line2);color:var(--mute)}
+  .spin{display:inline-block;width:14px;height:14px;border:2px solid rgba(255,255,255,.18);border-top-color:var(--ink);border-radius:50%;animation:spin .8s linear infinite}
+  @keyframes spin{to{transform:rotate(360deg)}}
+
+  /* Filesystem state */
+  .fs-grid{display:grid;grid-template-columns:auto 1fr auto;gap:6px 12px;font-size:12px;font-family:ui-monospace,monospace}
+  .fs-grid .lbl{color:var(--mute)}
+  .fs-grid .val{color:var(--ink);overflow-wrap:break-word;word-break:break-all}
+  .fs-grid .ok{color:var(--green);font-size:10.5px;letter-spacing:.04em}
+  .fs-grid .warn{color:var(--orange);font-size:10.5px;letter-spacing:.04em}
+
+  /* Done state */
+  .done-card{position:relative;background:rgba(12,18,32,.85);
+    border:1px solid rgba(0,229,204,.4);overflow:hidden}
+  .done-card::before{content:'';position:absolute;inset:-2px;
+    background:linear-gradient(135deg,rgba(0,229,204,.15),rgba(124,92,255,.10),rgba(255,107,107,.10));
+    z-index:-1;border-radius:18px;filter:blur(20px);opacity:.6}
+  .done-card h2{background:var(--grad);-webkit-background-clip:text;background-clip:text;
+    -webkit-text-fill-color:transparent;font-size:30px}
+  .done-cmd{margin:10px 0 0;padding:11px 15px;background:rgba(0,0,0,.4);
+    border:1px solid var(--line);border-radius:10px;
+    font-family:'JetBrains Mono',monospace;font-size:13px;color:var(--acc);
+    overflow-x:auto;white-space:nowrap}
+  .done-cmd::-webkit-scrollbar{display:none}
+  .done-cta-row{display:flex;gap:12px;flex-wrap:wrap;margin-top:22px;
+    padding-top:22px;border-top:1px solid var(--line)}
+  .done-chat-hint{margin:14px 0 0;padding:14px 16px;border-radius:10px;
+    background:rgba(124,92,255,.06);border:1px solid rgba(124,92,255,.18);
+    font-size:13.5px;color:var(--ink);display:flex;align-items:center;gap:10px}
+  .done-chat-hint b{color:#a48bff;font-weight:600}
+
+  @media(max-width:520px){
+    h1{font-size:32px;line-height:1.15}
+    .lede{font-size:15px;max-width:none}
+    .card{padding:22px 18px}
+    .card h2{font-size:21px}
+    .nav-step{display:none}
+    .providers{grid-template-columns:1fr}
+    main{padding:36px 16px 64px}
+  }
+</style>
+</head>
+<body>
+
+<div class="starfield"></div>
+<div class="aurora"></div>
+
+<nav class="nav">
+  <div class="nav-inner">
+    <a class="brand" href="/">
+      <span class="brand-mark">
+        <svg viewBox="0 0 28 28" aria-hidden="true">
+          <defs>
+            <linearGradient id="setup-lg" x1="0" y1="0" x2="1" y2="1">
+              <stop offset="0%" stop-color="#ff6b6b"/>
+              <stop offset="50%" stop-color="#ffb454"/>
+              <stop offset="100%" stop-color="#00e5cc"/>
+            </linearGradient>
+          </defs>
+          <circle cx="14" cy="14" r="11" fill="none" stroke="url(#setup-lg)" stroke-width="1.2" stroke-dasharray="2 3"/>
+          <circle cx="14" cy="14" r="2" fill="url(#setup-lg)"/>
+        </svg>
+      </span>
+      <span>huntova</span>
+    </a>
+    <span class="nav-step" id="navStep">setup · step 1 of 3</span>
+  </div>
+</nav>
+
+<main>
+
+<section class="hero">
+  <div class="kicker"><span class="pip"></span> first-run setup</div>
+  <h1>Configure Huntova in 60 seconds.</h1>
+  <p class="lede">Pick from 13 AI providers — including <strong>local options</strong> like Ollama, LM Studio, llamafile (no API key needed) — or plug in any OpenAI-compatible endpoint.</p>
+</section>
+
+<ol class="steps">
+  <li class="step on" id="step-1"><span class="num">1</span><span>Provider</span></li>
+  <span class="step-bar"></span>
+  <li class="step" id="step-2"><span class="num">2</span><span>Connect</span></li>
+  <span class="step-bar"></span>
+  <li class="step" id="step-3"><span class="num">3</span><span>Run</span></li>
+</ol>
+
+<!-- Step 1 — Provider picker with tabs -->
+<section class="card" id="card-provider">
+  <p class="card-label">Step 1 — Pick a provider</p>
+  <h2>Cloud, local, or custom — your choice.</h2>
+
+  <div class="tabs" role="tablist">
+    <button class="tab on" type="button" data-tab="cloud" id="tab-cloud">Cloud APIs</button>
+    <button class="tab" type="button" data-tab="local" id="tab-local">Local AI</button>
+    <button class="tab" type="button" data-tab="custom" id="tab-custom">Custom endpoint</button>
+  </div>
+
+  <div class="tab-section on" id="section-cloud">
+    <div class="providers" id="cloudGrid"></div>
+  </div>
+  <div class="tab-section" id="section-local">
+    <p style="font-size:13px;margin-bottom:10px;color:var(--mute)">Run the model on your own machine. <strong style="color:var(--ink)">No API key, no usage charges, no data leaves your machine.</strong> Auto-detect probes localhost for running servers.</p>
+    <div class="providers" id="localGrid"></div>
+    <button class="btn btn-ghost" id="redetect" style="margin-top:10px;padding:7px 13px;font-size:12.5px">↻ Re-detect</button>
+  </div>
+  <div class="tab-section" id="section-custom">
+    <p style="font-size:13px;margin-bottom:10px;color:var(--mute)">Plug in <strong style="color:var(--ink)">any OpenAI-compatible endpoint</strong> — your own LiteLLM gateway, a self-hosted vLLM instance, an enterprise relay, or a niche provider.</p>
+    <div class="providers" id="customGrid"></div>
+  </div>
+
+  <div class="btn-row">
+    <button class="btn btn-primary" id="prov-next" disabled>Continue &rarr;</button>
+  </div>
+</section>
+
+<!-- Step 2 — Connection -->
+<section class="card" id="card-key" style="display:none">
+  <p class="card-label">Step 2 — Connect</p>
+  <h2 id="key-title">Connect to <span id="key-provider-name">provider</span>.</h2>
+  <p id="key-help">Saved to your OS keychain (or an encrypted local file as fallback). Huntova never sees the key — the local server reads it directly when you hunt.</p>
+
+  <div class="custom-fields" id="customFields">
+    <div class="field-row">
+      <label for="custom-base-url">Base URL</label>
+      <input class="key-input" id="custom-base-url" autocomplete="off" placeholder="https://my-gateway.example.com/v1" spellcheck="false">
+    </div>
+    <div class="field-row">
+      <label for="custom-model">Model name</label>
+      <input class="key-input" id="custom-model" autocomplete="off" placeholder="gpt-4o-mini" spellcheck="false">
+    </div>
+  </div>
+
+  <form onsubmit="return false">
+  <div class="keyrow">
+    <label for="key-input" id="key-label">API key</label>
+    <div class="row">
+      <input type="password" class="key-input" id="key-input" autocomplete="off" placeholder="paste here…" spellcheck="false">
+      <button class="btn btn-primary" id="key-save" disabled>Save &amp; test</button>
+    </div>
+    <a class="key-link" id="key-link" href="" target="_blank" rel="noopener">Get a key →</a>
+  </div>
+  </form>
+  <div class="status" id="key-status" role="status" aria-live="polite"></div>
+  <div class="btn-row">
+    <button class="btn btn-ghost" id="key-back">&larr; Back</button>
+  </div>
+</section>
+
+<!-- Step 3 — Done -->
+<section class="card done-card" id="card-done" style="display:none">
+  <p class="card-label">Step 3 — Ready to hunt</p>
+  <h2>You're all set.</h2>
+  <p>Provider connected, key saved. Pick how you want to start:</p>
+
+  <pre class="done-cmd"><code># install a playbook + run your first hunt</code></pre>
+  <pre class="done-cmd"><code>huntova examples install tech-recruiting</code></pre>
+  <pre class="done-cmd"><code>huntova recipe run tech-recruiting</code></pre>
+
+  <div class="done-chat-hint">
+    <span>💬</span>
+    <span><b>Stuck?</b> Open the dashboard and ask the chat anything — it can run hunts, edit settings, spawn parallel agents, and learns from every piece of feedback you give it.</span>
+  </div>
+
+  <div class="done-cta-row">
+    <a class="btn btn-primary" href="/">Open dashboard &rarr;</a>
+    <a class="btn btn-ghost" href="https://github.com/enzostrano/huntova-public/blob/main/README.md" target="_blank" rel="noopener">Read the README</a>
+  </div>
+</section>
+
+<!-- Filesystem state — always shown for transparency -->
+<section class="card">
+  <p class="card-label">Filesystem</p>
+  <div class="fs-grid" id="fsGrid">
+    <div class="lbl">config:</div><div class="val" id="fs-config">…</div><div class="ok" id="fs-config-ok"></div>
+    <div class="lbl">db:</div><div class="val" id="fs-db">…</div><div class="ok" id="fs-db-ok"></div>
+    <div class="lbl">secrets:</div><div class="val" id="fs-sec">…</div><div class="ok" id="fs-sec-ok"></div>
+  </div>
+</section>
+
+</main>
+
+<script>
+  // 13 provider definitions across 3 tabs
+  var CLOUD = [
+    { slug:'anthropic', env:'HV_ANTHROPIC_KEY', name:'Anthropic Claude', tag:'Default', tagClass:'prov-tag-default',
+      meta:'Claude Sonnet 4.5 · ~$0.04 / 10 leads · highest accuracy',
+      keyUrl:'https://console.anthropic.com/settings/keys' },
+    { slug:'gemini',    env:'HV_GEMINI_KEY',    name:'Google Gemini',    tag:'Cheap', tagClass:'prov-tag-quality',
+      meta:'Gemini 2.5 Flash · ~$0.005 / 10 leads · free tier available',
+      keyUrl:'https://aistudio.google.com/apikey' },
+    { slug:'openai',    env:'HV_OPENAI_KEY',    name:'OpenAI GPT',       tag:'Broad', tagClass:'prov-tag-broad',
+      meta:'GPT-4o-mini · ~$0.015 / 10 leads · widest model selection',
+      keyUrl:'https://platform.openai.com/api-keys' },
+    { slug:'openrouter', env:'HV_OPENROUTER_KEY', name:'OpenRouter',     tag:'Broad', tagClass:'prov-tag-broad',
+      meta:'200+ models, 1 API key · pay per call · pick any frontier model',
+      keyUrl:'https://openrouter.ai/keys' },
+    { slug:'groq',      env:'HV_GROQ_KEY',      name:'Groq',             tag:'Fast', tagClass:'prov-tag-fast',
+      meta:'Llama 3.3 70B at 750 tok/s · cheapest fast inference',
+      keyUrl:'https://console.groq.com/keys' },
+    { slug:'deepseek',  env:'HV_DEEPSEEK_KEY',  name:'DeepSeek',         tag:'Cheap', tagClass:'prov-tag-cheap',
+      meta:'DeepSeek-V3 · ~$0.001 / 10 leads · cheapest reasoning',
+      keyUrl:'https://platform.deepseek.com/api_keys' },
+    { slug:'together',  env:'HV_TOGETHER_KEY',  name:'Together AI',      tag:'Broad', tagClass:'prov-tag-broad',
+      meta:'200+ open-weight models · Llama 3.3, Mistral, Qwen',
+      keyUrl:'https://api.together.xyz/settings/api-keys' },
+    { slug:'mistral',   env:'HV_MISTRAL_KEY',   name:'Mistral',          tag:'Quality', tagClass:'prov-tag-quality',
+      meta:'Mistral Large + Codestral · EU-hosted · GDPR-friendly',
+      keyUrl:'https://console.mistral.ai/api-keys/' },
+    { slug:'perplexity', env:'HV_PERPLEXITY_KEY', name:'Perplexity',     tag:'Broad', tagClass:'prov-tag-broad',
+      meta:'Sonar models · web-grounded · live search built-in',
+      keyUrl:'https://www.perplexity.ai/settings/api' },
+  ];
+  var LOCAL = [
+    { slug:'ollama',    env:'HV_OLLAMA_KEY',    name:'Ollama',           tag:'Local', tagClass:'prov-tag-local',
+      meta:'Free · runs on your CPU/GPU · 100+ models · localhost:11434',
+      keyUrl:'https://ollama.com/download', noKey:true },
+    { slug:'lmstudio',  env:'HV_LMSTUDIO_KEY',  name:'LM Studio',        tag:'Local', tagClass:'prov-tag-local',
+      meta:'Free · GUI model manager · localhost:1234',
+      keyUrl:'https://lmstudio.ai/', noKey:true },
+    { slug:'llamafile', env:'HV_LLAMAFILE_KEY', name:'llamafile',        tag:'Local', tagClass:'prov-tag-local',
+      meta:'Free · single-file executables · cross-platform',
+      keyUrl:'https://github.com/Mozilla-Ocho/llamafile', noKey:true },
+  ];
+  var CUSTOM = [
+    { slug:'custom',    env:'HV_CUSTOM_KEY',    name:'Custom OpenAI-compat endpoint', tag:'Any', tagClass:'prov-tag-broad',
+      meta:'LiteLLM gateway · self-hosted vLLM · enterprise relay · any endpoint',
+      keyUrl:'', custom:true },
+  ];
+
+  var ALL = CLOUD.concat(LOCAL).concat(CUSTOM);
+  var BY_SLUG = {};
+  ALL.forEach(function(p){ BY_SLUG[p.slug] = p; });
+
+  var state = {
+    selectedProvider: null,
+    activeTab: 'cloud',
+    configured: {},
+    detected: {},
+    fsState: {},
+  };
+
+  function el(id){ return document.getElementById(id); }
+
+  function setStep(n){
+    [1,2,3].forEach(function(i){
+      var s = el('step-' + i);
+      s.classList.remove('on','done');
+      if (i < n) s.classList.add('done');
+      else if (i === n) s.classList.add('on');
+    });
+    el('navStep').textContent = 'Setup · step ' + n + ' of 3';
+  }
+
+  function setStatus(elt, kind, msg){
+    while(elt.firstChild) elt.removeChild(elt.firstChild);
+    elt.className = 'status show is-' + kind;
+    if (kind === 'loading'){
+      var s = document.createElement('span');
+      s.className = 'spin';
+      elt.appendChild(s);
+    }
+    elt.appendChild(document.createTextNode(msg));
+  }
+  function clearStatus(elt){
+    elt.className = 'status';
+    while(elt.firstChild) elt.removeChild(elt.firstChild);
+  }
+
+  function makeProvCard(p){
+    var b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'prov';
+    if (state.configured[p.slug]) b.classList.add('configured');
+    if (state.selectedProvider === p.slug) b.classList.add('selected');
+
+    var nameRow = document.createElement('div');
+    nameRow.className = 'prov-name';
+    var nm = document.createElement('span'); nm.textContent = p.name;
+    var tg = document.createElement('span'); tg.className = 'prov-tag ' + p.tagClass; tg.textContent = p.tag;
+    nameRow.appendChild(nm); nameRow.appendChild(tg);
+
+    var meta = document.createElement('div');
+    meta.className = 'prov-meta';
+    meta.textContent = p.meta;
+
+    b.appendChild(nameRow); b.appendChild(meta);
+
+    // Status badge top-right
+    if (state.configured[p.slug]){
+      var saved = document.createElement('span');
+      saved.className = 'prov-saved';
+      saved.textContent = '✓ saved';
+      b.appendChild(saved);
+    } else if (state.detected[p.slug] && state.detected[p.slug].available){
+      var det = document.createElement('span');
+      det.className = 'prov-detected';
+      det.textContent = '● detected';
+      b.appendChild(det);
+    }
+
+    b.addEventListener('click', function(){ selectProvider(p.slug); });
+    return b;
+  }
+
+  function renderProviders(){
+    var groups = [['cloudGrid', CLOUD], ['localGrid', LOCAL], ['customGrid', CUSTOM]];
+    groups.forEach(function(g){
+      var grid = el(g[0]);
+      while(grid.firstChild) grid.removeChild(grid.firstChild);
+      g[1].forEach(function(p){ grid.appendChild(makeProvCard(p)); });
+    });
+  }
+
+  function selectProvider(slug){
+    state.selectedProvider = slug;
+    renderProviders();
+    el('prov-next').disabled = false;
+  }
+
+  // Tab switching
+  Array.from(document.querySelectorAll('.tab')).forEach(function(t){
+    t.addEventListener('click', function(){
+      var name = t.dataset.tab;
+      state.activeTab = name;
+      // Reset provider selection when changing tabs — otherwise a
+      // user who picked Anthropic on Cloud, then switches to Local
+      // and clicks Continue, would still be wired up to Anthropic
+      // because `state.selectedProvider` survived the tab change.
+      state.selectedProvider = null;
+      var _next = el('prov-next');
+      if (_next) _next.disabled = true;
+      // Clear the "selected" highlight on every provider card so
+      // the previously-active card doesn't look like it's still
+      // chosen after the user switches tabs.
+      Array.from(document.querySelectorAll('.provider-card.selected')).forEach(function(c){
+        c.classList.remove('selected');
+      });
+      Array.from(document.querySelectorAll('.tab')).forEach(function(x){ x.classList.remove('on'); });
+      t.classList.add('on');
+      Array.from(document.querySelectorAll('.tab-section')).forEach(function(x){ x.classList.remove('on'); });
+      el('section-' + name).classList.add('on');
+    });
+  });
+
+  el('redetect').addEventListener('click', function(){
+    var btn = el('redetect');
+    btn.disabled = true;
+    btn.textContent = '↻ Probing localhost…';
+    fetch('/api/setup/detect-local', {headers:{'Accept':'application/json'}})
+      .then(function(r){ return r.ok ? r.json() : null; })
+      .then(function(d){
+        if (d && d.detected){
+          state.detected = d.detected;
+          renderProviders();
+        }
+      })
+      .finally(function(){
+        btn.disabled = false;
+        btn.textContent = '↻ Re-detect';
+      });
+  });
+
+  el('prov-next').addEventListener('click', function(){
+    var p = BY_SLUG[state.selectedProvider];
+    if (!p) return;
+    el('card-provider').style.display = 'none';
+    el('card-key').style.display = '';
+    el('key-provider-name').textContent = p.name;
+    el('key-link').href = p.keyUrl || '';
+    if (p.keyUrl){
+      el('key-link').textContent = 'Get a ' + p.name + ' key →';
+      el('key-link').style.display = '';
+    } else {
+      el('key-link').style.display = 'none';
+    }
+    // Custom endpoint shows the extra fields
+    el('customFields').classList.toggle('on', !!p.custom);
+    // Local providers don't need a key — we still let user paste one
+    // for password-protected local setups
+    if (p.noKey){
+      el('key-input').placeholder = '(optional — leave empty for unauthenticated local server)';
+      el('key-save').disabled = false;
+      el('key-help').textContent = 'No key needed for default Ollama / LM Studio setups. The local server is detected via its base URL.';
+    } else {
+      el('key-input').placeholder = 'paste here…';
+      el('key-save').disabled = true;
+      el('key-help').textContent = 'Stored in your OS keychain (macOS Keychain / Windows Credential Manager / Linux Secret Service). Huntova never sees the key — the local server reads it directly when you run a hunt.';
+    }
+    el('key-input').value = '';
+    if (p.custom){
+      el('custom-base-url').value = '';
+      el('custom-model').value = '';
+    }
+    el('key-input').focus();
+    setStep(2);
+  });
+
+  el('key-back').addEventListener('click', function(){
+    el('card-key').style.display = 'none';
+    el('card-provider').style.display = '';
+    setStep(1);
+  });
+
+  el('key-input').addEventListener('input', function(){
+    var p = BY_SLUG[state.selectedProvider];
+    var v = el('key-input').value.trim();
+    el('key-save').disabled = !p || (!p.noKey && v.length < 6);
+    el('key-input').classList.remove('ok','bad');
+    clearStatus(el('key-status'));
+  });
+
+  el('key-save').addEventListener('click', function(){
+    var p = BY_SLUG[state.selectedProvider];
+    if (!p) return;
+    // .trim() only removes leading/trailing whitespace — embedded newlines
+    // from copy-paste survive and break every API call later. Strip all
+    // CR/LF as well as collapsing internal whitespace.
+    var key = el('key-input').value.replace(/[\r\n\t]+/g, '').trim();
+    var body = { provider: p.slug, key: key, test: true };
+    if (p.custom){
+      body.base_url = el('custom-base-url').value.trim();
+      body.model = el('custom-model').value.trim();
+      if (!body.base_url){
+        setStatus(el('key-status'), 'error', 'Base URL is required for a custom endpoint.');
+        return;
+      }
+    }
+    el('key-save').disabled = true;
+    setStatus(el('key-status'), 'loading', 'Saving + testing the connection…');
+    fetch('/api/setup/key', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json', 'Accept': 'application/json'},
+      body: JSON.stringify(body),
+    }).then(function(r){ return r.json().catch(function(){ return {ok:false, message:'unexpected response'}; }); })
+      .then(function(d){
+        if (d && d.ok){
+          el('key-input').classList.remove('bad');
+          el('key-input').classList.add('ok');
+          var msg = '✓ saved to ' + (d.backend || 'keychain');
+          if (d.test_passed) msg += ' · live probe ok (' + (d.test_response || '').slice(0,40) + ')';
+          else if (d.test_passed === false) msg += ' · ⚠ probe failed: ' + (d.test_message || 'unknown');
+          setStatus(el('key-status'), 'ok', msg);
+          state.configured[p.slug] = true;
+          renderProviders();
+          setTimeout(function(){
+            el('card-key').style.display = 'none';
+            el('card-done').style.display = '';
+            setStep(3);
+            refreshFs();
+          }, 800);
+        } else {
+          el('key-input').classList.remove('ok');
+          el('key-input').classList.add('bad');
+          setStatus(el('key-status'), 'error', (d && d.message) || 'save failed');
+          el('key-save').disabled = false;
+        }
+      }).catch(function(err){
+        setStatus(el('key-status'), 'error', 'network error: ' + (err.message || err));
+        el('key-save').disabled = false;
+      });
+  });
+
+  function refreshFs(){
+    fetch('/api/setup/status', {headers: {'Accept': 'application/json'}})
+      .then(function(r){ return r.ok ? r.json() : null; })
+      .then(function(d){
+        if (!d) return;
+        state.configured = d.providers_configured_set || {};
+        state.fsState = d.filesystem || {};
+        if (d.detected) state.detected = d.detected;
+        renderProviders();
+        if (d.filesystem){
+          var f = d.filesystem;
+          if (f.config_path){ el('fs-config').textContent = f.config_path; el('fs-config-ok').textContent = f.config_exists ? '✓' : 'will be created'; }
+          if (f.db_path){     el('fs-db').textContent = f.db_path;         el('fs-db-ok').textContent = f.db_exists ? '✓' : 'on first hunt'; }
+          if (f.secrets_backend){ el('fs-sec').textContent = f.secrets_backend; el('fs-sec-ok').textContent = ''; }
+        }
+      })
+      .catch(function(){});
+  }
+
+  renderProviders();
+  refreshFs();
+</script>
+
+</body>
+</html>
