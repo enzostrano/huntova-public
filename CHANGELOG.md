@@ -6,6 +6,103 @@ Versioning: `0.1.0aNN` alpha increments. Public install path: `pipx install hunt
 
 ---
 
+## 0.1.0a503 — May 4 2026 — DNA `scoring_rules` is an AI-output string assembled from the Stage-1 `scoring_guide` payload but had no per-field byte cap; a hallucinating provider can produce 1000-item must_have/bonus/instant_reject lists or 50 KB score-band strings, ballooning `agent_dna.dna_json` and re-injecting the same bloat into every prompt at app.py:3756 — direct BYOK spend impact on every loop start; new `_DNA_FIELD_BYTES_MAX` constant + module-local `_clip_dna_field` helper close the next AI-output ingress after BRAIN-128 (phase-5 questions) and BRAIN-129 (scan output) (BRAIN-134)
+
+### Bug fix (BRAIN-134, AI-output byte cap on DNA scoring_rules)
+
+BRAIN-128 (a497) capped phase-5 question text + options
+at fixed UTF-8 byte budgets. BRAIN-129 (a498) capped
+scan-output fields at the same 16 KiB ceiling defined
+by `server._WIZARD_FIELD_BYTES_MAX`. Both closed
+specific AI-output ingresses into persisted rows.
+
+Per Huntova engineering review of the Agent DNA
+generation pipeline, one major AI-output ingress
+remains unbounded: `dna["scoring_rules"]`.
+
+**The flow** — `app.generate_agent_dna` calls Stage 1
+which returns a `strategy` dict; the code reads
+`strategy.get("scoring_guide", {})` and hands it to
+`_dna_build_scoring_rules` (app.py:4878). That helper
+joins lines from three list fields and five score-
+band strings:
+
+```python
+for sig in scoring.get("must_have_signals", []):
+    lines.append(f"  - {sig}")
+for sig in scoring.get("bonus_signals", []):
+    lines.append(f"  + {sig}")
+for sig in scoring.get("instant_reject", []):
+    lines.append(f"  x {sig}")
+lines.append(f"SCORE 10: {scoring.get('score_10', '')}")
+# ...
+return "\n".join(lines)  # ← unbounded
+```
+
+**Failure mode** — every field in `scoring_guide` is
+verbatim AI output. A hallucinating Stage-1 provider
+can produce thousands of bullets in `must_have_signals`
+/ `bonus_signals` / `instant_reject`, multi-KB strings
+per bullet, and 50 KB+ strings in any of the five
+`score_*` band fields.
+
+The result lands in `dna["scoring_rules"]`,
+`json.dumps`'d into `agent_dna.dna_json`, then
+re-loaded into `ctx._cached_dna` on every agent loop
+start (app.py:7757-7816). Worse, the loop re-injects
+it into every AI prompt:
+
+```python
+# app.py:3756
+if _dna.get("scoring_rules"):
+    c += f"\n═══ SCORING RULES ═══\n{_dna['scoring_rules']}\n"
+```
+
+Consequences: 100 KB+ `scoring_rules` bloats the
+`agent_dna` row on disk + on every fetch; every
+agent-loop start reloads the full string; every
+prompt to the BYOK provider eats the same budget
+repeatedly — direct user spend impact; slows BRAIN-86
+canonicalization downstream when the DNA is re-derived
+for fingerprinting; defeats the point of caching —
+bigger string, larger every cache hit.
+
+**Invariant**: every persisted AI-output text field
+needs a per-key byte cap matching the established
+16 KiB ceiling.
+
+**Fix** — new module-scope constant in app.py:
+
+```python
+_DNA_FIELD_BYTES_MAX = int(
+    os.environ.get("HV_DNA_FIELD_BYTES_MAX") or str(16 * 1024)
+)
+```
+
+…plus a module-local `_clip_dna_field` helper that
+mirrors `server._clip_to_byte_budget` (rounds down to
+the nearest UTF-8 codepoint boundary so output is
+always valid UTF-8, never an orphan continuation
+byte). Kept as a local copy because server.py imports
+app.py — the dependency must not flow back. The
+constant is env-overridable for operators who genuinely
+need higher caps.
+
+`_dna_build_scoring_rules` now wraps its `\n`.join
+output in `_clip_dna_field(..., _DNA_FIELD_BYTES_MAX)`.
+Realistic non-hallucinated `scoring_guide` payloads
+fit comfortably under 16 KiB; only adversarial /
+malformed AI output trips the cap. Round-trip UTF-8
+safety verified by behavioral test using 4-byte emoji
+at the boundary.
+
+5 new regression tests in
+`tests/test_dna_scoring_rules_byte_cap.py` codify the
+invariant — constant existence + sane bounds, source-
+level helper reference, behavioral clamp on 1000-bullet
+hallucinated input, multi-byte UTF-8 round-trip safety,
+and short-input passthrough preservation.
+
 ## 0.1.0a502 — May 4 2026 — BRAIN-114's destructive Origin-gated set was minimal (reset + start-retrain); /api/wizard/complete (destructive on retrain — overwrites prior brain) and admin /api/ops/users/{id}/wizard/reset (operator escape hatch) were not Origin-gated; set extended for parity (BRAIN-133)
 
 ### Bug fix (BRAIN-133, Origin-gate parity on destructive wizard write paths)

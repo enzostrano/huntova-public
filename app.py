@@ -4834,6 +4834,70 @@ DIVERSITY CHECKLIST (ensure your final set has):
 DELIVER 60-80 FINAL QUERIES after self-filtering. Quality over quantity — 60 precise queries beat 80 sloppy ones."""
 
 
+# a503 (BRAIN-134): per-field byte cap for AI-output DNA
+# strings. Stage-1 produces `scoring_guide` (and other
+# strategy sub-payloads) that get assembled into multi-
+# line strings by the `_dna_build_*` helpers. Without a
+# cap, a hallucinating provider can generate thousands
+# of bullet items or 50 KB score-band strings — the
+# resulting DNA string then re-loads on every agent-
+# loop start (`ctx._cached_dna`) and is re-injected
+# into every prompt at app.py:3756, eating BYOK budget
+# repeatedly. Parity with `server._WIZARD_FIELD_BYTES_MAX`
+# (16 KiB) — same order of magnitude as the wizard row
+# field cap. Closes the next AI-output ingress after
+# BRAIN-128 (phase-5 questions) and BRAIN-129 (scan
+# output).
+_DNA_FIELD_BYTES_MAX = int(
+    os.environ.get("HV_DNA_FIELD_BYTES_MAX") or str(16 * 1024)
+)
+
+
+def _clip_dna_field(text, max_bytes: int = _DNA_FIELD_BYTES_MAX) -> str:
+    """Truncate `text` so its UTF-8 byte length is at most
+    `max_bytes`. Rounds down to the nearest UTF-8 code-
+    point boundary so the output is always valid UTF-8 —
+    never an orphan continuation byte sequence.
+
+    a503 (BRAIN-134): mirror of `server._clip_to_byte_budget`.
+    Kept as a module-local copy so app.py doesn't depend
+    on importing from server.py (server.py imports app.py,
+    not the other way around).
+
+    None / non-strings → "" (caller-friendly fallback;
+    never raises).
+    """
+    if text is None:
+        return ""
+    if not isinstance(text, str):
+        try:
+            text = str(text)
+        except Exception:
+            return ""
+    encoded = text.encode("utf-8")
+    if len(encoded) <= max_bytes:
+        return text
+    truncated = encoded[:max_bytes]
+    # Continuation bytes match 10xxxxxx (0x80..0xBF).
+    while truncated and (truncated[-1] & 0xC0) == 0x80:
+        truncated = truncated[:-1]
+    # Drop the leading byte of an in-progress sequence too
+    # if we landed mid-codepoint.
+    if truncated and (truncated[-1] & 0xE0) == 0xC0:  # 2-byte lead
+        truncated = truncated[:-1]
+    elif truncated and (truncated[-1] & 0xF0) == 0xE0:  # 3-byte lead
+        truncated = truncated[:-1]
+    elif truncated and (truncated[-1] & 0xF8) == 0xF0:  # 4-byte lead
+        truncated = truncated[:-1]
+    try:
+        return truncated.decode("utf-8")
+    except UnicodeDecodeError:
+        # Belt-and-braces: should never trigger given the
+        # boundary backoff above, but if it does, fall
+        # back to error-tolerant decode.
+        return truncated.decode("utf-8", errors="ignore")
+
+
 def _dna_build_business_context(wizard_data, strategy):
     """Build the business_context string from strategy data.
     This is what the scoring AI reads to understand the business."""
@@ -4903,7 +4967,17 @@ def _dna_build_scoring_rules(scoring):
     lines.append(f"SCORE 1-3: {scoring.get('score_1_3', '')}")
     lines.append(f"SCORE 0: {scoring.get('score_0', '')}")
 
-    return "\n".join(lines)
+    # a503 (BRAIN-134): clamp the assembled string at a
+    # fixed byte budget. Stage-1 `scoring_guide` is AI-
+    # generated; a hallucinating provider can produce
+    # 1000-item must_have/bonus/instant_reject lists or
+    # 50 KB score-band strings. Without this cap, the
+    # resulting `scoring_rules` string lands in
+    # `agent_dna.dna_json`, gets reloaded on every
+    # agent-loop start, and is re-injected into every
+    # AI prompt — direct BYOK spend impact. Same byte
+    # budget as `server._WIZARD_FIELD_BYTES_MAX` (16 KiB).
+    return _clip_dna_field("\n".join(lines), _DNA_FIELD_BYTES_MAX)
 
 
 def _dna_build_email_rules(email_strat, wizard_data):
