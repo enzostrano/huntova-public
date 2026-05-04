@@ -6,6 +6,59 @@ Versioning: `0.1.0aNN` alpha increments. Public install path: `pipx install hunt
 
 ---
 
+## 0.1.0a491 — May 4 2026 — BRAIN-117/118 capped every wizard mutating route but `/agent/control` was still unbounded — the new easiest resource-exhaustion seam on the public surface; control endpoint now invokes `_enforce_body_byte_cap` before `request.json()` for parity (BRAIN-122)
+
+### Bug fix (BRAIN-122, byte-cap parity at /agent/control)
+
+BRAIN-117 (a486) capped `/api/wizard/save-progress` and
+`/api/wizard/complete`. BRAIN-118 (a487) extended the
+cap to `/api/wizard/scan`, `/api/wizard/generate-phase5`,
+`/api/wizard/assist`. After both, every wizard mutating
+route rejected oversize bodies before `request.json()`.
+
+`/agent/control` was missed. It accepts a JSON body
+with `action` (string), `countries` (list), and config
+fields. Real payloads are tiny — at worst 30 country
+strings × 50 bytes. The shared 256 KiB cap never trips
+a legitimate client. But without the cap, a malicious
+or buggy client can post a 10 MB body that gets fully
+buffered + parsed before any agent dispatch logic
+runs. That undoes the resource-hardening posture: the
+unbounded entry point becomes the easiest exhaustion
+seam.
+
+Per Huntova engineering review on endpoint-specific
+request-size limits (companion to BRAIN-117/118): every
+wizard or agent endpoint that accepts client JSON and
+can trigger meaningful server work must enforce the
+same top-level body byte cap before `request.json()`
+runs.
+
+Fix: `/agent/control` now calls
+`_enforce_body_byte_cap(request, _WIZARD_BODY_BYTES_MAX)`
+as its first line. Order: byte-cap → json parse →
+BRAIN-120 dna gate → agent dispatch. The byte-cap is
+the cheapest denial (header check first, then body
+length) so it correctly precedes the more expensive
+DB-fetching dna gate.
+
+4 new regression tests in
+`test_agent_control_body_byte_cap.py`:
+- agent_control calls the helper.
+- Helper call precedes `request.json()`.
+- Uses the shared `_WIZARD_BODY_BYTES_MAX` constant
+  (no hardcoded literal — operator-tunable parity).
+- Byte-cap precedes the dna gate.
+
+571 / 571 tests passing.
+
+### Files
+
+- `server.py`: byte-cap call inserted at the top of `agent_control`, before `request.json()`. Uses the same shared `_WIZARD_BODY_BYTES_MAX` constant the wizard endpoints already use.
+- `tests/test_agent_control_body_byte_cap.py`: new — 4 tests guarding the byte-cap parity invariant for the agent control endpoint.
+
+---
+
 ## 0.1.0a490 — May 4 2026 — BRAIN-79's gate was on `agent_control`'s `start` action only; `resume` re-activated the agent without consulting the same precondition, so a sibling-tab DNA wipe/corruption during pause could be silently bypassed when resuming; the BRAIN-120 helper now also gates `resume` for shared-precondition parity (BRAIN-121)
 
 ### Bug fix (BRAIN-121, shared-precondition consistency)

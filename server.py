@@ -11866,6 +11866,17 @@ async def api_gdpr_erasure(request: Request, user: dict = Depends(require_user))
 
 @app.post("/agent/control")
 async def agent_control(request: Request, user: dict = Depends(require_user)):
+    # a491 (BRAIN-122): byte-cap BEFORE json parse for
+    # consistency with the wizard mutating endpoints
+    # (BRAIN-117/118). One unbounded control endpoint
+    # becomes the new easiest resource-exhaustion seam,
+    # undoing the resource-hardening posture everywhere
+    # else. Real payloads are tiny (action + countries[]
+    # + a few config ints), so the 256 KiB shared cap
+    # never trips a legitimate client.
+    _body_bytes, _too_large = await _enforce_body_byte_cap(request, _WIZARD_BODY_BYTES_MAX)
+    if _too_large is not None:
+        return _too_large
     body = await request.json()
     action = body.get("action")
     print(f"[AGENT] user={user['id']} action={action} tier={user.get('tier','?')}")
