@@ -6,6 +6,37 @@ Versioning: `0.1.0aNN` alpha increments. Public install path: `pipx install hunt
 
 ---
 
+## 0.1.0a532 — May 4 2026 — Comprehensive HTTP-method audit catching EVERY `@app.post` route on the live FastAPI app — closes the per-group-list coverage gap where a new endpoint between BRAIN-131/138/148 audits could slip through unless someone remembered to extend the right list (BRAIN-149)
+
+### Lockdown (BRAIN-149, blanket POST-route audit)
+
+BRAIN-131 / BRAIN-138 / BRAIN-148 codified
+HTTP-method discipline on specific path lists
+(wizard, agent, ops, admin, adjacent). New
+endpoints added between releases slip through
+until someone extends the right list.
+
+This release is the catch-all: every route
+registered with POST on `app.routes` must reject
+GET / PUT / DELETE / PATCH. Sanity-bound: 30+ POST
+routes expected; critical mutators (wizard,
+agent, settings, chat, lead-feedback, team,
+memory) explicitly enumerated to detect router
+regressions.
+
+4 new comprehensive regression tests in
+`tests/test_global_post_route_audit.py` — no
+source changes.
+
+775 → 779 / 779 tests passing.
+
+### Files
+
+- `tests/test_global_post_route_audit.py`: new — 4 tests blanket-auditing every POST route.
+- `cli.py` (VERSION) + `pyproject.toml` (version) + `CHANGELOG.md`. No source changes.
+
+---
+
 ## 0.1.0a531 — May 4 2026 — HTTP-method discipline lockdown extended to adjacent mutating endpoints added since BRAIN-138 — /api/lead-feedback (BRAIN-139), /api/chat (BRAIN-142), /api/team/seed-defaults + /api/team/{slot}/toggle (BRAIN-144); 4 regression tests codify POST-only methods + reject GET/PUT/DELETE/PATCH (BRAIN-148)
 
 ### Lockdown (BRAIN-148, HTTP-method discipline on recently-added mutators)
