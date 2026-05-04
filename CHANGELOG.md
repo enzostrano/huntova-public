@@ -6,6 +6,93 @@ Versioning: `0.1.0aNN` alpha increments. Public install path: `pipx install hunt
 
 ---
 
+## 0.1.0a560 — May 4 2026 — Per-event SSE payload byte cap on `UserEventBus.emit` — a malformed or oversized lead/log/thought emission could produce a single 50 KiB+ SSE frame the frontend EventSource fails to parse, breaking the live feed for the rest of the run; new `_SSE_EVENT_BYTES_MAX` (32 KiB) + `_clip_sse_event_payload` helper replace oversized frames with a tiny `{_truncated: true, reason: "event_oversize", type: …}` marker, exempt `screenshot` (intentionally large) (BRAIN-147)
+
+### Bug fix (BRAIN-147, SSE-frame size hygiene)
+
+The agent thread emits SSE events via
+`ctx.bus.emit(event_type, data)`. Real `lead`
+payloads are ~2-5 KiB. A buggy or adversarial
+code path can produce a much larger one — e.g.
+a `lead` dict that accidentally carries the full
+scraped page text, a `log` line built from a
+runaway provider error repr, a `thought` carrying
+the raw AI response. The browser EventSource
+splits on `\n\n` and parses one frame at a time;
+a 50 KiB+ frame can stall or break parsing for
+the rest of the stream depending on browser +
+network. Without an explicit cap, every emit
+site (`lead`, `thought`, `progress`, `log`,
+`research_progress`, `research_done`,
+`scan_report`, `dna_updated`, `crm_refresh`,
+`credits_exhausted`, `subagent_status`,
+`browsing_state`) is a potential feed-break seam.
+
+Per Huntova engineering review on SSE-frame
+size hygiene: every frame entering the bus must
+fit under a documented per-event byte cap, and
+oversize frames must be replaced — not dropped
+silently — so the frontend can surface "frame
+too large" as a known state and the run keeps
+going.
+
+Fix in `user_context.py`:
+
+- `UserEventBus._SSE_EVENT_BYTES_MAX` constant
+  (32 KiB) — generous for a lead with every
+  enrichment field, tight enough that any frame
+  above it is a bug.
+- `UserEventBus._clip_sse_event_payload(event,
+  data)` classmethod returns the JSON string the
+  caller embeds in the SSE frame. Logic:
+  1. JSON-serialise `data` (default=str). If
+     serialisation fails (TypeError /
+     ValueError on circular refs etc.), return
+     a `{_truncated: true, reason:
+     "event_unserialisable", type: <event>}`
+     marker — emit() never raises.
+  2. If the event type is in
+     `_SSE_OVERSIZE_EXEMPT_EVENTS` (currently
+     just `screenshot`), pass through unchanged
+     — JPEG screenshots are intentionally
+     large (q=55, b64-encoded) and the
+     frontend handles them as a known-bigger
+     frame.
+  3. If the UTF-8 byte length is at or below
+     the cap, pass through unchanged.
+  4. Otherwise return a marker:
+     `{_truncated: true, reason:
+     "event_oversize", type: <event>,
+     max_bytes: 32768, …}`. Lightweight
+     identifying fields (`lead_id`, `id`,
+     `run_id`, `user_id`, `state`) are
+     preserved when present so the frontend
+     can still correlate the dropped frame
+     to the right card.
+- `UserEventBus.emit(...)` now routes every
+  event through the helper before building the
+  `event: …\ndata: …\n\n` SSE frame.
+
+Tests (`tests/test_sse_event_size_cap.py`, 9
+tests) cover constant existence, helper
+existence, small-payload pass-through, oversize
+clipping, lead_id preservation across
+truncation, screenshot exemption, circular-ref
+non-crash behavior, and end-to-end emit-to-
+subscriber for both small and oversize frames.
+
+Behavior: legitimate clients see no change —
+all real leads / thoughts / progress events
+fit under 32 KiB by an order of magnitude.
+The only frames that get rewritten are the
+ones that would have broken the live feed
+anyway, and they now arrive as a tiny marker
+the frontend can render as "(frame
+truncated, lead_id=N)" instead of stalling
+the EventSource.
+
+---
+
 ## 0.1.0a532 — May 4 2026 — Comprehensive HTTP-method audit catching EVERY `@app.post` route on the live FastAPI app — closes the per-group-list coverage gap where a new endpoint between BRAIN-131/138/148 audits could slip through unless someone remembered to extend the right list (BRAIN-149)
 
 ### Lockdown (BRAIN-149, blanket POST-route audit)

@@ -29,6 +29,21 @@ class UserEventBus:
     _MAXSIZE = 200
     _DEAD_THRESHOLD = 100
 
+    # a560 (BRAIN-147): per-event SSE payload byte cap. A malformed or
+    # oversized lead emission (e.g. a `lead` dict that accidentally
+    # carried a multi-megabyte page-text blob, or a `log` line built
+    # from a runaway exception repr) produces a single SSE frame the
+    # frontend EventSource may fail to parse — breaking the live feed
+    # for the entire run. The frontend never legitimately needs more
+    # than ~5 KiB per event; 32 KiB is generous headroom for a lead
+    # carrying every enrichment field and still tight enough that any
+    # frame above it is a bug we want to clip rather than ship. The
+    # `screenshot` event type is exempt — JPEG screenshots are
+    # intentionally large (b64-encoded, q=55, not full-page) and the
+    # frontend handles them as a known-bigger frame.
+    _SSE_EVENT_BYTES_MAX = 32 * 1024
+    _SSE_OVERSIZE_EXEMPT_EVENTS = frozenset({"screenshot"})
+
     def __init__(self):
         self._subscribers: set[queue.Queue] = set()
         self._lock = threading.Lock()
@@ -78,8 +93,54 @@ class UserEventBus:
                 except queue.Full:
                     self._subscribers.discard(q)
 
+    @classmethod
+    def _clip_sse_event_payload(cls, event: str, data):
+        """a560 (BRAIN-147): if the JSON-serialised payload exceeds
+        `_SSE_EVENT_BYTES_MAX`, replace it with a tiny truncation
+        marker so the SSE frame stays small and parseable. Returns
+        the JSON string the caller will embed in the SSE frame.
+
+        Exempt event types (e.g. `screenshot`) bypass the check —
+        those are intentionally large by design.
+
+        Defensive: if json.dumps itself fails on the original
+        payload, fall back to the marker too (a non-serialisable
+        object would otherwise raise inside emit()).
+        """
+        try:
+            serialised = json.dumps(data, default=str)
+        except (TypeError, ValueError):
+            return json.dumps({
+                "_truncated": True,
+                "reason": "event_unserialisable",
+                "type": event,
+            })
+        if event in cls._SSE_OVERSIZE_EXEMPT_EVENTS:
+            return serialised
+        if len(serialised.encode("utf-8")) <= cls._SSE_EVENT_BYTES_MAX:
+            return serialised
+        marker = {
+            "_truncated": True,
+            "reason": "event_oversize",
+            "type": event,
+            "max_bytes": cls._SSE_EVENT_BYTES_MAX,
+        }
+        # Preserve a couple of small identifying keys when present so
+        # the frontend can still correlate the dropped frame to a
+        # lead / run.
+        if isinstance(data, dict):
+            for k in ("lead_id", "id", "run_id", "user_id", "state"):
+                v = data.get(k)
+                if isinstance(v, (str, int, float, bool)) and len(str(v)) <= 64:
+                    marker[k] = v
+        return json.dumps(marker)
+
     def emit(self, event: str, data: dict):
-        msg = f"event: {event}\ndata: {json.dumps(data, default=str)}\n\n"
+        # a560 (BRAIN-147): clip oversized payloads before they enter
+        # the SSE frame — a single 50 KiB+ frame can break the
+        # frontend EventSource parser for the rest of the run.
+        payload_json = self._clip_sse_event_payload(event, data)
+        msg = f"event: {event}\ndata: {payload_json}\n\n"
         dead = []
         with self._lock:
             # Cache terminal status for replay to future subscribers; clear
