@@ -6,6 +6,26 @@ Versioning: `0.1.0aNN` alpha increments. Public install path: `pipx install hunt
 
 ---
 
+## 0.1.0a1900 — May 4 2026 — Audit-sweep batch BRAIN-190..192 — user_context.UserEventBus invariants (16 tests pinning subscribe/unsubscribe + cached terminal/progress replay + emit_keepalive SSE-comment + dead-subscriber drop + BRAIN-147 _clip_sse_event_payload 32KiB byte-cap + screenshot exemption + truncation-marker preserves identifying keys + multi-agent-bug-11 _DEAD_THRESHOLD), agent_runner._SubagentRegistry (15 tests pinning _Subagent 12-hex-id + uniqueness + initial-state + register-cap-enforcement + a277 cancel-flips-running-to-cancelled-immediately + idempotent-on-terminal + cross-user-rejection + cancel_event propagation), providers _key_for + _resolve_settings + list_available_providers (17 tests pinning settings→keychain→env priority + a289 env-strip + a289 empty-env→None + nested dict/string forms + top-level-overrides-nested + cloud/local _resolve_settings + key-filter contract + _DEFAULT_ORDER ⊆ _ENV_KEY + _LOCAL_PROVIDERS ⊆ _DEFAULT_ORDER)
+
+### Lockdown bundle (BRAIN-190..192)
+
+48 new tests across 3 modules. Zero source changes.
+
+**BRAIN-190 — user_context.UserEventBus (16 tests)** — pin SSE bus subscribe/unsubscribe + cached event replay + keepalive + BRAIN-147 byte-cap clipping + dead-subscriber detection.
+
+**BRAIN-191 — agent_runner._SubagentRegistry (15 tests)** — pin subagent id format + initial state + per-user concurrency cap enforcement + a277 cancel-frees-slot-immediately + cross-user rejection + cancel_event propagation.
+
+**BRAIN-192 — providers key-resolution chain (17 tests)** — pin settings→keychain→env priority order + a289 env-strip + empty-string-env-no-bypass + nested dict/string settings forms + cloud/local resolve mode + key-filter on list_available_providers + DEFAULT_ORDER/ENV_KEY/LOCAL_PROVIDERS set integrity.
+
+### Files
+- `tests/test_user_event_bus_audit.py`: new — 16 tests.
+- `tests/test_subagent_registry_audit.py`: new — 15 tests.
+- `tests/test_providers_key_resolution_audit.py`: new — 17 tests.
+- `cli.py` + `pyproject.toml` + `CHANGELOG.md`. Versions a1801-a1899 reserved for parallel agents.
+
+---
+
 ## 0.1.0a1800 — May 4 2026 — Audit-sweep batch BRAIN-187..189 — cli_inbox reply-classifier (24 tests pinning _split_msgids angle-bracket extraction + _decode_payload utf-8/cp1252/latin-1 fallback chain + _is_autoreply RFC-3834 subject patterns + Re/Fwd peel + Auto-Submitted/X-Autoreply/X-Auto-Response-Suppress headers + _heuristic_class OOO/unsub/wrong + audit-wave-27 'will-be-back' no-longer-OOO fix), cli_remote Telegram-bridge config (16 tests pinning _load_config missing/unparseable→{}, _save_config 0600 mode + atomic-rename + .tmp-cleanup + overwrite + unicode round-trip, _format_reply action hints + 1500-char json-dump cap), plugins.PluginRegistry (15 tests pinning hook chain semantics + audit-wave-29 scalar-form post_score current_lead tracking + a275 dedupe-by-name + async-hook rejection + plugin-exception caught + _HOOK_NAMES canonical set)
 
 ### Lockdown bundle (BRAIN-187..189)
