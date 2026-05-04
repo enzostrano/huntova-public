@@ -6,6 +6,64 @@ Versioning: `0.1.0aNN` alpha increments. Public install path: `pipx install hunt
 
 ---
 
+## 0.1.0a526 — May 4 2026 — Recovery release: my a525 (BRAIN-143 phase-5 prefill type-aware) push raced against the BRAIN-141 (a525) save-progress idempotency agent's commit and force-with-lease overwrote their server.py + test file from work-clean head; this release re-applies BOTH BRAIN-141 + BRAIN-143 cleanly under a526 (BRAIN-RECOVERY-2)
+
+### Recovery (a525 double-tag race)
+
+The BRAIN-141 agent (save-progress idempotency) and
+my BRAIN-143 work (phase-5 prefill type-aware)
+shipped near-simultaneously and BOTH attempted to
+tag `v0.1.0a525`. The agent's commit `0c1c66c`
+created the tag first; my push `e148ef1` overwrote
+work-clean head via `--force-with-lease` because
+the lease check passed (origin had advanced) but
+the local rebase didn't pull in the agent's
+untracked files (test_save_progress_idempotency.py)
+or their server.py edits to `api_wizard_save_progress`.
+
+State after the race:
+- v0.1.0a525 tag points to 0c1c66c (BRAIN-141, no
+  longer reachable from work-clean head).
+- work-clean head is e148ef1 (BRAIN-143 only).
+- BRAIN-141's test file deleted from disk + their
+  server.py edits reverted.
+
+Recovery: re-apply BRAIN-141's server.py changes
+to `api_wizard_save_progress` (Idempotency-Key
+lookup at handler entry, store on success-return)
++ restore the test file from `git show 0c1c66c:`
++ ship as a526 with BOTH fixes intact.
+
+The `v0.1.0a525` tag + GitHub release continue to
+reference 0c1c66c (the BRAIN-141 commit) — that's
+correct attribution. a526 supersedes both with
+the merged state.
+
+765 / 765 tests passing (749 from a525 BRAIN-143
++ 16 BRAIN-141 tests restored).
+
+### Lesson (compounding the a524 lesson)
+
+The `git diff HEAD~1 --stat` pre-push check from
+the a524 hotfix did flag `delete mode 100644
+tests/test_save_progress_idempotency.py` in the
+output BEFORE the push completed. But the push
+proceeded anyway because the diff was inspected
+AFTER the commit was created. Future rule: inspect
+`git diff HEAD --stat` BEFORE `git commit`, after
+the rebase, to catch deletions while there's still
+time to abort. Better still: spawn parallel ship
+agents in worktree isolation so the main worktree
+is never racy.
+
+### Files
+
+- `server.py`: BRAIN-141 lookup + store on `api_wizard_save_progress` re-applied.
+- `tests/test_save_progress_idempotency.py`: restored from 0c1c66c.
+- `cli.py` (VERSION) + `pyproject.toml` (version) + `CHANGELOG.md`.
+
+---
+
 ## 0.1.0a525 — May 4 2026 — BRAIN-128's phase-5 byte cap wrapped `prefill` in `str(...)` which destroys list-shaped prefills used by `multi_select` to pre-select multiple options — the frontend can't pre-check anything because it gets `"['a', 'b']"` instead of `["a", "b"]`; new type-aware `_normalize_phase5_prefill(raw, q_type)` helper preserves list shape for multi_select and byte-caps each option (BRAIN-143)
 
 ### Bug fix (BRAIN-143, type-aware phase-5 prefill normalization)
