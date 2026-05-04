@@ -8794,6 +8794,63 @@ _PROMPT_INJECTION_WARNING = (
 #  - "bool": boolean. Coerce truthy non-bool to bool.
 #  - "int": int. Coerce numeric strings, reject otherwise.
 _WIZARD_STR_MAX = 50_000
+
+# a496 (BRAIN-127): per-field BYTE cap that complements
+# the existing char cap. `_WIZARD_STR_MAX` clips at 50K
+# CHARS — at 4 bytes/char (UTF-8 max), that's ~200 KB
+# per field. Real wizard fields are paragraphs (sub-1KB).
+# 16 KiB byte cap is 10× the longest legitimate answer,
+# tight enough that pathological single-field inputs
+# never reach the persisted row, BRAIN-86 canonicalization,
+# or BRAIN-85 fingerprint hash. Per Huntova engineering
+# review on field-level byte caps + OWASP API4:2023
+# unrestricted resource consumption: top-level body cap
+# doesn't catch the few-keys-one-massive-field hole.
+_WIZARD_FIELD_BYTES_MAX = int(
+    os.environ.get("HV_WIZARD_FIELD_BYTES_MAX") or str(16 * 1024)
+)
+
+
+def _clip_to_byte_budget(text, max_bytes: int) -> str:
+    """Truncate `text` so its UTF-8 byte length is at
+    most `max_bytes`. Rounds down to the nearest UTF-8
+    code-point boundary so the output is always valid
+    UTF-8 — never an orphan continuation byte sequence.
+
+    None / non-strings → "" (caller-friendly fallback;
+    never raises).
+    """
+    if text is None:
+        return ""
+    if not isinstance(text, str):
+        try:
+            text = str(text)
+        except Exception:
+            return ""
+    encoded = text.encode("utf-8")
+    if len(encoded) <= max_bytes:
+        return text
+    # Slice at max_bytes and back off any incomplete
+    # UTF-8 sequence at the tail. Continuation bytes
+    # match 10xxxxxx (0x80..0xBF).
+    truncated = encoded[:max_bytes]
+    while truncated and (truncated[-1] & 0xC0) == 0x80:
+        truncated = truncated[:-1]
+    # Drop the leading byte of the in-progress sequence
+    # too if we landed mid-codepoint.
+    if truncated and (truncated[-1] & 0xE0) == 0xC0:  # 2-byte lead
+        truncated = truncated[:-1]
+    elif truncated and (truncated[-1] & 0xF0) == 0xE0:  # 3-byte lead
+        truncated = truncated[:-1]
+    elif truncated and (truncated[-1] & 0xF8) == 0xF0:  # 4-byte lead
+        truncated = truncated[:-1]
+    try:
+        return truncated.decode("utf-8")
+    except UnicodeDecodeError:
+        # Ultra-defensive: try with errors=ignore.
+        return truncated.decode("utf-8", errors="ignore")
+
+
 # a467 (BRAIN-98): aggregate-payload cap. Per-field caps in
 # `_coerce_wizard_answer` stop one giant string; this cap stops
 # death-by-thousand-cuts (a client sending hundreds of tiny p5_*
@@ -8911,10 +8968,19 @@ def _coerce_wizard_answer(key: str, value):
         # Unknown key — drop. Schema is closed; an attacker can't
         # smuggle arbitrary blobs into user_settings via this path.
         return _WIZARD_DROP
+    # a496 (BRAIN-127): per-field BYTE cap applied AFTER
+    # the existing char trim. Real wizard fields are
+    # paragraphs (sub-1KB); 16 KiB is generous. Pathological
+    # single-field inputs that survive the body cap (a 200KB
+    # field inside a 256KB body) are clamped here so they
+    # never reach merge_settings.
     if kind in ("str", "str_or_list") and isinstance(value, (list, tuple)):
         # str_or_list: accept list-of-string for multi_select p5_*.
         if kind == "str_or_list":
-            cleaned = [str(x).strip()[:_WIZARD_STR_MAX] for x in value if isinstance(x, (str, int, float, bool))]
+            cleaned = [
+                _clip_to_byte_budget(str(x).strip()[:_WIZARD_STR_MAX], _WIZARD_FIELD_BYTES_MAX)
+                for x in value if isinstance(x, (str, int, float, bool))
+            ]
             cleaned = [c for c in cleaned if c]
             return cleaned[:_WIZARD_LIST_MAX] if cleaned else _WIZARD_DROP
         return _WIZARD_DROP  # scalar field got a list — reject
@@ -8927,13 +8993,16 @@ def _coerce_wizard_answer(key: str, value):
         s = str(value).strip()
         if not s:
             return _WIZARD_DROP
-        return s[:_WIZARD_STR_MAX]
+        return _clip_to_byte_budget(s[:_WIZARD_STR_MAX], _WIZARD_FIELD_BYTES_MAX)
     if kind == "list_str":
         if isinstance(value, str):
             # Tolerant: a single string for a list field becomes
             # [string]. Common from form posts.
             v = value.strip()
-            return [v[:_WIZARD_STR_MAX]] if v else _WIZARD_DROP
+            return (
+                [_clip_to_byte_budget(v[:_WIZARD_STR_MAX], _WIZARD_FIELD_BYTES_MAX)]
+                if v else _WIZARD_DROP
+            )
         if not isinstance(value, list):
             return _WIZARD_DROP
         cleaned = []
@@ -8941,7 +9010,7 @@ def _coerce_wizard_answer(key: str, value):
             if isinstance(item, (str, int, float)) and not isinstance(item, bool):
                 s = str(item).strip()
                 if s:
-                    cleaned.append(s[:_WIZARD_STR_MAX])
+                    cleaned.append(_clip_to_byte_budget(s[:_WIZARD_STR_MAX], _WIZARD_FIELD_BYTES_MAX))
             elif isinstance(item, bool):
                 cleaned.append("true" if item else "false")
             # dict/list/None items are filtered out
@@ -9379,8 +9448,18 @@ async def api_wizard_complete(request: Request, response: Response, user: dict =
             _a = _h.get("answer")
             if not isinstance(_q, str) or not isinstance(_a, str):
                 continue
-            _q = _q.strip()[:_WIZARD_STR_MAX]
-            _a = _a.strip()[:_WIZARD_STR_MAX]
+            # a496 (BRAIN-127): per-field byte cap on the
+            # parallel history payload. The save-progress
+            # path goes through `_coerce_wizard_answer`
+            # which now applies the byte cap; history
+            # comes in via this separate code path and
+            # needs the same defense.
+            _q = _clip_to_byte_budget(
+                _q.strip()[:_WIZARD_STR_MAX], _WIZARD_FIELD_BYTES_MAX
+            )
+            _a = _clip_to_byte_budget(
+                _a.strip()[:_WIZARD_STR_MAX], _WIZARD_FIELD_BYTES_MAX
+            )
             if not _q and not _a:
                 continue
             history.append({"question": _q, "answer": _a})

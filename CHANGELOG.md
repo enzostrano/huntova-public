@@ -6,6 +6,86 @@ Versioning: `0.1.0aNN` alpha increments. Public install path: `pipx install hunt
 
 ---
 
+## 0.1.0a496 — May 4 2026 — BRAIN-117/118's top-level body cap (256 KiB) closes "many keys" + "huge body" but not "few keys, one massive field": a single 200 KB persisted-row field survived under the body ceiling, bloating BRAIN-86 canonicalization, BRAIN-85 fingerprint hash, and every subsequent get-mutate-save cycle; new `_WIZARD_FIELD_BYTES_MAX` + `_clip_to_byte_budget` helper now clamp every user-writable field BEFORE merge (BRAIN-127)
+
+### Bug fix (BRAIN-127, per-field byte cap)
+
+BRAIN-117/118 (a486/a487) introduced the top-level
+`_WIZARD_BODY_BYTES_MAX = 256 KiB` cap on every
+wizard mutating route. BRAIN-13 (a374) clips fields
+to 400-4000 chars BEFORE feeding into AI prompts.
+`_WIZARD_STR_MAX = 50_000` clips each persisted-row
+field to 50K chars.
+
+The gap: 50K chars × up to 4 bytes/char (UTF-8) =
+~200 KB per field. A client could send a body well
+under 256 KiB total but with a single 200 KB field
+that:
+- Survived the body cap.
+- Bloated the persisted SQLite row.
+- Weighed down BRAIN-86 canonicalization (key sort
+  + JSON dump on every fingerprint).
+- Slowed BRAIN-85 fingerprint cache lookups.
+- Inflated every subsequent get-mutate-save cycle
+  on the row.
+
+Real wizard fields are paragraphs — `outreach_tone`
+is a sentence, `business_description` is a paragraph
+(<1 KB). 16 KiB byte cap is 10× the longest
+legitimate answer; tight enough that pathological
+single-field inputs are rejected before merge.
+
+Per Huntova engineering review on field-level byte
+caps + OWASP API4:2023 unrestricted resource
+consumption: every user-writable long-text field
+must have its own maximum encoded byte length
+enforced before merge or canonicalization. Field-
+level caps complement (don't duplicate) body caps —
+they protect the hot-path data model from
+pathological single-field inputs that fit inside
+the request envelope.
+
+Fix: two module-scope additions near `_WIZARD_STR_MAX`.
+
+- `_WIZARD_FIELD_BYTES_MAX` (default 16384 = 16 KiB,
+  env-overridable via `HV_WIZARD_FIELD_BYTES_MAX`).
+- `_clip_to_byte_budget(text, max_bytes)` truncates
+  at a UTF-8 code-point boundary so the output is
+  always valid UTF-8 — never an orphan continuation
+  byte sequence. Defensive: None / non-strings → "".
+
+`_coerce_wizard_answer` (the closed-schema entry
+point that save-progress + complete both use for
+client-supplied keys) applies the byte cap to every
+string field AND each item in list_str fields,
+AFTER the existing char trim. The history
+coercion in `api_wizard_complete` (the parallel
+path for the `history` payload) gets the same
+defense.
+
+10 new regression tests in
+`test_wizard_per_field_byte_cap.py`:
+- Constant + helper exist with sane bounds.
+- Helper passes under-cap, truncates oversize ASCII,
+  handles multibyte UTF-8 safely (round-trips
+  encode/decode), handles None/empty.
+- Source-level: `_coerce_wizard_answer` references
+  the byte cap.
+- Behavioral: a single 100 KB string field clamps
+  to ≤ cap.
+- Behavioral: each item in a list_str field clamps.
+- Source-level: api_wizard_complete history clip
+  uses the byte cap on the parallel path.
+
+608 / 608 tests passing.
+
+### Files
+
+- `server.py`: new `_WIZARD_FIELD_BYTES_MAX` constant + `_clip_to_byte_budget(text, max_bytes)` helper near `_WIZARD_STR_MAX`. `_coerce_wizard_answer` applies the byte cap on all three field shapes (`str`, `str_or_list`, `list_str`). `api_wizard_complete` history clip applies the cap on each q/a pair.
+- `tests/test_wizard_per_field_byte_cap.py`: new — 10 tests guarding the per-field byte-cap contract.
+
+---
+
 ## 0.1.0a495 — May 4 2026 — BRAIN-124/125 made the four wizard write-rejection responses match by hand-rolling each branch; the next refactor would silently drift one site away from the others — extracted the conflict contract into a shared `_wizard_conflict_response` helper, all four callsites now go through one source of truth (BRAIN-126)
 
 ### Bug fix (BRAIN-126, shared conflict-response helper)
