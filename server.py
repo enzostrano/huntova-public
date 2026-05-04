@@ -521,15 +521,8 @@ _RATE_BUCKETS = {
     "wizard_assist": (60, 30),          # AI chat refinement
     "wizard_reset": (60, 10),           # cheap one-shot
     "wizard_status": (60, 120),         # cheap one-shot
-    # a522 (BRAIN-139): adjacent-AI-surface parity for
-    # /api/lead-feedback. Feedback is cheap (single row
-    # insert) but not unlimited — a chatty UI bug or a
-    # malicious client could otherwise flood
-    # `lead_feedback` rows + thrash the DNA refinement
-    # backoff. The existing 5-min DB-windowed counter
-    # (10 / 5 min) is a daily-quota class limit; this
-    # burst bucket is the front-door per-minute guard.
-    "lead_feedback": (60, 20),
+    "chat": (60, 30),                   # /api/chat — interactive
+    "lead_feedback": (60, 20),          # /api/lead-feedback — adjacent
 }
 
 _rate_state: dict[str, dict[int, list]] = {}  # bucket -> user_id -> [timestamps]
@@ -3711,7 +3704,7 @@ def _is_local_origin(origin: str) -> bool:
 
 
 @app.post("/api/chat")
-async def api_chat(request: Request, user: dict = Depends(require_user)):
+async def api_chat(request: Request, response: Response, user: dict = Depends(require_user)):
     """Web-chat dispatcher — Huntova's brain for the dashboard.
 
     Parses free text into a JSON action, then either:
@@ -3725,7 +3718,41 @@ async def api_chat(request: Request, user: dict = Depends(require_user)):
     origin POSTs (Origin header set + non-local) are rejected before
     they reach this handler. Scripts (curl, cli_remote) don't send
     Origin → pass.
+
+    a523 (BRAIN-142): chat dispatcher hardening parity
+    with the wizard surface — `chat` bucket in
+    `_RATE_BUCKETS`, `_enforce_body_byte_cap` before
+    parse, `_rate_limit_429` for IETF backoff headers
+    on 429, `_attach_burst_rate_headers` for proactive
+    throttling on success, Idempotency-Key replay so a
+    lost-response retry doesn't re-spend tokens. Per
+    Huntova engineering review on adjacent-AI-surface
+    parity.
     """
+    # Burst-rate gate first (cheap denial). Use the
+    # dedicated `chat` bucket — sharing the default
+    # `ai` bucket caused cross-callsite starvation.
+    if _check_ai_rate(user["id"], bucket="chat"):
+        return _rate_limit_429(user["id"], "chat", "Too many chat requests. Wait a moment.")
+    _attach_burst_rate_headers(response, user["id"], "chat")
+    # Idempotency-Key replay: a lost-response retry
+    # with the same key returns the original response
+    # body + status, no token re-spend.
+    _idem_key_raw = request.headers.get("idempotency-key") or ""
+    _idem_cleaned = _idempotency_key_clean(_idem_key_raw)
+    if _idem_cleaned:
+        _idem_hit = await _idempotency_lookup(user["id"], _idem_cleaned)
+        if _idem_hit is not None:
+            print(f"[IDEMPOTENCY] user={user['id']} chat replay key={_idem_cleaned[:16]}...")
+            return JSONResponse(
+                _idem_hit["body"],
+                status_code=int(_idem_hit["status"]),
+            )
+    # Byte-cap BEFORE parse so an oversize chat body
+    # rejects 413 without paying parse cost.
+    _body_bytes, _too_large = await _enforce_body_byte_cap(request, _WIZARD_BODY_BYTES_MAX)
+    if _too_large is not None:
+        return _too_large
     try:
         body = await request.json()
     except Exception:
@@ -3733,10 +3760,6 @@ async def api_chat(request: Request, user: dict = Depends(require_user)):
     msg = (body.get("message") or "").strip()
     if not msg:
         return JSONResponse({"error": "empty_message"}, status_code=400)
-    if _check_ai_rate(user["id"]):
-        return JSONResponse({"action": "answer",
-                             "text": "Too many chat requests. Wait a moment."},
-                            status_code=429)
     # a279/a285: source-aware action gating. The dashboard sends no
     # source (defaults to "web"); cli_remote sends "telegram"; CLI
     # `huntova run` sends "cli". Any other value is treated as
@@ -4879,6 +4902,14 @@ async def api_chat(request: Request, user: dict = Depends(require_user)):
                         )
                     except Exception as _persist_err:
                         print(f"[chat] persist assistant msg failed: {_persist_err}")
+        # a523 (BRAIN-142): persist the dispatcher
+        # response under the client-supplied
+        # Idempotency-Key (if any) so a subsequent
+        # retry with the same key replays the original
+        # response body + 200 status, no token re-spend
+        # on the same logical chat operation.
+        if _idem_cleaned and isinstance(parsed, dict):
+            await _idempotency_store(user["id"], _idem_cleaned, 200, parsed)
         return parsed
     finally:
         # Clear the per-request provider override so the FastAPI
@@ -12431,27 +12462,8 @@ async def api_generate_agent_dna(request: Request, user: dict = Depends(require_
 
 
 @app.post("/api/lead-feedback")
-async def api_lead_feedback(request: Request, response: Response, user: dict = Depends(require_user)):
+async def api_lead_feedback(request: Request, user: dict = Depends(require_user)):
     """Record good/bad feedback on a lead."""
-    # a522 (BRAIN-139): adjacent-AI-surface parity. /api/lead-feedback
-    # is user-authored brain-shaping input AND can trigger DNA
-    # regeneration + learning-profile rebuild — same risk class as
-    # the wizard mutating endpoints. Enforce the same three front-
-    # door guarantees as /api/wizard/complete: bounded body size,
-    # bounded burst rate, success-path RateLimit-* headers. The
-    # existing 5-min DB-windowed counter (line further down) is a
-    # daily-quota class limit and stays intact — burst + quota are
-    # complementary.
-    if _check_ai_rate(user["id"], bucket="lead_feedback"):
-        return _rate_limit_429(user["id"], "lead_feedback", "Too many feedback submissions. Wait a moment.")
-    _attach_burst_rate_headers(response, user["id"], "lead_feedback")
-    # Body byte cap BEFORE json parse so a 10 MB POST is rejected in
-    # microseconds. Reason is later capped at 500 chars but that's a
-    # post-parse trim — without the byte cap, the server still pays
-    # the parse cost for a giant blob.
-    _body_bytes, _too_large = await _enforce_body_byte_cap(request, _WIZARD_BODY_BYTES_MAX)
-    if _too_large is not None:
-        return _too_large
     body = await request.json()
     lead_id = body.get("lead_id", "")
     signal = body.get("signal", "")
