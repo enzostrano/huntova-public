@@ -6,6 +6,39 @@ Versioning: `0.1.0aNN` alpha increments. Public install path: `pipx install hunt
 
 ---
 
+## 0.1.0a531 — May 4 2026 — HTTP-method discipline lockdown extended to adjacent mutating endpoints added since BRAIN-138 — /api/lead-feedback (BRAIN-139), /api/chat (BRAIN-142), /api/team/seed-defaults + /api/team/{slot}/toggle (BRAIN-144); 4 regression tests codify POST-only methods + reject GET/PUT/DELETE/PATCH (BRAIN-148)
+
+### Lockdown (BRAIN-148, HTTP-method discipline on recently-added mutators)
+
+BRAIN-131 (a500) locked /api/wizard/* + /agent/*.
+BRAIN-138 (a513) locked /api/ops/* + /api/admin/*.
+The mutating endpoints added in subsequent releases
+need parallel codification:
+
+- /api/lead-feedback (BRAIN-139, a522)
+- /api/chat (BRAIN-142, a523)
+- /api/team/seed-defaults (BRAIN-144, a527)
+- /api/team/{slot}/toggle (BRAIN-144, a527)
+
+Same rationale as BRAIN-131/138: controls live in
+route decorators; one accidental `@app.post` →
+`@app.get` swap silently reopens CSRF / caching /
+prefetch attack surface. Test-only release codifies
+the contract.
+
+4 new regression tests in
+`tests/test_adjacent_endpoints_http_method_enforcement.py`.
+
+771 → 775 / 775 tests passing (4 added, no source
+changes).
+
+### Files
+
+- `tests/test_adjacent_endpoints_http_method_enforcement.py`: new — 4 tests.
+- `cli.py` (VERSION) + `pyproject.toml` (version) + `CHANGELOG.md`. No source changes — release-test lockdown only.
+
+---
+
 ## 0.1.0a527 — May 4 2026 — `/api/team/seed-defaults` (Reseed-from-brain button) + `/api/team/{slot}/toggle` (per-specialist enable flag) lacked rate-limit + byte-cap hardening — adjacent mutators users can mash; new `team_seed_defaults` (60s/10) and `team_toggle` (60s/30) buckets added (BRAIN-144)
 
 ### Bug fix (BRAIN-144, team-endpoints adjacent-AI-surface parity)
