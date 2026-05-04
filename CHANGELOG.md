@@ -6,6 +6,26 @@ Versioning: `0.1.0aNN` alpha increments. Public install path: `pipx install hunt
 
 ---
 
+## 0.1.0a565 — May 4 2026 — CSRF middleware path-set lattice integrity audit — `_CSRF_EXEMPT_ALSO_ORIGIN_EXEMPT` ⊆ `CSRF_EXEMPT_PATHS`; `_WIZARD_DESTRUCTIVE_ORIGIN_GATED_PATHS` ∩ `CSRF_EXEMPT_PATHS` = ∅; critical wizard mutators NOT exempt; BRAIN-114 destructive paths still gated (BRAIN-154)
+
+### Lockdown (BRAIN-154, CSRF path-set lattice)
+
+CSRFMiddleware uses three path sets that form a strict lattice. A typo or set-mutation regression silently opens a CSRF hole.
+
+- `CSRF_EXEMPT_PATHS`: skip the double-submit token check.
+- `_CSRF_EXEMPT_ALSO_ORIGIN_EXEMPT`: also skip Origin (must be a SUBSET of csrf-exempt).
+- `_WIZARD_DESTRUCTIVE_ORIGIN_GATED_PATHS`: extra Origin gate on top of the token check (must be DISJOINT from csrf-exempt — a destructive endpoint that's also csrf-exempt would bypass both).
+
+Plus critical wizard mutators (`/api/wizard/complete`, `save-progress`, `scan`, `generate-phase5`, `assist`, `/agent/control`) MUST NOT be in any exemption set. BRAIN-114's destructive set members (`/api/wizard/reset`, `/api/wizard/start-retrain`) MUST stay there.
+
+5 new tests in `tests/test_csrf_middleware_path_sets_audit.py`. No source changes.
+
+### Files
+- `tests/test_csrf_middleware_path_sets_audit.py`: new — 5 tests.
+- `cli.py` + `pyproject.toml` + `CHANGELOG.md`.
+
+---
+
 ## 0.1.0a564 — May 4 2026 — Env-override naming-convention audit — every `os.environ.get(...)` key in server.py module-scope must follow the `HV_*` prefix (or be a documented standard env var); critical knobs (HV_WIZARD_*, HV_DNA_*) explicitly enumerated; legacy `HUNTOVA_*` prefix forbidden; `int(os.environ.get(K))` without default fallback flagged (BRAIN-153)
 
 ### Lockdown (BRAIN-153, env-override convention)
