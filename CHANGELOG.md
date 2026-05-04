@@ -6,6 +6,216 @@ Versioning: `0.1.0aNN` alpha increments. Public install path: `pipx install hunt
 
 ---
 
+## 0.1.0a505 — May 4 2026 — BRAIN-85's content fingerprint cache covers double-click but NOT lost-response retries: a client that POSTs `/api/wizard/complete`, gets a network failure mid-response (server committed, client never received the 200), and resends the same payload received `reused: true` instead of the original response — content equality ≠ client-visible retry safety; new `_idempotency_lookup` + `_idempotency_store` helpers + per-user persisted cache replay the original status + body for retries with the same client-supplied `Idempotency-Key` header (BRAIN-132)
+
+### Bug fix (BRAIN-132, Idempotency-Key support on /api/wizard/complete)
+
+BRAIN-85 (a449) added a content-fingerprint cache
+that returns `reused: true` when the same payload
+hits twice. That covers "user clicked Complete
+twice on the same answers". It does NOT cover:
+
+- Network failure mid-response. Server committed,
+  client never received the 200. Client retries
+  the same payload → BRAIN-85 fingerprint hits →
+  returns `reused: true`. Client treats `reused`
+  semantically different from `ok` and may show a
+  confusing UX or re-trigger expensive recovery.
+- Retry semantics across logical operations. The
+  client wants to know "is THIS request a retry of
+  one I already sent?" — that's a client-side
+  intent, not a content equality.
+- Different clients sending identical payloads
+  (legitimate independent operations) — BRAIN-85
+  treats them as a duplicate.
+
+Standard contract (Stripe / AWS / Google Cloud
+guidance): an `Idempotency-Key` header marks one
+logical operation. The server stores the resulting
+status code + body for a bounded TTL. Subsequent
+retries with the same key replay the stored
+response verbatim — same status, same body. A new
+key with identical content is a new logical
+operation.
+
+Per Huntova engineering review on client retry
+safety: content fingerprinting is not the same as
+client-visible retry safety. Idempotency-Key is the
+canonical solution.
+
+Fix: three module-scope additions near the
+BRAIN-101 fingerprint TTL config.
+
+- `_IDEMPOTENCY_TTL_SEC` (default 14 days, matching
+  BRAIN-101's fingerprint cache; env-overridable).
+- `_IDEMPOTENCY_KEY_MAX_LEN` (default 255) bounds
+  opaque key strings.
+- `_IDEMPOTENCY_CACHE_PER_USER_MAX` (default 50)
+  prevents key-flood DoS via per-user LRU eviction.
+
+Plus three module-scope helpers:
+
+- `_idempotency_key_clean(raw)` — validates +
+  normalizes the header. Rejects empty / oversize
+  / non-printable-ASCII keys (header-injection
+  defense).
+- `_idempotency_lookup(user_id, key)` — async DB
+  read; returns `{status, body}` on hit within
+  TTL, else None. Drops expired entries silently.
+- `_idempotency_store(user_id, key, status, body)`
+  — async DB write via merge_settings. Drops
+  expired entries inline + LRU-evicts down to the
+  per-user cap. Best-effort; failures are logged,
+  never raised.
+
+Per-user persistence via the existing user_settings
+JSON blob (new `_idempotency_cache` key). Survives
+process restarts; tied to user identity so cross-
+user replays are impossible by construction.
+
+`/api/wizard/complete` now reads the
+`Idempotency-Key` header BEFORE the daily-quota
+check (replays must not consume quota). Cache hit
+→ returns the stored status + body verbatim. Miss
+→ runs the normal flow + stores the successful
+2xx response on the way out.
+
+Order: rate check → idempotency lookup → daily
+quota → byte cap → json parse → flow → store on
+success.
+
+Only 200 successes are cached. 4xx/5xx are
+transient state and replaying them would be
+incorrect; the client should re-evaluate.
+
+11 new regression tests in
+`test_wizard_idempotency_key.py`:
+- All three constants + all helpers exist.
+- `_idempotency_key_clean` rejects empty / oversize
+  / non-printable / None.
+- Source-level: handler reads header, calls lookup,
+  calls store on success.
+- Source-level: lookup precedes the daily-quota
+  check.
+- Behavioral: lookup returns None for missing /
+  invalid key.
+
+656 / 656 tests passing.
+
+### Files
+
+- `server.py`: new `_IDEMPOTENCY_TTL_SEC` / `_IDEMPOTENCY_KEY_MAX_LEN` / `_IDEMPOTENCY_CACHE_PER_USER_MAX` constants + `_idempotency_key_clean` / `_idempotency_lookup` / `_idempotency_store` helpers near the BRAIN-101 TTL config. `api_wizard_complete` reads the header at handler entry, returns cached response on hit, persists the success body on miss.
+- `tests/test_wizard_idempotency_key.py`: new — 11 tests guarding the Idempotency-Key contract.
+
+---
+## 0.1.0a504 — May 4 2026 — `/api/wizard/status` emitted confidence via `_safe_nonneg_int(w.get("_wizard_confidence"))` with no upper bound; a corrupted persisted 999999 leaked raw to clients (breaking the 0..100 percentage-bar render) and locked the wizard's confidence forever via the `_monotonic_phase` max-comparison — exactly the BRAIN-119 failure mode mirrored on the sister progress marker; new `_WIZARD_CONFIDENCE_MAX` constant (env-overridable via `HV_WIZARD_CONFIDENCE_MAX`, default 100) + `_normalize_wizard_confidence` helper close the read boundary in parallel with the existing `_monotonic_phase` write-side clamp (BRAIN-135)
+
+### Bug fix (BRAIN-135, bound `_wizard_confidence` at the persist + emit boundary)
+
+BRAIN-119 (a488) introduced `_WIZARD_PHASE_MAX = 100`
+plus the `_normalize_wizard_phase` helper to clamp
+`_wizard_phase` at every public read of the wizard
+state machine. The fix closed a real failure mode:
+once a corrupted 999999 lands in the persisted phase,
+`_monotonic_phase(prev=999999, incoming=clean)` returns
+999999 forever, locking the wizard at a bogus value
+(the BRAIN-3 "no regression" guarantee turns into a
+permanent lock when the starting value is garbage).
+
+Per Huntova engineering review on
+persisted-workflow-state validation, that fix only
+covered half the surface. `_wizard_confidence` is the
+sister progress marker: written together with
+`_wizard_phase` through the same `_monotonic_phase`
+mutator at `/api/wizard/save-progress` (server.py),
+emitted next to it on `/api/wizard/status`. The
+status endpoint emitted it raw via:
+
+```python
+"confidence": _safe_nonneg_int(w.get("_wizard_confidence")),
+```
+
+`_safe_nonneg_int` (BRAIN-115) is type-safe — strings,
+lists, dicts, negatives all normalise — but it has no
+upper bound. Concrete failure modes:
+
+1. **Client-side progress-bar overflow** — the wizard
+   UI renders confidence as a 0..100 percentage bar.
+   An unbounded value blows the layout and the
+   visual progress signal that drives "are we there
+   yet?" feedback.
+2. **`_monotonic_phase` lock duplicated** — once a
+   garbage 999999 is persisted (operator UPDATE,
+   restore from corrupted backup, BYOK provider
+   misbehaviour writing to the wrong field), every
+   subsequent legitimate confidence write goes
+   through `max(999999, real_value)` and gets
+   discarded. The confidence locks at the bogus
+   value forever.
+3. **Asymmetric defense** — capping phase but not
+   confidence is asymmetric. Both go through the
+   same `_monotonic_phase` write path and are
+   emitted on the same status response.
+
+**The fix mirrors BRAIN-119 exactly:**
+
+- New module-scope `_WIZARD_CONFIDENCE_MAX` constant
+  (env-overridable via `HV_WIZARD_CONFIDENCE_MAX`,
+  default 100 since the wizard UI renders a
+  0..100 percentage). Operators can widen if a
+  future scale change requires it.
+- New `_normalize_wizard_confidence(raw, default=0)`
+  helper. Delegates to `_safe_nonneg_int` for the
+  BRAIN-115 type-safety contract, then additionally
+  clamps the upper bound. Same shape as
+  `_normalize_wizard_phase`.
+- `/api/wizard/status` now emits `confidence` via
+  the bounded helper (server.py).
+
+The write boundary is already covered by
+`_monotonic_phase` clamping to `_WIZARD_PHASE_MAX`
+(both helpers default to 100, so the write-side
+clamp is conservative for confidence). Defense at
+both boundaries means a corrupted persisted value
+cannot survive a single round-trip: the read clamp
+emits the cap; the next write clamps again before
+re-persisting.
+
+8 regression tests added in
+`tests/test_wizard_confidence_bounded.py`:
+
+- `test_wizard_confidence_max_constant_exists` — module
+  exports the cap as a positive int.
+- `test_wizard_confidence_max_env_overridable` —
+  source-level proof of the
+  `HV_WIZARD_CONFIDENCE_MAX` env override.
+- `test_normalize_wizard_confidence_clamps_corrupted_high_value`
+  — 999999 input clamps to the cap.
+- `test_normalize_wizard_confidence_passes_clean_values`
+  — values within range pass through unchanged.
+- `test_normalize_wizard_confidence_floors_negatives`
+  — negatives clamp to 0.
+- `test_normalize_wizard_confidence_handles_garbage`
+  — strings/dicts/None coerce to 0.
+- `test_normalize_wizard_confidence_handles_string_ints`
+  — JSON-loaded "75" still works.
+- `test_status_endpoint_emits_confidence_via_bounded_helper`
+  — source-level: the emission expression references
+  the bounded helper.
+- `test_monotonic_phase_still_clamps_confidence_writes`
+  — write-boundary smoke test.
+
+Same defense-in-depth pattern as BRAIN-109 (DNA enum
+validation), BRAIN-115 (optimistic-concurrency token
+read validation) and BRAIN-119 (phase upper-bound
+clamp). Public read paths over user-influenced
+persisted state must validate-and-normalise; a
+corrupted column must not leak garbage to clients
+or lock the state machine.
+
+---
+
+
 ## 0.1.0a503 — May 4 2026 — DNA `scoring_rules` is an AI-output string assembled from the Stage-1 `scoring_guide` payload but had no per-field byte cap; a hallucinating provider can produce 1000-item must_have/bonus/instant_reject lists or 50 KB score-band strings, ballooning `agent_dna.dna_json` and re-injecting the same bloat into every prompt at app.py:3756 — direct BYOK spend impact on every loop start; new `_DNA_FIELD_BYTES_MAX` constant + module-local `_clip_dna_field` helper close the next AI-output ingress after BRAIN-128 (phase-5 questions) and BRAIN-129 (scan output) (BRAIN-134)
 
 ### Bug fix (BRAIN-134, AI-output byte cap on DNA scoring_rules)

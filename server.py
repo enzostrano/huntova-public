@@ -733,6 +733,24 @@ _WIZARD_BODY_BYTES_MAX = int(
 # legal execution inputs.
 _WIZARD_PHASE_MAX = int(os.environ.get("HV_WIZARD_PHASE_MAX") or "100")
 
+# a504 (BRAIN-135): confidence is the sister progress
+# marker to `_wizard_phase` — both written together
+# through `_monotonic_phase` at save-progress and emitted
+# next to each other on `/api/wizard/status`. The wizard
+# UI renders confidence as a 0..100 percentage bar, so
+# the same upper-bound clamp BRAIN-119 applied to phase
+# must apply to confidence at the public read boundary.
+# Without this, a corrupted persisted 999999 leaks raw
+# to clients (breaking the progress bar) and locks the
+# value forever via the BRAIN-3 monotonic guarantee
+# (`max(999999, anything legitimate) == 999999`). Per
+# Huntova engineering review on persisted-workflow-state
+# validation: capping phase but not confidence is
+# asymmetric defense — same failure mode, same fix.
+# Default 100 (percent); env-overridable in case a
+# future scale change widens the legitimate range.
+_WIZARD_CONFIDENCE_MAX = int(os.environ.get("HV_WIZARD_CONFIDENCE_MAX") or "100")
+
 
 def _normalize_wizard_phase(raw, default: int = 0) -> int:
     """Normalize a persisted wizard phase / cursor /
@@ -749,6 +767,31 @@ def _normalize_wizard_phase(raw, default: int = 0) -> int:
     v = _safe_nonneg_int(raw, default=default)
     if v > _WIZARD_PHASE_MAX:
         return _WIZARD_PHASE_MAX
+    return v
+
+
+def _normalize_wizard_confidence(raw, default: int = 0) -> int:
+    """Normalize a persisted wizard confidence value to a
+    bounded non-negative int. Delegates to
+    `_safe_nonneg_int` for type safety (BRAIN-115
+    contract) and additionally clamps the upper bound to
+    `_WIZARD_CONFIDENCE_MAX`.
+
+    a504 (BRAIN-135): mirror of `_normalize_wizard_phase`
+    for the sister progress marker. Without this, the
+    `/api/wizard/status` emission used `_safe_nonneg_int`
+    directly — type-safe but unbounded — so a corrupted
+    persisted 999999 would leak raw to the client and
+    break the percentage-bar render. Same failure class
+    as BRAIN-119; defense-in-depth at the public read
+    boundary. The write boundary is already covered by
+    `_monotonic_phase` (which clamps to
+    `_WIZARD_PHASE_MAX`, conservative for confidence
+    when both caps share the default 100).
+    """
+    v = _safe_nonneg_int(raw, default=default)
+    if v > _WIZARD_CONFIDENCE_MAX:
+        return _WIZARD_CONFIDENCE_MAX
     return v
 
 
@@ -10580,7 +10623,7 @@ async def api_wizard_complete(request: Request, response: Response, user: dict =
         "brain_saved": bool(w.get("normalized_hunt_profile")),
         "dossier_saved": bool(w.get("training_dossier")),
     }
-    # a501 (BRAIN-132): persist this successful response
+    # a505 (BRAIN-132): persist this successful response
     # under the client-supplied Idempotency-Key (if any)
     # so a subsequent retry with the same key replays
     # the same body + 200 status. Best-effort; failures
@@ -11600,7 +11643,16 @@ async def api_wizard_status(user: dict = Depends(require_user)):
         # (display-only progress marker, not a transition
         # input — covered by separate validation if it
         # ever drives logic).
-        "confidence": _safe_nonneg_int(w.get("_wizard_confidence")),
+        # a504 (BRAIN-135): emit confidence via the
+        # bounded helper. Pre-fix used `_safe_nonneg_int`
+        # directly — type-safe but unbounded — so a
+        # corrupted persisted 999999 leaked raw to clients
+        # (breaking the 0..100 percentage-bar render) and
+        # locked the value forever via the
+        # `_monotonic_phase` max-comparison. Closes the
+        # read boundary in parallel with the write-side
+        # clamp BRAIN-119 added on `_wizard_phase`.
+        "confidence": _normalize_wizard_confidence(w.get("_wizard_confidence")),
         "phase": _normalize_wizard_phase(w.get("_wizard_phase")),
         "has_answers": bool(w.get("_wizard_answers")),
         "company_name": w.get("company_name", ""),
