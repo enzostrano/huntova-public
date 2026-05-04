@@ -1,0 +1,532 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Huntova — first-run setup</title>
+<meta name="description" content="Pick your AI provider, paste an API key, run your first hunt — all from the browser.">
+<style>
+  :root{
+    --bg:#08090c; --bg2:#0d0f14; --panel:#11141a; --line:#1c2029; --line2:#272b35;
+    --ink:#eef0f4; --mute:#8a93a4; --dim:#5d6679;
+    --acc:#7c5cff; --acc2:#a48bff; --green:#3ddc97; --red:#ff6464; --orange:#f6b352;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;padding:0;background:var(--bg);color:var(--ink);font-family:-apple-system,BlinkMacSystemFont,Inter,'Segoe UI',Helvetica,Arial,sans-serif;line-height:1.55;-webkit-font-smoothing:antialiased}
+  a{color:inherit;text-decoration:none}
+  code,pre,kbd{font-family:ui-monospace,'SF Mono','Cascadia Mono','JetBrains Mono',Consolas,monospace}
+  ::selection{background:rgba(124,92,255,.35)}
+  .nav{position:sticky;top:0;z-index:50;background:rgba(8,9,12,.85);backdrop-filter:saturate(150%) blur(10px);border-bottom:1px solid var(--line)}
+  .nav-inner{max-width:1080px;margin:0 auto;padding:14px 22px;display:flex;align-items:center;justify-content:space-between;gap:18px}
+  .brand{display:flex;align-items:center;gap:10px;font-weight:700;letter-spacing:-.01em;font-size:17px}
+  .brand-dot{width:9px;height:9px;border-radius:50%;background:var(--acc);box-shadow:0 0 12px var(--acc)}
+  .nav-step{font-size:13px;color:var(--mute)}
+  main{max-width:880px;margin:0 auto;padding:48px 22px 80px}
+
+  .steps{display:flex;align-items:center;gap:0;margin-bottom:32px;padding:0;list-style:none}
+  .step{display:flex;align-items:center;gap:8px;font-size:12.5px;color:var(--dim)}
+  .step.on{color:var(--ink)}
+  .step.done{color:var(--green)}
+  .step .num{width:24px;height:24px;border-radius:50%;border:1px solid var(--line2);display:grid;place-items:center;font-size:11px;font-family:ui-monospace,monospace}
+  .step.on .num{border-color:var(--acc);background:var(--acc);color:var(--bg);font-weight:700}
+  .step.done .num{border-color:var(--green);background:var(--green);color:var(--bg)}
+  .step-bar{flex:1;height:1px;background:var(--line);margin:0 12px}
+
+  .hero{margin-bottom:24px}
+  .kicker{display:inline-flex;align-items:center;gap:8px;padding:5px 12px;border:1px solid var(--line2);border-radius:999px;font-size:11.5px;color:var(--mute);letter-spacing:.04em;text-transform:uppercase;margin-bottom:16px;background:var(--bg2)}
+  .kicker .pip{width:6px;height:6px;border-radius:50%;background:var(--green);box-shadow:0 0 8px var(--green);animation:pulse 2s infinite}
+  @keyframes pulse{50%{opacity:.4}}
+  h1{font-size:30px;line-height:1.1;letter-spacing:-.02em;margin:0 0 12px;font-weight:700}
+  .lede{font-size:15px;color:var(--mute);max-width:640px;margin:0 0 0;line-height:1.6}
+
+  .card{background:var(--bg2);border:1px solid var(--line);border-radius:14px;padding:22px;margin-bottom:16px}
+  .card-label{font-size:11px;letter-spacing:.06em;color:var(--mute);text-transform:uppercase;font-weight:600;margin:0 0 10px}
+  .card h2{font-size:18px;font-weight:600;margin:0 0 8px;letter-spacing:-.005em}
+  .card p{margin:0 0 14px;font-size:14px;color:var(--mute);line-height:1.6}
+
+  /* Tabs (Cloud / Local / Custom) */
+  .tabs{display:flex;gap:4px;background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:4px;margin-bottom:16px}
+  .tab{flex:1;padding:8px 14px;font-size:13px;font-weight:500;color:var(--mute);border:none;background:transparent;cursor:pointer;border-radius:7px;font-family:inherit;transition:all .15s}
+  .tab:hover{color:var(--ink)}
+  .tab.on{background:var(--bg2);color:var(--ink);box-shadow:0 1px 2px rgba(0,0,0,.3)}
+  .tab-section{display:none}
+  .tab-section.on{display:block}
+
+  /* Provider grid */
+  .providers{display:grid;grid-template-columns:1fr;gap:8px}
+  @media(min-width:640px){.providers{grid-template-columns:1fr 1fr}}
+  .prov{position:relative;display:flex;flex-direction:column;gap:4px;padding:13px 14px;background:var(--panel);border:1px solid var(--line);border-radius:10px;cursor:pointer;transition:all .15s;text-align:left;font-family:inherit;color:var(--ink)}
+  .prov:hover{border-color:var(--line2);background:rgba(255,255,255,.02)}
+  .prov.selected{border-color:var(--acc);background:rgba(124,92,255,.06);box-shadow:0 0 0 3px rgba(124,92,255,.12)}
+  .prov.disabled{opacity:.4;cursor:not-allowed}
+  .prov-name{font-size:13.5px;font-weight:600;display:flex;align-items:center;justify-content:space-between;gap:8px}
+  .prov-tag{font-size:9.5px;padding:2px 6px;border-radius:6px;letter-spacing:.05em;text-transform:uppercase;font-weight:600}
+  .prov-tag-default{background:rgba(61,220,151,.15);color:#3ddc97}
+  .prov-tag-quality{background:rgba(124,92,255,.15);color:#a48bff}
+  .prov-tag-broad{background:rgba(246,179,82,.15);color:#f6b352}
+  .prov-tag-local{background:rgba(61,220,151,.15);color:#3ddc97}
+  .prov-tag-fast{background:rgba(255,213,77,.15);color:#ffd54d}
+  .prov-tag-cheap{background:rgba(124,92,255,.15);color:#a48bff}
+  .prov-meta{font-size:11.5px;color:var(--mute);line-height:1.5}
+  .prov-saved{position:absolute;top:6px;right:8px;font-size:9px;color:var(--green);font-family:ui-monospace,monospace;font-weight:600}
+  .prov-detected{position:absolute;top:6px;right:8px;font-size:9px;color:var(--acc2);font-family:ui-monospace,monospace;font-weight:600}
+
+  /* Key entry */
+  .keyrow{display:flex;flex-direction:column;gap:8px;margin-top:8px}
+  .keyrow label{font-size:12px;color:var(--mute)}
+  .keyrow .row{display:flex;gap:8px}
+  .key-input{flex:1;background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:12px 14px;color:var(--ink);font-family:ui-monospace,monospace;font-size:13px;outline:none;transition:border-color .15s,box-shadow .15s}
+  .key-input::placeholder{color:var(--dim)}
+  .key-input:focus{border-color:var(--acc);box-shadow:0 0 0 3px rgba(124,92,255,.18)}
+  .key-input.ok{border-color:var(--green)}
+  .key-input.bad{border-color:var(--red)}
+  .key-link{display:inline-block;font-size:12px;color:var(--acc2);text-decoration:none;border-bottom:1px dotted rgba(164,139,255,.3)}
+  .key-link:hover{border-bottom-color:var(--acc2)}
+
+  /* Custom endpoint extras */
+  .custom-fields{display:none;flex-direction:column;gap:8px}
+  .custom-fields.on{display:flex}
+  .field-row{display:flex;flex-direction:column;gap:4px}
+  .field-row label{font-size:11.5px;color:var(--mute);font-weight:500}
+
+  /* Btn */
+  .btn{display:inline-flex;align-items:center;gap:8px;padding:11px 18px;border-radius:10px;font-weight:600;font-size:14px;border:1px solid transparent;cursor:pointer;transition:all .15s;font-family:inherit}
+  .btn-primary{background:var(--ink);color:var(--bg)}
+  .btn-primary:hover:not(:disabled){filter:brightness(.92);transform:translateY(-1px)}
+  .btn-primary:disabled{opacity:.55;cursor:not-allowed;transform:none}
+  .btn-ghost{background:transparent;color:var(--ink);border-color:var(--line2)}
+  .btn-ghost:hover{border-color:var(--ink);background:rgba(255,255,255,.03)}
+  .btn-row{display:flex;gap:10px;align-items:center;margin-top:14px;flex-wrap:wrap}
+
+  /* Status */
+  .status{margin-top:10px;padding:10px 14px;border-radius:10px;font-size:13px;display:none;line-height:1.5}
+  .status.show{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+  .status.is-ok{background:rgba(61,220,151,.06);border:1px solid rgba(61,220,151,.3);color:#bcf2d6}
+  .status.is-error{background:rgba(255,100,100,.06);border:1px solid rgba(255,100,100,.3);color:#ffb0b0}
+  .status.is-loading{background:var(--bg2);border:1px solid var(--line2);color:var(--mute)}
+  .spin{display:inline-block;width:14px;height:14px;border:2px solid rgba(255,255,255,.18);border-top-color:var(--ink);border-radius:50%;animation:spin .8s linear infinite}
+  @keyframes spin{to{transform:rotate(360deg)}}
+
+  /* Filesystem state */
+  .fs-grid{display:grid;grid-template-columns:auto 1fr auto;gap:6px 12px;font-size:12px;font-family:ui-monospace,monospace}
+  .fs-grid .lbl{color:var(--mute)}
+  .fs-grid .val{color:var(--ink);overflow-wrap:break-word;word-break:break-all}
+  .fs-grid .ok{color:var(--green);font-size:10.5px;letter-spacing:.04em}
+  .fs-grid .warn{color:var(--orange);font-size:10.5px;letter-spacing:.04em}
+
+  /* Done state */
+  .done-card{background:linear-gradient(135deg,rgba(61,220,151,.10),rgba(124,92,255,.06));border:1px solid rgba(61,220,151,.4)}
+  .done-card h2{color:#3ddc97}
+  .done-cmd{margin:6px 0 0;padding:9px 13px;background:#0a0c10;border:1px solid var(--line);border-radius:8px;font-family:ui-monospace,monospace;font-size:12.5px;color:#a48bff;overflow-x:auto;white-space:nowrap}
+
+  @media(max-width:520px){
+    h1{font-size:24px}
+    .nav-step{display:none}
+    .providers{grid-template-columns:1fr}
+  }
+</style>
+</head>
+<body>
+
+<nav class="nav">
+  <div class="nav-inner">
+    <a class="brand" href="/">
+      <span class="brand-dot"></span>
+      <span>Huntova</span>
+    </a>
+    <span class="nav-step" id="navStep">Setup &middot; step 1 of 3</span>
+  </div>
+</nav>
+
+<main>
+
+<section class="hero">
+  <div class="kicker"><span class="pip"></span> first-run setup</div>
+  <h1>Configure Huntova in 60 seconds.</h1>
+  <p class="lede">Pick from 13 AI providers — including <strong>local options</strong> like Ollama, LM Studio, llamafile (no API key needed) — or plug in any OpenAI-compatible endpoint.</p>
+</section>
+
+<ol class="steps">
+  <li class="step on" id="step-1"><span class="num">1</span><span>Provider</span></li>
+  <span class="step-bar"></span>
+  <li class="step" id="step-2"><span class="num">2</span><span>Connect</span></li>
+  <span class="step-bar"></span>
+  <li class="step" id="step-3"><span class="num">3</span><span>Run</span></li>
+</ol>
+
+<!-- Step 1 — Provider picker with tabs -->
+<section class="card" id="card-provider">
+  <p class="card-label">Step 1 — Pick a provider</p>
+  <h2>Cloud, local, or custom — your choice.</h2>
+
+  <div class="tabs" role="tablist">
+    <button class="tab on" type="button" data-tab="cloud" id="tab-cloud">Cloud APIs</button>
+    <button class="tab" type="button" data-tab="local" id="tab-local">Local AI</button>
+    <button class="tab" type="button" data-tab="custom" id="tab-custom">Custom endpoint</button>
+  </div>
+
+  <div class="tab-section on" id="section-cloud">
+    <div class="providers" id="cloudGrid"></div>
+  </div>
+  <div class="tab-section" id="section-local">
+    <p style="font-size:13px;margin-bottom:10px;color:var(--mute)">Run the model on your own machine. <strong style="color:var(--ink)">No API key, no usage charges, no data leaves your machine.</strong> Auto-detect probes localhost for running servers.</p>
+    <div class="providers" id="localGrid"></div>
+    <button class="btn btn-ghost" id="redetect" style="margin-top:10px;padding:7px 13px;font-size:12.5px">↻ Re-detect</button>
+  </div>
+  <div class="tab-section" id="section-custom">
+    <p style="font-size:13px;margin-bottom:10px;color:var(--mute)">Plug in <strong style="color:var(--ink)">any OpenAI-compatible endpoint</strong> — your own LiteLLM gateway, a self-hosted vLLM instance, an enterprise relay, or a niche provider.</p>
+    <div class="providers" id="customGrid"></div>
+  </div>
+
+  <div class="btn-row">
+    <button class="btn btn-primary" id="prov-next" disabled>Continue &rarr;</button>
+  </div>
+</section>
+
+<!-- Step 2 — Connection -->
+<section class="card" id="card-key" style="display:none">
+  <p class="card-label">Step 2 — Connect</p>
+  <h2 id="key-title">Connect to <span id="key-provider-name">provider</span>.</h2>
+  <p id="key-help">Stored in your OS keychain (macOS Keychain / Windows Credential Manager / Linux Secret Service) when available, or in an encrypted file at <code>~/.config/huntova/secrets.enc</code> otherwise. Huntova never sees the key — the local server reads it directly when you run a hunt.</p>
+
+  <div class="custom-fields" id="customFields">
+    <div class="field-row">
+      <label for="custom-base-url">Base URL</label>
+      <input class="key-input" id="custom-base-url" autocomplete="off" placeholder="https://my-gateway.example.com/v1" spellcheck="false">
+    </div>
+    <div class="field-row">
+      <label for="custom-model">Model name</label>
+      <input class="key-input" id="custom-model" autocomplete="off" placeholder="gpt-4o-mini" spellcheck="false">
+    </div>
+  </div>
+
+  <div class="keyrow">
+    <label for="key-input" id="key-label">API key</label>
+    <div class="row">
+      <input type="password" class="key-input" id="key-input" autocomplete="off" placeholder="paste here…" spellcheck="false">
+      <button class="btn btn-primary" id="key-save" disabled>Save &amp; test</button>
+    </div>
+    <a class="key-link" id="key-link" href="" target="_blank" rel="noopener">Get a key →</a>
+  </div>
+  <div class="status" id="key-status" role="status" aria-live="polite"></div>
+  <div class="btn-row">
+    <button class="btn btn-ghost" id="key-back">&larr; Back</button>
+  </div>
+</section>
+
+<!-- Step 3 — Done -->
+<section class="card done-card" id="card-done" style="display:none">
+  <p class="card-label">Step 3 — All set</p>
+  <h2>Huntova is ready.</h2>
+  <p>Your provider is connected. Try the 60-second pipeline:</p>
+  <pre class="done-cmd"><code>huntova examples install tech-recruiting</code></pre>
+  <pre class="done-cmd"><code>huntova recipe run tech-recruiting</code></pre>
+  <pre class="done-cmd"><code>huntova outreach send --top 5 --dry-run</code></pre>
+  <div class="btn-row">
+    <a class="btn btn-primary" href="/">Open dashboard &rarr;</a>
+    <a class="btn btn-ghost" href="/download" target="_blank" rel="noopener">Read the docs</a>
+  </div>
+</section>
+
+<!-- Filesystem state — always shown for transparency -->
+<section class="card">
+  <p class="card-label">Filesystem</p>
+  <div class="fs-grid" id="fsGrid">
+    <div class="lbl">config:</div><div class="val" id="fs-config">…</div><div class="ok" id="fs-config-ok"></div>
+    <div class="lbl">db:</div><div class="val" id="fs-db">…</div><div class="ok" id="fs-db-ok"></div>
+    <div class="lbl">secrets:</div><div class="val" id="fs-sec">…</div><div class="ok" id="fs-sec-ok"></div>
+  </div>
+</section>
+
+</main>
+
+<script>
+  // 13 provider definitions across 3 tabs
+  var CLOUD = [
+    { slug:'gemini',    env:'HV_GEMINI_KEY',    name:'Google Gemini',    tag:'Default', tagClass:'prov-tag-default',
+      meta:'Gemini 2.5 Flash · ~$0.005 / 10 leads · free tier available',
+      keyUrl:'https://aistudio.google.com/apikey' },
+    { slug:'anthropic', env:'HV_ANTHROPIC_KEY', name:'Anthropic Claude', tag:'Quality', tagClass:'prov-tag-quality',
+      meta:'Claude Sonnet 4.5 · ~$0.04 / 10 leads · highest accuracy',
+      keyUrl:'https://console.anthropic.com/settings/keys' },
+    { slug:'openai',    env:'HV_OPENAI_KEY',    name:'OpenAI GPT',       tag:'Broad', tagClass:'prov-tag-broad',
+      meta:'GPT-4o-mini · ~$0.015 / 10 leads · widest model selection',
+      keyUrl:'https://platform.openai.com/api-keys' },
+    { slug:'openrouter', env:'HV_OPENROUTER_KEY', name:'OpenRouter',     tag:'Broad', tagClass:'prov-tag-broad',
+      meta:'200+ models, 1 API key · pay per call · pick any frontier model',
+      keyUrl:'https://openrouter.ai/keys' },
+    { slug:'groq',      env:'HV_GROQ_KEY',      name:'Groq',             tag:'Fast', tagClass:'prov-tag-fast',
+      meta:'Llama 3.3 70B at 750 tok/s · cheapest fast inference',
+      keyUrl:'https://console.groq.com/keys' },
+    { slug:'deepseek',  env:'HV_DEEPSEEK_KEY',  name:'DeepSeek',         tag:'Cheap', tagClass:'prov-tag-cheap',
+      meta:'DeepSeek-V3 · ~$0.001 / 10 leads · cheapest reasoning',
+      keyUrl:'https://platform.deepseek.com/api_keys' },
+    { slug:'together',  env:'HV_TOGETHER_KEY',  name:'Together AI',      tag:'Broad', tagClass:'prov-tag-broad',
+      meta:'200+ open-weight models · Llama 3.3, Mistral, Qwen',
+      keyUrl:'https://api.together.xyz/settings/api-keys' },
+    { slug:'mistral',   env:'HV_MISTRAL_KEY',   name:'Mistral',          tag:'Quality', tagClass:'prov-tag-quality',
+      meta:'Mistral Large + Codestral · EU-hosted · GDPR-friendly',
+      keyUrl:'https://console.mistral.ai/api-keys/' },
+    { slug:'perplexity', env:'HV_PERPLEXITY_KEY', name:'Perplexity',     tag:'Broad', tagClass:'prov-tag-broad',
+      meta:'Sonar models · web-grounded · live search built-in',
+      keyUrl:'https://www.perplexity.ai/settings/api' },
+  ];
+  var LOCAL = [
+    { slug:'ollama',    env:'HV_OLLAMA_KEY',    name:'Ollama',           tag:'Local', tagClass:'prov-tag-local',
+      meta:'Free · runs on your CPU/GPU · 100+ models · localhost:11434',
+      keyUrl:'https://ollama.com/download', noKey:true },
+    { slug:'lmstudio',  env:'HV_LMSTUDIO_KEY',  name:'LM Studio',        tag:'Local', tagClass:'prov-tag-local',
+      meta:'Free · GUI model manager · localhost:1234',
+      keyUrl:'https://lmstudio.ai/', noKey:true },
+    { slug:'llamafile', env:'HV_LLAMAFILE_KEY', name:'llamafile',        tag:'Local', tagClass:'prov-tag-local',
+      meta:'Free · single-file executables · cross-platform',
+      keyUrl:'https://github.com/Mozilla-Ocho/llamafile', noKey:true },
+  ];
+  var CUSTOM = [
+    { slug:'custom',    env:'HV_CUSTOM_KEY',    name:'Custom OpenAI-compat endpoint', tag:'Any', tagClass:'prov-tag-broad',
+      meta:'LiteLLM gateway · self-hosted vLLM · enterprise relay · any endpoint',
+      keyUrl:'', custom:true },
+  ];
+
+  var ALL = CLOUD.concat(LOCAL).concat(CUSTOM);
+  var BY_SLUG = {};
+  ALL.forEach(function(p){ BY_SLUG[p.slug] = p; });
+
+  var state = {
+    selectedProvider: null,
+    activeTab: 'cloud',
+    configured: {},
+    detected: {},
+    fsState: {},
+  };
+
+  function el(id){ return document.getElementById(id); }
+
+  function setStep(n){
+    [1,2,3].forEach(function(i){
+      var s = el('step-' + i);
+      s.classList.remove('on','done');
+      if (i < n) s.classList.add('done');
+      else if (i === n) s.classList.add('on');
+    });
+    el('navStep').textContent = 'Setup · step ' + n + ' of 3';
+  }
+
+  function setStatus(elt, kind, msg){
+    while(elt.firstChild) elt.removeChild(elt.firstChild);
+    elt.className = 'status show is-' + kind;
+    if (kind === 'loading'){
+      var s = document.createElement('span');
+      s.className = 'spin';
+      elt.appendChild(s);
+    }
+    elt.appendChild(document.createTextNode(msg));
+  }
+  function clearStatus(elt){
+    elt.className = 'status';
+    while(elt.firstChild) elt.removeChild(elt.firstChild);
+  }
+
+  function makeProvCard(p){
+    var b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'prov';
+    if (state.configured[p.slug]) b.classList.add('configured');
+    if (state.selectedProvider === p.slug) b.classList.add('selected');
+
+    var nameRow = document.createElement('div');
+    nameRow.className = 'prov-name';
+    var nm = document.createElement('span'); nm.textContent = p.name;
+    var tg = document.createElement('span'); tg.className = 'prov-tag ' + p.tagClass; tg.textContent = p.tag;
+    nameRow.appendChild(nm); nameRow.appendChild(tg);
+
+    var meta = document.createElement('div');
+    meta.className = 'prov-meta';
+    meta.textContent = p.meta;
+
+    b.appendChild(nameRow); b.appendChild(meta);
+
+    // Status badge top-right
+    if (state.configured[p.slug]){
+      var saved = document.createElement('span');
+      saved.className = 'prov-saved';
+      saved.textContent = '✓ saved';
+      b.appendChild(saved);
+    } else if (state.detected[p.slug] && state.detected[p.slug].available){
+      var det = document.createElement('span');
+      det.className = 'prov-detected';
+      det.textContent = '● detected';
+      b.appendChild(det);
+    }
+
+    b.addEventListener('click', function(){ selectProvider(p.slug); });
+    return b;
+  }
+
+  function renderProviders(){
+    var groups = [['cloudGrid', CLOUD], ['localGrid', LOCAL], ['customGrid', CUSTOM]];
+    groups.forEach(function(g){
+      var grid = el(g[0]);
+      while(grid.firstChild) grid.removeChild(grid.firstChild);
+      g[1].forEach(function(p){ grid.appendChild(makeProvCard(p)); });
+    });
+  }
+
+  function selectProvider(slug){
+    state.selectedProvider = slug;
+    renderProviders();
+    el('prov-next').disabled = false;
+  }
+
+  // Tab switching
+  Array.from(document.querySelectorAll('.tab')).forEach(function(t){
+    t.addEventListener('click', function(){
+      var name = t.dataset.tab;
+      state.activeTab = name;
+      Array.from(document.querySelectorAll('.tab')).forEach(function(x){ x.classList.remove('on'); });
+      t.classList.add('on');
+      Array.from(document.querySelectorAll('.tab-section')).forEach(function(x){ x.classList.remove('on'); });
+      el('section-' + name).classList.add('on');
+    });
+  });
+
+  el('redetect').addEventListener('click', function(){
+    var btn = el('redetect');
+    btn.disabled = true;
+    btn.textContent = '↻ Probing localhost…';
+    fetch('/api/setup/detect-local', {headers:{'Accept':'application/json'}})
+      .then(function(r){ return r.ok ? r.json() : null; })
+      .then(function(d){
+        if (d && d.detected){
+          state.detected = d.detected;
+          renderProviders();
+        }
+      })
+      .finally(function(){
+        btn.disabled = false;
+        btn.textContent = '↻ Re-detect';
+      });
+  });
+
+  el('prov-next').addEventListener('click', function(){
+    var p = BY_SLUG[state.selectedProvider];
+    if (!p) return;
+    el('card-provider').style.display = 'none';
+    el('card-key').style.display = '';
+    el('key-provider-name').textContent = p.name;
+    el('key-link').href = p.keyUrl || '';
+    if (p.keyUrl){
+      el('key-link').textContent = 'Get a ' + p.name + ' key →';
+      el('key-link').style.display = '';
+    } else {
+      el('key-link').style.display = 'none';
+    }
+    // Custom endpoint shows the extra fields
+    el('customFields').classList.toggle('on', !!p.custom);
+    // Local providers don't need a key — we still let user paste one
+    // for password-protected local setups
+    if (p.noKey){
+      el('key-input').placeholder = '(optional — leave empty for unauthenticated local server)';
+      el('key-save').disabled = false;
+      el('key-help').textContent = 'No key needed for default Ollama / LM Studio setups. The local server is detected via its base URL.';
+    } else {
+      el('key-input').placeholder = 'paste here…';
+      el('key-save').disabled = true;
+      el('key-help').textContent = 'Stored in your OS keychain (macOS Keychain / Windows Credential Manager / Linux Secret Service). Huntova never sees the key — the local server reads it directly when you run a hunt.';
+    }
+    el('key-input').value = '';
+    if (p.custom){
+      el('custom-base-url').value = '';
+      el('custom-model').value = '';
+    }
+    el('key-input').focus();
+    setStep(2);
+  });
+
+  el('key-back').addEventListener('click', function(){
+    el('card-key').style.display = 'none';
+    el('card-provider').style.display = '';
+    setStep(1);
+  });
+
+  el('key-input').addEventListener('input', function(){
+    var p = BY_SLUG[state.selectedProvider];
+    var v = el('key-input').value.trim();
+    el('key-save').disabled = !p || (!p.noKey && v.length < 6);
+    el('key-input').classList.remove('ok','bad');
+    clearStatus(el('key-status'));
+  });
+
+  el('key-save').addEventListener('click', function(){
+    var p = BY_SLUG[state.selectedProvider];
+    if (!p) return;
+    var key = el('key-input').value.trim();
+    var body = { provider: p.slug, key: key, test: true };
+    if (p.custom){
+      body.base_url = el('custom-base-url').value.trim();
+      body.model = el('custom-model').value.trim();
+      if (!body.base_url){
+        setStatus(el('key-status'), 'error', 'Base URL is required for a custom endpoint.');
+        return;
+      }
+    }
+    el('key-save').disabled = true;
+    setStatus(el('key-status'), 'loading', 'Saving + testing the connection…');
+    fetch('/api/setup/key', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json', 'Accept': 'application/json'},
+      body: JSON.stringify(body),
+    }).then(function(r){ return r.json().catch(function(){ return {ok:false, message:'unexpected response'}; }); })
+      .then(function(d){
+        if (d && d.ok){
+          el('key-input').classList.remove('bad');
+          el('key-input').classList.add('ok');
+          var msg = '✓ saved to ' + (d.backend || 'keychain');
+          if (d.test_passed) msg += ' · live probe ok (' + (d.test_response || '').slice(0,40) + ')';
+          else if (d.test_passed === false) msg += ' · ⚠ probe failed: ' + (d.test_message || 'unknown');
+          setStatus(el('key-status'), 'ok', msg);
+          state.configured[p.slug] = true;
+          renderProviders();
+          setTimeout(function(){
+            el('card-key').style.display = 'none';
+            el('card-done').style.display = '';
+            setStep(3);
+            refreshFs();
+          }, 800);
+        } else {
+          el('key-input').classList.remove('ok');
+          el('key-input').classList.add('bad');
+          setStatus(el('key-status'), 'error', (d && d.message) || 'save failed');
+          el('key-save').disabled = false;
+        }
+      }).catch(function(err){
+        setStatus(el('key-status'), 'error', 'network error: ' + (err.message || err));
+        el('key-save').disabled = false;
+      });
+  });
+
+  function refreshFs(){
+    fetch('/api/setup/status', {headers: {'Accept': 'application/json'}})
+      .then(function(r){ return r.ok ? r.json() : null; })
+      .then(function(d){
+        if (!d) return;
+        state.configured = d.providers_configured_set || {};
+        state.fsState = d.filesystem || {};
+        if (d.detected) state.detected = d.detected;
+        renderProviders();
+        if (d.filesystem){
+          var f = d.filesystem;
+          if (f.config_path){ el('fs-config').textContent = f.config_path; el('fs-config-ok').textContent = f.config_exists ? '✓' : 'will be created'; }
+          if (f.db_path){     el('fs-db').textContent = f.db_path;         el('fs-db-ok').textContent = f.db_exists ? '✓' : 'on first hunt'; }
+          if (f.secrets_backend){ el('fs-sec').textContent = f.secrets_backend; el('fs-sec-ok').textContent = ''; }
+        }
+      })
+      .catch(function(){});
+  }
+
+  renderProviders();
+  refreshFs();
+</script>
+
+</body>
+</html>
