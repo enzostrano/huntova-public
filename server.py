@@ -889,6 +889,115 @@ def _safe_nonneg_int(raw, default: int = 0) -> int:
     return default
 
 
+# a495 (BRAIN-126): shared conflict-response contract
+# for wizard write rejections caused by concurrent
+# state change. BRAIN-124 (a493) and BRAIN-125 (a494)
+# made the four rejection sites match. Hand-rolled
+# bodies at every callsite drift over time — the next
+# refactor updates one branch and forgets another.
+# Per Huntova engineering review on shared-helper
+# interface guarantees: every wizard conflict caused
+# by concurrent state change must be constructed by
+# ONE helper. complete, save-progress, and any future
+# mutating wizard route call this instead of building
+# JSONResponse inline.
+
+_WIZARD_CONFLICT_KINDS = ("wizard_reset", "stale_revision", "dna_in_flight")
+
+_WIZARD_CONFLICT_MESSAGES = {
+    "wizard_reset": (
+        "Your answers were not saved. The wizard was reset "
+        "in another tab — that reset started a fresh wizard "
+        "epoch. Reload to start over."
+    ),
+    "stale_revision": (
+        "Your answers were not saved. Another tab edited "
+        "the wizard between when you loaded and when you "
+        "submitted. Reload to merge their edits, then "
+        "resubmit to apply yours."
+    ),
+    "dna_in_flight": (
+        "Your answers were not saved. Brain training is "
+        "already running in another tab — that tab's "
+        "answers won the race. Wait for it to finish, then "
+        "reload this tab to see the latest state, or click "
+        "Re-train after it finishes to apply your edits."
+    ),
+}
+
+_WIZARD_CONFLICT_STATUS_CODES = {
+    "wizard_reset": 410,
+    "stale_revision": 409,
+    "dna_in_flight": 409,
+}
+
+
+def _wizard_conflict_response(
+    kind: str,
+    current_revision: int = 0,
+    current_epoch: int = 0,
+    in_flight_started_at: str = "",
+):
+    """Single source of truth for the wizard conflict
+    contract. Returns a JSONResponse with the documented
+    fields:
+
+    - `ok: false`
+    - `answers_applied: false` (explicit lost-update
+      signal; clients branch on this deterministically)
+    - `error_kind`: one of `wizard_reset`,
+      `stale_revision`, `dna_in_flight`
+    - `error`: kind-specific human-readable copy that
+      explicitly states answers were not saved
+    - `wizard_revision` / `wizard_epoch`: live row
+      tokens for client reconciliation
+    - For `stale_revision`: also `stale: true` (legacy
+      flag preserved for back-compat).
+    - For `dna_in_flight`: also `in_flight: true` and
+      `in_flight_started_at: str` for UI countdown.
+
+    Status codes: 410 for `wizard_reset` (gone — the
+    epoch ratchet moved past), 409 for the other two
+    (conflict — concurrent state change).
+
+    Defensive: unknown `kind` falls back to a generic
+    409 conflict so a future mis-typed call doesn't
+    return 200 or crash.
+    """
+    if kind not in _WIZARD_CONFLICT_KINDS:
+        return JSONResponse(
+            {
+                "ok": False,
+                "answers_applied": False,
+                "error": (
+                    "Your write was rejected because the "
+                    "wizard state changed concurrently. Reload "
+                    "to reconcile."
+                ),
+                "error_kind": "conflict",
+                "wizard_revision": int(current_revision or 0),
+                "wizard_epoch": int(current_epoch or 0),
+            },
+            status_code=409,
+        )
+    payload = {
+        "ok": False,
+        "answers_applied": False,
+        "error": _WIZARD_CONFLICT_MESSAGES[kind],
+        "error_kind": kind,
+        "wizard_revision": int(current_revision or 0),
+        "wizard_epoch": int(current_epoch or 0),
+    }
+    if kind == "stale_revision":
+        payload["stale"] = True
+    if kind == "dna_in_flight":
+        payload["in_flight"] = True
+        payload["in_flight_started_at"] = str(
+            in_flight_started_at or ""
+        )
+    return JSONResponse(payload, status_code=_WIZARD_CONFLICT_STATUS_CODES[kind])
+
+
 def _dna_state_gate_response(wizard_blob):
     """The BRAIN-79 dna-state precondition gate, extracted
     so `agent_control` and any future endpoint that needs
@@ -9646,115 +9755,33 @@ async def api_wizard_complete(request: Request, response: Response, user: dict =
         # have failed the BRAIN-14 guard inside the final merge
         # anyway; bailing here saves the BYOK spend.
         if _flip_stale["kind"] == "wizard_reset":
-            # a494 (BRAIN-125): conflict-response parity
-            # with the BRAIN-124 dna_in_flight branch. The
-            # losing tab's submitted answers were rejected
-            # by the BRAIN-81 epoch ratchet — they never
-            # reached the row. Tell the user so explicitly,
-            # and return the new epoch + revision so the
-            # client can reconcile rather than infer from
-            # status-code folklore.
-            return JSONResponse(
-                {
-                    "ok": False,
-                    "answers_applied": False,
-                    "error": (
-                        "Your answers were not saved. The wizard "
-                        "was reset in another tab — that reset "
-                        "started a fresh wizard epoch. Reload to "
-                        "start over."
-                    ),
-                    "error_kind": "wizard_reset",
-                    "wizard_revision": int(
-                        _flip_stale.get("current_revision") or 0
-                    ),
-                    "wizard_epoch": int(
-                        _flip_stale.get("current_epoch") or 0
-                    ),
-                },
-                status_code=410,
+            # a495 (BRAIN-126): shared conflict-response
+            # helper. One source of truth for the contract
+            # — clients see the same shape across every
+            # rejection branch.
+            return _wizard_conflict_response(
+                "wizard_reset",
+                current_revision=_flip_stale.get("current_revision") or 0,
+                current_epoch=_flip_stale.get("current_epoch") or 0,
             )
         if _flip_stale["kind"] == "dna_in_flight":
-            # a479 (BRAIN-110): a sibling tab already won
-            # the atomic claim for this retrain. Surface
-            # 409 so this client can poll /api/wizard/status
-            # for the in-flight DNA job rather than triggering
-            # a duplicate brain+dossier compute + duplicate
-            # _gen_dna() spawn.
-            #
-            # a493 fix (BRAIN-124): explicit conflict
-            # messaging. Pre-fix the response said "wait
-            # for it to finish" — which incorrectly
-            # implied the losing tab's submitted answers
-            # were part of the active run. They aren't:
-            # the loser's payload was rejected before
-            # merge_settings even ran. Per Huntova
-            # engineering review on optimistic-concurrency
-            # conflict messaging: a 409 must explicitly
-            # state that the rejected write was NOT
-            # applied + provide reconciliation state.
-            return JSONResponse(
-                {
-                    "ok": False,
-                    "in_flight": True,
-                    # Explicit conflict signal — clients
-                    # can branch on this deterministically
-                    # rather than parsing the error string.
-                    "answers_applied": False,
-                    "error": (
-                        "Your answers were not saved. Brain "
-                        "training is already running in another "
-                        "tab — that tab's answers won the race. "
-                        "Wait for it to finish, then reload this "
-                        "tab to see the latest state, or click "
-                        "Re-train after it finishes to apply "
-                        "your edits."
-                    ),
-                    "error_kind": "dna_in_flight",
-                    # Reconciliation state so the client
-                    # can tell whether a reload is required
-                    # (BRAIN-14 revision + BRAIN-81 epoch)
-                    # and show countdown for the active run.
-                    "wizard_revision": int(
-                        _flip_stale.get("current_revision") or 0
-                    ),
-                    "wizard_epoch": int(
-                        _flip_stale.get("current_epoch") or 0
-                    ),
-                    "in_flight_started_at": str(
-                        _flip_stale.get("in_flight_started_at") or ""
-                    ),
-                },
-                status_code=409,
+            # a495 (BRAIN-126): shared conflict-response
+            # helper. The dna_in_flight contract is now
+            # constructed in one place — drift across
+            # rejection paths is impossible.
+            return _wizard_conflict_response(
+                "dna_in_flight",
+                current_revision=_flip_stale.get("current_revision") or 0,
+                current_epoch=_flip_stale.get("current_epoch") or 0,
+                in_flight_started_at=_flip_stale.get("in_flight_started_at") or "",
             )
-        # a494 (BRAIN-125): conflict-response parity. The
-        # stale_revision branch fires when a sibling tab
-        # bumped the wizard revision (e.g. they typed an
-        # answer) between this tab's load and submit. The
-        # loser's answers were rejected by the BRAIN-14
-        # guard. Tell the user explicitly + return live
-        # tokens for client-side reconciliation.
-        return JSONResponse(
-            {
-                "ok": False,
-                "stale": True,
-                "answers_applied": False,
-                "error": (
-                    "Your answers were not saved. Another tab "
-                    "edited the wizard between when you loaded "
-                    "and when you clicked Complete. Reload to "
-                    "merge their edits, then click Complete "
-                    "training again to apply yours."
-                ),
-                "error_kind": "stale_revision",
-                "wizard_revision": int(
-                    _flip_stale.get("current_revision") or 0
-                ),
-                "wizard_epoch": int(
-                    _flip_stale.get("current_epoch") or 0
-                ),
-            },
-            status_code=409,
+        # a495 (BRAIN-126): shared conflict-response
+        # helper. The stale_revision contract is unified
+        # with wizard_reset and dna_in_flight.
+        return _wizard_conflict_response(
+            "stale_revision",
+            current_revision=_flip_stale.get("current_revision") or 0,
+            current_epoch=_flip_stale.get("current_epoch") or 0,
         )
 
     def _apply_wizard_mutations(w: dict) -> None:
@@ -10476,16 +10503,15 @@ async def api_wizard_save_progress(request: Request, response: Response, user: d
         return s
     await db.merge_settings(user["id"], _mutator)
     if _stale["value"]:
-        # BRAIN-68: 409 Conflict — the standard optimistic-concurrency
-        # rejection. Distinct from 429 (rate limit) so the frontend
-        # can show a refresh toast instead of a retry toast.
-        return JSONResponse(
-            {
-                "error": "Wizard was edited in another tab. Reload to continue.",
-                "stale": True,
-                "current_revision": _stale["current"],
-            },
-            status_code=409,
+        # a495 (BRAIN-126): use the shared conflict-response
+        # helper. The kind here can be `stale_revision`
+        # (BRAIN-68) or `wizard_reset` (BRAIN-81 epoch
+        # mismatch); the helper picks status code +
+        # message + full contract automatically.
+        return _wizard_conflict_response(
+            _stale.get("kind") or "stale_revision",
+            current_revision=_stale.get("current") or 0,
+            current_epoch=_stale.get("current_epoch") or 0,
         )
     return {
         "ok": True,

@@ -91,11 +91,17 @@ def test_dna_in_flight_response_has_answers_applied_flag():
         "branch should still exist."
     )
     # Look for the explicit answers-not-saved signal.
+    # a495 (BRAIN-126): the contract was extracted into
+    # `_wizard_conflict_response`. The helper invocation
+    # itself satisfies the BRAIN-124 invariant —
+    # `answers_applied: false` is now baked into the
+    # helper's payload.
     has_flag = (
         "answers_applied" in block
         or "answers_saved" in block
         or "answers_discarded" in block
         or "your_answers" in block
+        or "_wizard_conflict_response(" in block
     )
     assert has_flag, (
         "BRAIN-124 regression: dna_in_flight response "
@@ -162,7 +168,12 @@ def test_dna_in_flight_response_includes_epoch():
     src = inspect.getsource(api_wizard_complete)
     block = _extract_response_block(src)
     assert block, "BRAIN-124 regression: response branch missing"
-    assert "wizard_epoch" in block, (
+    # a495 (BRAIN-126): contract baked into the shared
+    # helper — the helper call counts as proof.
+    assert (
+        "wizard_epoch" in block
+        or "_wizard_conflict_response(" in block
+    ), (
         "BRAIN-124 regression: dna_in_flight response "
         "must include `wizard_epoch` for full state "
         "reconciliation."

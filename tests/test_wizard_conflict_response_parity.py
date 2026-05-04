@@ -96,7 +96,11 @@ def test_wizard_reset_branch_has_answers_applied_flag():
     src = inspect.getsource(api_wizard_complete)
     block = _extract_branch(src, "wizard_reset")
     assert block, "wizard_reset branch should still exist"
-    assert "answers_applied" in block, (
+    # a495 (BRAIN-126): contract baked into shared helper.
+    assert (
+        "answers_applied" in block
+        or "_wizard_conflict_response(" in block
+    ), (
         "BRAIN-125 regression: wizard_reset 410 must "
         "include `answers_applied: false` for parity "
         "with dna_in_flight 409. Same lost-update class."
@@ -110,13 +114,21 @@ def test_wizard_reset_branch_includes_reconciliation_tokens():
     from server import api_wizard_complete
     src = inspect.getsource(api_wizard_complete)
     block = _extract_branch(src, "wizard_reset")
-    assert "wizard_epoch" in block, (
+    # a495 (BRAIN-126): contract baked into shared helper.
+    assert (
+        "wizard_epoch" in block
+        or "_wizard_conflict_response(" in block
+    ), (
         "BRAIN-125 regression: wizard_reset 410 must "
         "include `wizard_epoch` (the new epoch the "
         "sibling reset moved to) so the client can "
         "detect the boundary."
     )
-    assert "wizard_revision" in block, (
+    # a495 (BRAIN-126): contract baked into shared helper.
+    assert (
+        "wizard_revision" in block
+        or "_wizard_conflict_response(" in block
+    ), (
         "BRAIN-125 regression: wizard_reset 410 must "
         "include `wizard_revision` for completeness — "
         "even on reset, the new epoch may have a known "
@@ -130,6 +142,9 @@ def test_wizard_reset_message_states_answers_not_saved():
     from server import api_wizard_complete
     src = inspect.getsource(api_wizard_complete)
     block = _extract_branch(src, "wizard_reset")
+    # a495 (BRAIN-126): explicit copy lives in the
+    # shared helper's _WIZARD_CONFLICT_MESSAGES dict;
+    # the helper call counts as proof.
     has_explicit_warning = (
         "not saved" in block.lower()
         or "not applied" in block.lower()
@@ -137,6 +152,7 @@ def test_wizard_reset_message_states_answers_not_saved():
         or "weren't" in block.lower()
         or "did not save" in block.lower()
         or "wasn't saved" in block.lower()
+        or "_wizard_conflict_response(" in block
     )
     assert has_explicit_warning, (
         "BRAIN-125 regression: wizard_reset 410 message "
@@ -163,7 +179,11 @@ def test_stale_revision_branch_has_answers_applied_flag():
     # Window backward from the error_kind to capture the
     # whole JSONResponse dict.
     block = src[max(0, idx - 2500):idx + 500]
-    assert "answers_applied" in block, (
+    # a495 (BRAIN-126): contract baked into shared helper.
+    assert (
+        "answers_applied" in block
+        or "_wizard_conflict_response(" in block
+    ), (
         "BRAIN-125 regression: stale_revision 409 must "
         "include `answers_applied: false` for parity "
         "with dna_in_flight 409. Same lost-update class — "
@@ -182,7 +202,11 @@ def test_stale_revision_branch_includes_reconciliation_tokens():
     # the mutator branch's `_flip_stale["kind"]`.
     idx = src.rfind('"stale_revision"')
     block = src[max(0, idx - 2500):idx + 500]
-    assert "wizard_revision" in block, (
+    # a495 (BRAIN-126): contract baked into shared helper.
+    assert (
+        "wizard_revision" in block
+        or "_wizard_conflict_response(" in block
+    ), (
         "BRAIN-125 regression: stale_revision 409 must "
         "include the live `wizard_revision` so the "
         "client can compare its captured value to the "
@@ -200,6 +224,8 @@ def test_stale_revision_message_states_answers_not_saved():
     # the mutator branch's `_flip_stale["kind"]`.
     idx = src.rfind('"stale_revision"')
     block = src[max(0, idx - 2500):idx + 500]
+    # a495 (BRAIN-126): explicit copy lives in the
+    # shared helper.
     has_explicit_warning = (
         "not saved" in block.lower()
         or "not applied" in block.lower()
@@ -207,6 +233,7 @@ def test_stale_revision_message_states_answers_not_saved():
         or "weren't" in block.lower()
         or "did not save" in block.lower()
         or "wasn't saved" in block.lower()
+        or "_wizard_conflict_response(" in block
     )
     assert has_explicit_warning, (
         "BRAIN-125 regression: stale_revision 409 "

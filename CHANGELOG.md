@@ -6,6 +6,101 @@ Versioning: `0.1.0aNN` alpha increments. Public install path: `pipx install hunt
 
 ---
 
+## 0.1.0a495 — May 4 2026 — BRAIN-124/125 made the four wizard write-rejection responses match by hand-rolling each branch; the next refactor would silently drift one site away from the others — extracted the conflict contract into a shared `_wizard_conflict_response` helper, all four callsites now go through one source of truth (BRAIN-126)
+
+### Bug fix (BRAIN-126, shared conflict-response helper)
+
+BRAIN-124 (a493) and BRAIN-125 (a494) made the four
+wizard write-rejection sites match: each returns
+`ok:false`, `answers_applied:false`,
+`wizard_revision`, `wizard_epoch`, and an explicit
+"your answers were not saved" message. But each
+response body was hand-rolled at the callsite. Once
+the contract is hand-rolled in N places, the next
+refactor that updates one — adding a new field,
+renaming `error_kind`, tweaking the message —
+silently drifts the others.
+
+In optimistic-concurrency systems, the client's
+recovery logic depends on a stable conflict shape
+across endpoints. Drift is the failure mode.
+
+Per Huntova engineering review on shared-helper
+interface guarantees: every wizard conflict caused
+by concurrent state change must be constructed by
+ONE shared helper. complete, save-progress, and any
+future mutating wizard route must not hand-roll
+their own stale/conflict bodies once the public
+contract is established.
+
+Fix: extract the contract into a module-scope helper.
+
+- `_wizard_conflict_response(kind,
+  current_revision=0, current_epoch=0,
+  in_flight_started_at="")`. Returns a JSONResponse
+  with the full BRAIN-124/125 contract:
+  `ok:false`, `answers_applied:false`, `error_kind`,
+  `error`, `wizard_revision`, `wizard_epoch`. Plus
+  kind-specific extras: `stale:true` (legacy flag
+  for stale_revision), `in_flight:true` +
+  `in_flight_started_at` (dna_in_flight).
+- Status code mapping in `_WIZARD_CONFLICT_STATUS_CODES`:
+  `wizard_reset` → 410, others → 409.
+- Message mapping in `_WIZARD_CONFLICT_MESSAGES`:
+  one place to tune copy.
+- Defensive: unknown `kind` falls back to a generic
+  409 conflict.
+
+All four callsites migrated:
+
+- `api_wizard_complete`'s three rejection branches
+  (wizard_reset, dna_in_flight, stale_revision) —
+  ~80 lines of hand-rolled JSONResponse collapsed
+  to one-line helper invocations.
+- `api_wizard_save_progress`'s BRAIN-68 stale-write
+  rejection — also handled the BRAIN-81 epoch-
+  mismatch case but always returned 409 with a
+  partial body. Now uses the helper, gets correct
+  410 for `wizard_reset` automatically AND the
+  full contract.
+
+The save-progress migration is the load-bearing
+benefit: pre-fix it returned 409 for both
+`wizard_reset` and `stale_revision` with body
+`{error, stale, current_revision}` — missing
+`answers_applied`, `error_kind`, `wizard_epoch`,
+and the "not saved" copy. Drift was already there.
+The helper extraction kills it.
+
+8 new regression tests in
+`test_wizard_conflict_response_helper.py`:
+- Helper exists at module scope.
+- `wizard_reset` → 410 with full contract.
+- `stale_revision` → 409 with full contract +
+  legacy `stale:true` flag.
+- `dna_in_flight` → 409 with full contract +
+  `in_flight_started_at`.
+- Defensive: unknown kind falls back safely.
+- Source-level: complete uses the helper ≥3 times.
+- Source-level: save-progress uses the helper.
+- Helper output has all contract fields.
+
+Plus ~5 pre-existing BRAIN-124/125 source-level
+tests updated to accept the helper invocation as
+proof of contract compliance (the inline strings
+those tests previously grepped for moved into the
+helper).
+
+598 / 598 tests passing.
+
+### Files
+
+- `server.py`: new module-scope `_wizard_conflict_response`, `_WIZARD_CONFLICT_KINDS`, `_WIZARD_CONFLICT_MESSAGES`, `_WIZARD_CONFLICT_STATUS_CODES` near `_dna_state_gate_response`. Four conflict-response callsites collapsed to one-liners.
+- `tests/test_wizard_conflict_response_helper.py`: new — 8 tests guarding the shared-helper contract.
+- `tests/test_dna_in_flight_silent_discard.py` (BRAIN-124) + `tests/test_wizard_conflict_response_parity.py` (BRAIN-125): pre-existing source-level tests updated to accept the helper indirection.
+
+---
+
 ## 0.1.0a494 — May 4 2026 — BRAIN-124 fixed silent-discard on dna_in_flight 409 but the SIBLING wizard_reset 410 + stale_revision 409 branches still had the same lost-update class wearing different status codes; conflict-response contract parity restored — all three rejections now carry `answers_applied: false` + reconciliation tokens + explicit "not saved" copy (BRAIN-125)
 
 ### Bug fix (BRAIN-125, conflict-response contract parity)
