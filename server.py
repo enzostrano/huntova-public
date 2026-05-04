@@ -506,6 +506,53 @@ _ASSIST_DAILY_MAX = int(os.environ.get("HV_WIZARD_ASSIST_DAILY_MAX") or "200")
 _DNA_STATE_ALLOWED = ("pending", "ready", "failed", "unset")
 
 
+# a480 (BRAIN-111): lease-TTL for the BRAIN-110 atomic
+# claim. `_dna_state="pending"` is a lease — it grants
+# one writer the right to enqueue _gen_dna(). Like every
+# lease, it must define how it gets released on worker
+# failure. BRAIN-78 covers in-process exceptions
+# (failed-state writeback). But asyncio cancellation,
+# SIGKILL, OOM, server crash, and machine power-off all
+# strand the lease at "pending" with no writeback path.
+# Without a TTL, BRAIN-110's 409 dna_in_flight becomes
+# permanent and the user can never retrain again.
+#
+# Default 600s (10 min). Legitimate runs finish in
+# 10-30s, so 10 min is 20-60× the worst real case but
+# tight enough that recovery is quick. Env override:
+# HV_DNA_PENDING_STALE_SEC=1200 etc.
+_DNA_PENDING_STALE_AFTER_SEC = int(
+    os.environ.get("HV_DNA_PENDING_STALE_SEC") or "600"
+)
+
+
+def _dna_pending_is_stale(started_at_iso, now=None):
+    """True when a `_dna_state="pending"` lease should be
+    considered abandoned and reclaimable.
+
+    Fail-open toward recovery: missing / empty /
+    unparseable timestamps are treated as stale, because
+    a pending lease that can't be aged is exactly the
+    "permanently stuck" case we're trying to prevent.
+    The downside (a fresh-but-malformed timestamp could
+    be reclaimed early) is acceptable — the only path
+    that writes the timestamp is BRAIN-88's flip
+    mutator with a server-generated isoformat string.
+    """
+    if not started_at_iso or not isinstance(started_at_iso, str):
+        return True
+    try:
+        started = datetime.fromisoformat(started_at_iso)
+    except (ValueError, TypeError):
+        return True
+    _now = now or datetime.now()
+    try:
+        age = (_now - started).total_seconds()
+    except (ValueError, TypeError):
+        return True
+    return age > _DNA_PENDING_STALE_AFTER_SEC
+
+
 def _normalize_dna_state(raw):
     """Normalize a persisted ``_dna_state`` value for any
     public read path.
@@ -9039,10 +9086,29 @@ async def api_wizard_complete(request: Request, user: dict = Depends(require_use
         # Per Huntova engineering review on atomic claims:
         # bind uniqueness to persisted operation state, not
         # timing luck.
+        #
+        # a480 fix (BRAIN-111): lease expiry. A pending
+        # lease whose worker crashed (asyncio cancel,
+        # SIGKILL, OOM, deploy mid-run) never writes the
+        # ready/failed terminal state — leaving "pending"
+        # forever. Without a TTL, BRAIN-110 punishes the
+        # user with permanent 409 dna_in_flight. Consult
+        # _dna_pending_is_stale: if the lease is older
+        # than _DNA_PENDING_STALE_AFTER_SEC, treat as
+        # abandoned and let the new claim proceed
+        # (refreshes _dna_started_at below so the new
+        # lease ages from now). Only FRESH pending
+        # leases short-circuit.
         if w.get("_dna_state") == "pending":
-            _flip_stale["value"] = True
-            _flip_stale["kind"] = "dna_in_flight"
-            return cur
+            if not _dna_pending_is_stale(w.get("_dna_started_at")):
+                _flip_stale["value"] = True
+                _flip_stale["kind"] = "dna_in_flight"
+                return cur
+            print(
+                f"[WIZARD] stale pending lease detected for user {user['id']} "
+                f"(started_at={w.get('_dna_started_at') or '<missing>'}); "
+                f"reclaiming"
+            )
         # Atomic ready→pending. Clear all prior terminal-state
         # metadata so /api/wizard/status surfaces a clean "in
         # flight" view during regeneration.
@@ -9406,6 +9472,14 @@ async def api_wizard_complete(request: Request, user: dict = Depends(require_use
     _dna_spawn_epoch = int(w.get("_wizard_epoch", 0) or 0)
     async def _gen_dna():
         _ctx = get_or_create_context(user["id"], user.get("email", ""), user.get("tier", "free"))
+        # a480 (BRAIN-111): track whether a terminal state
+        # was persisted. If we exit the try blocks without
+        # one (e.g. asyncio.CancelledError, BaseException,
+        # or any exception path that fails to writeback),
+        # the `finally` clause below writes a defensive
+        # failed-state so the BRAIN-110 atomic-claim lease
+        # releases and the user can retrain again.
+        _terminal_written = {"value": False}
         try:
             from app import generate_agent_dna
             dna = await asyncio.to_thread(generate_agent_dna, w)
@@ -9435,6 +9509,7 @@ async def api_wizard_complete(request: Request, user: dict = Depends(require_use
                 return c
             try:
                 await db.merge_settings(user["id"], _ready_mutator)
+                _terminal_written["value"] = True
             except Exception as _ms_err:
                 print(f"[DNA] state-ready merge failed (non-fatal): {_ms_err}")
             try:
@@ -9465,12 +9540,53 @@ async def api_wizard_complete(request: Request, user: dict = Depends(require_use
                 return c
             try:
                 await db.merge_settings(user["id"], _failed_mutator)
+                _terminal_written["value"] = True
             except Exception as _ms_err:
                 print(f"[DNA] state-failed merge failed (non-fatal): {_ms_err}")
             try:
                 _ctx.bus.emit("dna_updated", {"ok": False, "trigger": "wizard", "error": _err_str})
             except Exception:
                 pass
+        finally:
+            # a480 (BRAIN-111): defense-in-depth release of
+            # the BRAIN-110 atomic-claim lease. `except
+            # Exception` does NOT catch
+            # `asyncio.CancelledError` (BaseException since
+            # 3.8) — without this finally, an in-process
+            # cancellation strands `_dna_state="pending"`
+            # forever and BRAIN-110 returns 409 dna_in_flight
+            # permanently. The read-side TTL
+            # (_DNA_PENDING_STALE_AFTER_SEC) is the ultimate
+            # backstop for process death; this finally
+            # handles the in-process cancel case
+            # immediately.
+            if not _terminal_written["value"]:
+                _interrupted_iso = datetime.now().isoformat()
+                def _interrupt_mutator(c: dict) -> dict:
+                    c = {**DEFAULT_SETTINGS, **(c or {})}
+                    _w = dict(c.get("wizard", {}))
+                    _cur_epoch = int(_w.get("_wizard_epoch", 0) or 0)
+                    if _cur_epoch != _dna_spawn_epoch:
+                        return c
+                    # Only write if the lease still belongs
+                    # to us — a sibling spawn would have
+                    # bumped the row.
+                    if _w.get("_dna_state") != "pending":
+                        return c
+                    _w["_dna_state"] = "failed"
+                    _w["_dna_failed_at"] = _interrupted_iso
+                    _w["_dna_error"] = "DNA generation interrupted before completing — please retrain."
+                    _w.pop("_dna_completed_at", None)
+                    c["wizard"] = _w
+                    return c
+                try:
+                    await db.merge_settings(user["id"], _interrupt_mutator)
+                    print(f"[DNA] interrupt writeback released stale pending lease for user {user['id']}")
+                except BaseException as _ms_err:
+                    # Best-effort. If even this write fails,
+                    # the read-side TTL recovery will
+                    # eventually unblock the user.
+                    print(f"[DNA] interrupt writeback failed (read-side TTL will recover): {_ms_err}")
     _spawn_bg(_gen_dna())
 
     # Update master training file (global intelligence across all users)

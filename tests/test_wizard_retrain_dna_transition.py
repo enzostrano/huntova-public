@@ -154,7 +154,7 @@ def test_pending_flip_clears_prior_ready_metadata():
             flip_idx = i
             break
     assert flip_idx != -1
-    block = src[flip_idx:flip_idx + 2000]
+    block = src[flip_idx:flip_idx + 4000]
     assert '"_dna_state"' in block and '"pending"' in block, (
         "BRAIN-88 regression: flip mutator must set "
         "_dna_state=pending."
@@ -181,7 +181,7 @@ def test_pending_flip_honors_revision_and_epoch_guards():
             flip_idx = i
             break
     assert flip_idx != -1
-    block = src[flip_idx:flip_idx + 2000]
+    block = src[flip_idx:flip_idx + 4000]
     assert "_wizard_revision" in block, (
         "BRAIN-88 regression: flip must check _wizard_revision "
         "against captured value. Stale-write protection."

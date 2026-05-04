@@ -6,6 +6,85 @@ Versioning: `0.1.0aNN` alpha increments. Public install path: `pipx install hunt
 
 ---
 
+## 0.1.0a480 — May 4 2026 — BRAIN-110's `_dna_state="pending"` lease had no expiry: a crashed `_gen_dna()` (asyncio cancel, SIGKILL, OOM, deploy mid-run) stranded the lock forever and 409'd every future retrain permanently; lease TTL on the read side + try/finally interrupt-writeback in the worker (BRAIN-111)
+
+### Bug fix (BRAIN-111, lease lifecycle for atomic claim)
+
+BRAIN-110 (a479) made `_dna_state="pending"` an atomic
+claim that prevents concurrent-tab double-spawn of
+`_gen_dna()`. But "pending" is also a *lease* — and
+every lease needs a release path for worker failure.
+
+The release paths only covered:
+- Successful completion → BRAIN-78 ready writeback.
+- In-process exception caught by `except Exception` →
+  BRAIN-78 failed writeback.
+
+Three failure modes were uncovered:
+- `asyncio.CancelledError` (event-loop shutdown,
+  parent-task cancel) — derives from `BaseException`
+  since Python 3.8, so `except Exception` does NOT
+  catch it. Strands `_dna_state="pending"` permanently.
+- Process death (SIGKILL, OOM, server crash, deploy
+  mid-generation) — no Python code runs. Strands the
+  lease.
+- `merge_settings` itself failing during the failed-
+  state writeback — no fallback. Strands the lease.
+
+Once "pending" is immortal, BRAIN-110 punishes the user
+forever: every `/api/wizard/complete` returns HTTP 409
+`dna_in_flight` permanently. The user can never retrain
+again without admin intervention. Exactly the opposite
+of helpful.
+
+Standard fix for this class: a lease must have an
+expiry. The fix is two-layered:
+
+**Layer 1 (read-side TTL — handles process death):** a
+new module-scope constant `_DNA_PENDING_STALE_AFTER_SEC`
+(default 600s, env-overridable via
+`HV_DNA_PENDING_STALE_SEC`) defines the lease TTL. A
+new helper `_dna_pending_is_stale(started_at_iso)`
+returns True when the lease is older than the TTL — or
+when the timestamp is missing/empty/unparseable
+(fail-open toward recovery rather than fail-closed
+toward permanent stuck). The BRAIN-110 flip mutator now
+consults the helper: if `_dna_state="pending"` AND the
+lease is stale, the mutator allows the new claim
+(refreshes `_dna_started_at` to now). Only FRESH
+pending leases short-circuit with 409. DNA generation
+typically finishes in 10-30s, so a 10-min TTL is 20-60×
+the worst legitimate case but tight enough that
+recovery from a crashed worker is quick.
+
+**Layer 2 (in-process try/finally — handles
+cancellation):** `_gen_dna` now tracks
+`_terminal_written` across success/exception paths.
+If neither writeback fired (cancellation, BaseException,
+or merge failure), a `finally` clause writes a
+defensive interrupt-state row that releases the lease
+immediately. Defense in depth: layer 1 is the ultimate
+backstop, but layer 2 makes recovery instant for the
+common in-process-cancel case.
+
+9 new regression tests in
+`test_wizard_dna_pending_stale_recovery.py` cover the
+TTL constant, the helper's behavior across fresh/old/
+missing/unparseable timestamps, source-level proof
+that the flip mutator consults the helper and that
+`_gen_dna` uses finally, plus a behavioral simulation
+of the stale-recovery and fresh-deny code paths.
+
+474 / 474 tests passing.
+
+### Files
+
+- `server.py`: module-scope `_DNA_PENDING_STALE_AFTER_SEC` constant and `_dna_pending_is_stale(started_at_iso)` helper near the BRAIN-109 helper. `_pending_flip_mutator` now calls `_dna_pending_is_stale` when `_dna_state == "pending"`. `_gen_dna` adds `_terminal_written` flag and a `finally` clause that writes a defensive interrupt-state row when neither writeback fired.
+- `tests/test_wizard_dna_pending_stale_recovery.py`: new — 9 tests guarding lease lifecycle.
+- `tests/test_wizard_retrain_dna_transition.py`: BRAIN-88 source-level inspection window widened from 2000 → 4000 chars to absorb the BRAIN-110/111 comment growth.
+
+---
+
 ## 0.1.0a479 — May 4 2026 — Concurrent-tab `/api/wizard/complete` race could double-enqueue DNA generation jobs because the BRAIN-88 ready→pending flip didn't bind atomic claim semantics to `_dna_state`; pre-pending callers now short-circuit with 409 dna_in_flight (BRAIN-110)
 
 ### Bug fix (BRAIN-110, atomic claim for DNA retrain)
