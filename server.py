@@ -349,7 +349,24 @@ CSRF_EXEMPT_PATHS = {
 _WIZARD_DESTRUCTIVE_ORIGIN_GATED_PATHS = {
     "/api/wizard/reset",
     "/api/wizard/start-retrain",
+    # a502 (BRAIN-133): /api/wizard/complete is destructive
+    # on retrain — overwrites the user's prior brain +
+    # dossier in user_settings. A successful CSRF bypass on
+    # this path silently destroys tuned brain state.
+    "/api/wizard/complete",
 }
+
+# a502 (BRAIN-133): admin operator escape hatch
+# `/api/ops/users/<user_id>/wizard/reset` is destructive
+# (wipes targeted user's wizard sub-object, bumps epoch —
+# parity with user-facing reset, BRAIN-95). The path
+# carries a runtime-substituted user_id, so we match it
+# via a precompiled regex instead of exact-set membership.
+# Per Huntova engineering review on Origin-gate parity for
+# destructive wizard write paths.
+_ADMIN_WIZARD_RESET_PATH_RE = re.compile(
+    r"^/api/ops/users/[^/]+/wizard/reset$"
+)
 
 
 def _is_trusted_origin(origin) -> bool:
@@ -437,7 +454,14 @@ class CSRFMiddleware(BaseHTTPMiddleware):
         # review on CSRF + OWASP CSRF Prevention Cheat Sheet:
         # combine token-based defenses with strict Origin
         # verification on destructive endpoints.
-        if request.url.path in _WIZARD_DESTRUCTIVE_ORIGIN_GATED_PATHS:
+        # a502 (BRAIN-133): match exact-set membership OR
+        # the admin /api/ops/users/<id>/wizard/reset regex
+        # (path carries a runtime-substituted user_id).
+        _path = request.url.path
+        if (
+            _path in _WIZARD_DESTRUCTIVE_ORIGIN_GATED_PATHS
+            or _ADMIN_WIZARD_RESET_PATH_RE.match(_path)
+        ):
             if not _is_trusted_origin(request.headers.get("origin") or ""):
                 return JSONResponse(
                     {"ok": False, "error": "bad_origin"},
@@ -1136,6 +1160,128 @@ def _normalize_dna_state(raw):
 # tight enough that a stale 6-month-old cache can't keep
 # suppressing real work after substantial product evolution.
 _COMPLETE_CACHE_TTL_SECONDS = int(os.environ.get("HV_WIZARD_COMPLETE_CACHE_TTL") or str(14 * 86400))
+
+# a501 (BRAIN-132): client-supplied Idempotency-Key
+# support on /api/wizard/complete. BRAIN-85's content
+# fingerprint cache covers "user clicked Complete twice
+# with the same answers" but NOT "client lost the
+# response after partial success and is retrying with
+# the same logical operation". Per Huntova engineering
+# review on client retry safety: content fingerprinting
+# is not the same as client-visible retry safety. The
+# Idempotency-Key header marks one logical operation;
+# the server stores the resulting status + body for a
+# bounded TTL and replays it on retry.
+#
+# TTL matches BRAIN-101's fingerprint cache (14 days).
+# Per-user cache cap prevents key-flood DoS. Key length
+# capped to bound storage growth.
+_IDEMPOTENCY_TTL_SEC = int(
+    os.environ.get("HV_WIZARD_IDEMPOTENCY_TTL_SEC") or str(14 * 86400)
+)
+_IDEMPOTENCY_KEY_MAX_LEN = int(
+    os.environ.get("HV_WIZARD_IDEMPOTENCY_KEY_MAX_LEN") or "255"
+)
+_IDEMPOTENCY_CACHE_PER_USER_MAX = int(
+    os.environ.get("HV_WIZARD_IDEMPOTENCY_CACHE_PER_USER_MAX") or "50"
+)
+
+
+def _idempotency_key_clean(raw):
+    """Validate + normalize a client-supplied
+    Idempotency-Key header. Returns None for unusable
+    values so callers can branch cleanly."""
+    if not raw or not isinstance(raw, str):
+        return None
+    s = raw.strip()
+    if not s:
+        return None
+    if len(s) > _IDEMPOTENCY_KEY_MAX_LEN:
+        return None
+    # Require printable ASCII to keep keys log-safe and
+    # prevent header-injection tricks.
+    if not all(0x20 <= ord(c) <= 0x7E for c in s):
+        return None
+    return s
+
+
+async def _idempotency_lookup(user_id: int, key):
+    """Look up a stored response for `(user_id, key)`.
+    Returns `{status, body}` dict on hit (within TTL)
+    or `None` on miss / expired / invalid key."""
+    cleaned = _idempotency_key_clean(key)
+    if cleaned is None:
+        return None
+    try:
+        s = await db.get_settings(user_id)
+    except Exception:
+        return None
+    cache = (s or {}).get("_idempotency_cache") or {}
+    if not isinstance(cache, dict):
+        return None
+    entry = cache.get(cleaned)
+    if not isinstance(entry, dict):
+        return None
+    created_at = entry.get("created_at") or 0
+    try:
+        age = time.time() - float(created_at)
+    except (ValueError, TypeError):
+        return None
+    if age > _IDEMPOTENCY_TTL_SEC:
+        return None  # expired
+    status = entry.get("status")
+    body = entry.get("body")
+    if not isinstance(status, int) or not isinstance(body, dict):
+        return None
+    return {"status": status, "body": body}
+
+
+async def _idempotency_store(user_id: int, key, status: int, body):
+    """Persist a response under `(user_id, key)`.
+    Best-effort: failures are logged, never raised, so
+    a transient DB error doesn't break the user-facing
+    response. Only 2xx successes should be stored —
+    callers gate on status before invoking."""
+    cleaned = _idempotency_key_clean(key)
+    if cleaned is None:
+        return
+    if not isinstance(body, dict):
+        # Only store JSON-dict bodies; opaque blobs
+        # would be lossy on replay.
+        return
+    _now = time.time()
+    def _mutator(cur: dict) -> dict:
+        cur = dict(cur or {})
+        cache = dict(cur.get("_idempotency_cache") or {})
+        # Drop expired entries inline so the cache
+        # doesn't grow forever for users who never
+        # retry.
+        cache = {
+            k: v for k, v in cache.items()
+            if isinstance(v, dict)
+            and isinstance(v.get("created_at"), (int, float))
+            and (_now - float(v["created_at"])) <= _IDEMPOTENCY_TTL_SEC
+        }
+        cache[cleaned] = {
+            "status": int(status),
+            "body": body,
+            "created_at": _now,
+        }
+        # LRU-style cap: if over the limit, drop the
+        # oldest entries.
+        if len(cache) > _IDEMPOTENCY_CACHE_PER_USER_MAX:
+            sorted_items = sorted(
+                cache.items(),
+                key=lambda kv: kv[1].get("created_at") or 0,
+                reverse=True,
+            )
+            cache = dict(sorted_items[:_IDEMPOTENCY_CACHE_PER_USER_MAX])
+        cur["_idempotency_cache"] = cache
+        return cur
+    try:
+        await db.merge_settings(user_id, _mutator)
+    except Exception as _err:
+        print(f"[IDEMPOTENCY] store failed (non-fatal): {_err}")
 # a471 (BRAIN-102): bound the wizard `_knowledge` audit list to
 # a recent-N window. Per Huntova engineering review on
 # embedded-array growth: every successful complete appends a
@@ -9490,6 +9636,23 @@ async def api_wizard_complete(request: Request, response: Response, user: dict =
     # JSONResponse so this attach only affects success
     # + non-429 error responses returned as dicts.
     _attach_burst_rate_headers(response, user["id"], "wizard_complete")
+    # a501 (BRAIN-132): client-supplied Idempotency-Key
+    # replay. BRAIN-85's content fingerprint covers
+    # double-click; this covers retry-after-lost-response.
+    # Order: rate check → idempotency lookup → daily-
+    # quota check → byte cap → json parse → flow. Lookup
+    # runs AFTER rate-limit (cheap denial first) but
+    # BEFORE quota (replays must not consume quota).
+    _idem_key_raw = request.headers.get("idempotency-key") or ""
+    _idem_cleaned = _idempotency_key_clean(_idem_key_raw)
+    if _idem_cleaned:
+        _idem_hit = await _idempotency_lookup(user["id"], _idem_cleaned)
+        if _idem_hit is not None:
+            print(f"[IDEMPOTENCY] user={user['id']} replay key={_idem_cleaned[:16]}...")
+            return JSONResponse(
+                _idem_hit["body"],
+                status_code=int(_idem_hit["status"]),
+            )
     # a465 fix (BRAIN-96): durable daily quota on complete to
     # cap slow-burn BYOK drain (parity with BRAIN-93 scan).
     # a466 fix (BRAIN-97): use read-only check here; the
@@ -10404,16 +10567,27 @@ async def api_wizard_complete(request: Request, response: Response, user: dict =
             print(f"[MASTER] Update failed: {e}")
     _spawn_bg(_update_master())
 
-    return {"ok": True, "train_count": w["_train_count"],
-            "archetype": brain["archetype"],
-            "archetype_confidence": brain["archetype_confidence"],
-            "profile_confidence": brain["profile_confidence"],
-            "can_hunt": brain["can_hunt"],
-            "quality_flags": brain["blocking_flags"] + brain["warning_flags"],
-            "dossier_version": dossier["training_dossier_version"],
-            "dossier_confidence": dossier["confidence"]["overall"],
-            "brain_saved": bool(w.get("normalized_hunt_profile")),
-            "dossier_saved": bool(w.get("training_dossier"))}
+    _success_body = {
+        "ok": True,
+        "train_count": w["_train_count"],
+        "archetype": brain["archetype"],
+        "archetype_confidence": brain["archetype_confidence"],
+        "profile_confidence": brain["profile_confidence"],
+        "can_hunt": brain["can_hunt"],
+        "quality_flags": brain["blocking_flags"] + brain["warning_flags"],
+        "dossier_version": dossier["training_dossier_version"],
+        "dossier_confidence": dossier["confidence"]["overall"],
+        "brain_saved": bool(w.get("normalized_hunt_profile")),
+        "dossier_saved": bool(w.get("training_dossier")),
+    }
+    # a501 (BRAIN-132): persist this successful response
+    # under the client-supplied Idempotency-Key (if any)
+    # so a subsequent retry with the same key replays
+    # the same body + 200 status. Best-effort; failures
+    # are logged inside the helper, never raised.
+    if _idem_cleaned:
+        await _idempotency_store(user["id"], _idem_cleaned, 200, _success_body)
+    return _success_body
 
 
 @app.post("/api/wizard/reset")

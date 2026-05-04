@@ -6,6 +6,63 @@ Versioning: `0.1.0aNN` alpha increments. Public install path: `pipx install hunt
 
 ---
 
+## 0.1.0a502 — May 4 2026 — BRAIN-114's destructive Origin-gated set was minimal (reset + start-retrain); /api/wizard/complete (destructive on retrain — overwrites prior brain) and admin /api/ops/users/{id}/wizard/reset (operator escape hatch) were not Origin-gated; set extended for parity (BRAIN-133)
+
+### Bug fix (BRAIN-133, Origin-gate parity on destructive wizard write paths)
+
+BRAIN-114 (a483) introduced a defense-in-depth Origin
+gate on destructive wizard endpoints, layered behind
+the existing double-submit CSRF token check. The
+initial set covered:
+
+- `/api/wizard/reset`
+- `/api/wizard/start-retrain`
+
+Per Huntova engineering review of the wizard write
+surface, two more destructive paths warrant the same
+gate:
+
+- **`/api/wizard/complete`** — on retrain (when the
+  user has already completed the wizard once), this
+  overwrites the prior brain + dossier in
+  `user_settings.data`. A successful CSRF bypass on
+  this path silently destroys tuned brain state,
+  which is the main asset users invest time in.
+  Same destructive class as `/api/wizard/reset` —
+  belongs in the gated set.
+- **`/api/ops/users/{user_id}/wizard/reset`** — the
+  admin operator escape hatch (BRAIN-95 made it
+  parity with the user-facing reset). Wipes the
+  targeted user's wizard sub-object + bumps the
+  wizard epoch. Admin-targeted destruction.
+  Because the path carries a runtime-substituted
+  `{user_id}`, exact-set membership doesn't match;
+  the middleware now also consults a precompiled
+  regex `_ADMIN_WIZARD_RESET_PATH_RE`.
+
+**Failure mode** — same as BRAIN-114: subdomain
+takeover, header injection, proxy bugs, or future
+exempt-list regressions could let an attacker bypass
+the double-submit CSRF token. The Origin gate is the
+last line of defense for destructive endpoints.
+Browser-originated cross-site POSTs always carry
+`Origin`; CLI/curl/install.sh never do.
+
+**Invariant**: every destructive wizard write path
+is Origin-gated AND CSRF-token-validated.
+
+**Fix** — `_WIZARD_DESTRUCTIVE_ORIGIN_GATED_PATHS`
+extended to include `/api/wizard/complete`. New
+module-scope regex `_ADMIN_WIZARD_RESET_PATH_RE`
+matches `/api/ops/users/<id>/wizard/reset` at
+runtime (path-template form). `CSRFMiddleware`
+checks both: exact-set membership OR regex match.
+6 new regression tests in
+`tests/test_wizard_destructive_origin_set_extended.py`
+codify the invariant — set membership, source-level
+middleware checks, and behavioral 403 `bad_origin`
+on POST with attacker Origin to both paths.
+
 ## 0.1.0a500 — May 4 2026 — HTTP-method discipline lockdown on wizard + agent mutating routes; current router state is correct (all use `@app.post`), but one accidental `@app.get` swap on a future refactor would reopen CSRF/caching/prefetch attack surface; regression tests now codify the invariant — POST-only for mutators, GET-only for reads (BRAIN-131)
 
 ### Bug fix (BRAIN-131, HTTP-method enforcement audit + lockdown)
