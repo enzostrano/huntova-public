@@ -6,6 +6,51 @@ Versioning: `0.1.0aNN` alpha increments. Public install path: `pipx install hunt
 
 ---
 
+## 0.1.0a474 — May 4 2026 — Re-train audit counter `_train_count` stayed flat through BRAIN-85/101 idempotency short-circuits; new `_train_attempts` counter records intent even when execution skipped (BRAIN-105)
+
+### Bug fix (BRAIN-105, audit-trail accuracy)
+
+`_train_count` was bumped only inside the full-pipeline merge
+mutator. The BRAIN-85 idempotency cache hit returns
+`{ok: true, reused: true}` early WITHOUT going through that
+mutator. So a user who clicks **Re-train** five times in a
+row with unchanged inputs produces:
+
+- Stored `_train_count`: still N (the original execution).
+- Stored attempt count: not recorded.
+- Operator dashboard reads "1 retrain in this period."
+- Reality: 5 attempts, 1 execution + 4 short-circuits.
+
+Audit collapses "user actively asked for retrain but it
+was skipped as idempotent" with "user did nothing." Standard
+audit-trail invariant: accepted intent must be recorded
+even when execution is skipped.
+
+Fix:
+
+- New `_train_attempts` counter on the wizard blob, bumped
+  on EVERY accepted `/api/wizard/complete` invocation —
+  including BRAIN-85/101 short-circuits.
+- Existing `_train_count` semantics preserved (only bumped
+  on full-pipeline executions).
+- Short-circuit path adds a small dedicated
+  `merge_settings` call to bump attempts atomically. One
+  extra DB write per duplicate submit; accepted cost for
+  audit truth. Wrapped in try/except so a DB transient
+  doesn't 500 the user — audit precision is best-effort,
+  user functionality isn't.
+- Full-pipeline path bumps both counters in the existing
+  merge mutator (no extra writes).
+- `/api/wizard/status` exposes both `train_count` and
+  `train_attempts` so the dashboard shows the gap.
+
+5 new regression tests in
+`tests/test_wizard_train_attempts_audit.py`.
+
+438 of 438 tests passing.
+
+---
+
 ## 0.1.0a473 — May 4 2026 — `_knowledge.content` blunt `json.dumps(profile)[:2000]` truncation collapsed materially-different completes into byte-identical audit entries; structured fields + fingerprint added (BRAIN-104)
 
 ### Bug fix (BRAIN-104, audit-log distinguishability)

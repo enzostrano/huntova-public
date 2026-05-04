@@ -8893,6 +8893,23 @@ async def api_wizard_complete(request: Request, user: dict = Depends(require_use
         and _prior_cache_fresh
     ):
         print(f"[WIZARD] complete short-circuit (idempotent) for user {user['id']}: same fingerprint+epoch, dna_state={_prior_dna_state}")
+        # a474 fix (BRAIN-105): bump the attempts counter even
+        # though execution short-circuited. Per Huntova
+        # engineering review on audit accuracy: accepted
+        # retrain intent must be audit-visible regardless of
+        # whether the pipeline executed. Atomic via
+        # merge_settings; failure is non-fatal (audit precision
+        # is best-effort, user functionality isn't).
+        try:
+            def _bump_attempts_short_circuit(cur):
+                cur = {**DEFAULT_SETTINGS, **(cur or {})}
+                _w = dict(cur.get("wizard") or {})
+                _w["_train_attempts"] = int(_w.get("_train_attempts", 0) or 0) + 1
+                cur["wizard"] = _w
+                return cur
+            await db.merge_settings(user["id"], _bump_attempts_short_circuit)
+        except Exception as _ms_err:
+            print(f"[WIZARD] _train_attempts bump on short-circuit failed (non-fatal): {_ms_err}")
         return {
             "ok": True,
             "reused": True,
@@ -9169,6 +9186,10 @@ async def api_wizard_complete(request: Request, user: dict = Depends(require_use
             kn = kn[-_KNOWLEDGE_LIST_MAX:]
         w["_knowledge"] = kn
         w["_train_count"] = (w.get("_train_count", 0) or 0) + 1
+        # a474 fix (BRAIN-105): also bump attempts counter on
+        # the full-pipeline path so attempts is monotonic across
+        # both paths (attempts >= train_count always).
+        w["_train_attempts"] = int(w.get("_train_attempts", 0) or 0) + 1
         w["_last_trained"] = _now_iso
         w["normalized_hunt_profile"] = brain
         w["archetype"] = brain["archetype"]
@@ -10369,6 +10390,13 @@ async def api_wizard_status(user: dict = Depends(require_user)):
         # generate-phase5 call. Empty list for users who never
         # reached phase-5 or whose wizard was reset.
         "phase5_questions": w.get("_phase5_questions") if isinstance(w.get("_phase5_questions"), list) else [],
+        # a474 (BRAIN-105): split audit counters. `train_count`
+        # is executions (full-pipeline completes only).
+        # `train_attempts` includes BRAIN-85 short-circuit
+        # hits — accepted retrain intent regardless of whether
+        # execution ran. Operator dashboard can show the gap.
+        "train_count": int(w.get("_train_count", 0) or 0),
+        "train_attempts": int(w.get("_train_attempts", 0) or 0),
     }
 
 
