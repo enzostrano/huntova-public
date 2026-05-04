@@ -6,6 +6,85 @@ Versioning: `0.1.0aNN` alpha increments. Public install path: `pipx install hunt
 
 ---
 
+## 0.1.0a493 — May 4 2026 — BRAIN-110's 409 dna_in_flight response told the losing tab "wait for it to finish, or reload to follow its progress" — silently discarding the user's submitted answers without saying so; the response now includes `answers_applied: false`, the live `wizard_revision` + `wizard_epoch` for client reconciliation, and an explicit "your answers were not saved" message (BRAIN-124)
+
+### Bug fix (BRAIN-124, conflict messaging on dna_in_flight)
+
+BRAIN-110 (a479) introduced the atomic claim that
+prevents two tabs from both spawning `_gen_dna()`. The
+losing tab gets HTTP 409. The locking has been correct
+since a479, but the messaging was misleading.
+
+Pre-fix response:
+
+```json
+{
+  "ok": false,
+  "in_flight": true,
+  "error": "Brain training is already running for this
+    retrain in another tab. Wait for it to finish, or
+    reload this tab to follow its progress.",
+  "error_kind": "dna_in_flight"
+}
+```
+
+If two tabs typed different answers and submitted
+near-simultaneously, the winner's answers feed into
+the active DNA generation. The loser's answers are
+DROPPED — they never reach merge_settings, never
+update the row. The pre-fix copy "Wait for it to
+finish" incorrectly implied the loser's submitted
+answers were part of the in-flight run. They aren't.
+The user thought their corrections went through; they
+didn't.
+
+Per Huntova engineering review on optimistic-
+concurrency conflict messaging + lost-update semantics:
+a 409 is only correct when the response explicitly
+states that the rejected write was not applied AND
+provides reconciliation state. Silent discard turns
+correct concurrency control into a trust-eroding UX
+bug.
+
+Fix: three additions to the 409 dna_in_flight
+response.
+
+1. **Explicit `answers_applied: false` flag** so
+   clients can branch deterministically rather than
+   parsing the error string.
+2. **Reconciliation state**: `wizard_revision`,
+   `wizard_epoch`, `in_flight_started_at`. Captured
+   from inside the flip mutator (where the row state
+   is in scope) into the `_flip_stale` dict, no
+   second DB round-trip. Lets the client compare its
+   captured revision against the live one and decide
+   whether to reload.
+3. **Updated error string** that explicitly says
+   "Your answers were not saved" and tells the user
+   how to apply their edits after the active run
+   finishes.
+
+5 new regression tests in
+`test_dna_in_flight_silent_discard.py`:
+- Response includes `answers_applied: false` (or
+  equivalent semantic flag).
+- Response surfaces `wizard_revision`.
+- Error message contains explicit "not saved" /
+  "not applied" / "discarded" language.
+- Response includes `wizard_epoch`.
+- Flip mutator captures current state into
+  `_flip_stale` so the endpoint can return
+  reconciliation data without a second DB read.
+
+582 / 582 tests passing.
+
+### Files
+
+- `server.py`: `_flip_stale` dict extended with `current_revision`, `current_epoch`, `in_flight_started_at`. The dna_in_flight branch of the flip mutator captures those values; the endpoint's 409 response now surfaces them plus `answers_applied: false` and an updated user-facing error message.
+- `tests/test_dna_in_flight_silent_discard.py`: new — 5 tests guarding the conflict-messaging contract.
+
+---
+
 ## 0.1.0a492 — May 4 2026 — `_dna_state_gate_response` blocked unconditionally on `_dna_state="pending"` while the BRAIN-110 flip mutator already reclaimed stale leases via `_dna_pending_is_stale` — split-brain readers of the same persisted state; the gate now consults the same lease-staleness policy so a stale pending lease no longer traps the user behind a dead marker on the agent path (BRAIN-123)
 
 ### Bug fix (BRAIN-123, lease-coherence between gate and flip mutator)

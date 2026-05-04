@@ -9527,7 +9527,21 @@ async def api_wizard_complete(request: Request, response: Response, user: dict =
     #  3. Brain+dossier compute runs.
     #  4. Final merge writes brain/dossier/train_count/knowledge.
     _now_iso_flip = datetime.now().isoformat()
-    _flip_stale = {"value": False, "kind": None}
+    # a493 (BRAIN-124): also capture current row state
+    # for the dna_in_flight response. Lets the endpoint
+    # tell the losing tab the live revision/epoch +
+    # in-flight started_at without a second DB
+    # round-trip. Per Huntova engineering review on
+    # conflict messaging: a 409 must explicitly state
+    # that the rejected write was not applied AND
+    # provide reconciliation state.
+    _flip_stale = {
+        "value": False,
+        "kind": None,
+        "current_revision": 0,
+        "current_epoch": 0,
+        "in_flight_started_at": "",
+    }
 
     def _pending_flip_mutator(cur: dict) -> dict:
         cur = {**DEFAULT_SETTINGS, **(cur or {})}
@@ -9575,6 +9589,16 @@ async def api_wizard_complete(request: Request, response: Response, user: dict =
             if not _dna_pending_is_stale(w.get("_dna_started_at")):
                 _flip_stale["value"] = True
                 _flip_stale["kind"] = "dna_in_flight"
+                # a493 (BRAIN-124): capture current state
+                # for the response so the endpoint can tell
+                # the losing tab exactly which revision/
+                # epoch is live + when the in-flight run
+                # started — no second DB round-trip needed.
+                _flip_stale["current_revision"] = _cur_rev
+                _flip_stale["current_epoch"] = _cur_epoch
+                _flip_stale["in_flight_started_at"] = (
+                    str(w.get("_dna_started_at") or "")
+                )
                 return cur
             print(
                 f"[WIZARD] stale pending lease detected for user {user['id']} "
@@ -9626,16 +9650,49 @@ async def api_wizard_complete(request: Request, response: Response, user: dict =
             # for the in-flight DNA job rather than triggering
             # a duplicate brain+dossier compute + duplicate
             # _gen_dna() spawn.
+            #
+            # a493 fix (BRAIN-124): explicit conflict
+            # messaging. Pre-fix the response said "wait
+            # for it to finish" — which incorrectly
+            # implied the losing tab's submitted answers
+            # were part of the active run. They aren't:
+            # the loser's payload was rejected before
+            # merge_settings even ran. Per Huntova
+            # engineering review on optimistic-concurrency
+            # conflict messaging: a 409 must explicitly
+            # state that the rejected write was NOT
+            # applied + provide reconciliation state.
             return JSONResponse(
                 {
                     "ok": False,
                     "in_flight": True,
+                    # Explicit conflict signal — clients
+                    # can branch on this deterministically
+                    # rather than parsing the error string.
+                    "answers_applied": False,
                     "error": (
-                        "Brain training is already running for this "
-                        "retrain in another tab. Wait for it to finish, "
-                        "or reload this tab to follow its progress."
+                        "Your answers were not saved. Brain "
+                        "training is already running in another "
+                        "tab — that tab's answers won the race. "
+                        "Wait for it to finish, then reload this "
+                        "tab to see the latest state, or click "
+                        "Re-train after it finishes to apply "
+                        "your edits."
                     ),
                     "error_kind": "dna_in_flight",
+                    # Reconciliation state so the client
+                    # can tell whether a reload is required
+                    # (BRAIN-14 revision + BRAIN-81 epoch)
+                    # and show countdown for the active run.
+                    "wizard_revision": int(
+                        _flip_stale.get("current_revision") or 0
+                    ),
+                    "wizard_epoch": int(
+                        _flip_stale.get("current_epoch") or 0
+                    ),
+                    "in_flight_started_at": str(
+                        _flip_stale.get("in_flight_started_at") or ""
+                    ),
                 },
                 status_code=409,
             )
