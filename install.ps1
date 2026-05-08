@@ -16,14 +16,16 @@ function Warn($m){ Write-Host "! $m" -ForegroundColor Yellow }
 function Fail($m){ Write-Host "$([char]10007) $m" -ForegroundColor Red; exit 1 }
 function Chat($m){ Write-Host "  huntova: $m" -ForegroundColor Magenta }
 
-# Run a native command silently. PS 5.1 wraps `2>&1` stderr lines as
-# NativeCommandError records and trips $ErrorActionPreference='Stop' even
-# on benign warnings (e.g. pip "Cache entry deserialization failed"). So
-# we drop stderr at the stream level instead of merging it via 2>&1.
-function Invoke-Quiet {
-    param([scriptblock]$Block)
-    & $Block 2>$null | Out-Null
-}
+# Why no `2>$null` or `2>&1` anywhere on native commands below:
+# In PowerShell 5.1, *any* redirection of a native exe's stderr (to $null,
+# to a file, or merged via 2>&1) wraps every stderr line as a
+# NativeCommandError ErrorRecord. Combined with $ErrorActionPreference =
+# 'Stop' that aborts the script on benign warnings (e.g. pip's "Cache
+# entry deserialization failed"). Solution: don't touch stderr. Native
+# stderr written without redirection goes straight to the console — no
+# ErrorRecord wrapping, no Stop trigger. Warnings print but the script
+# survives. Stdout is still suppressed with | Out-Null where it would be
+# noisy.
 
 Write-Host ""
 $logo = @'
@@ -59,12 +61,14 @@ $pipxBinCandidates = @(
 Step "step 1/4: looking for Python 3.11+"
 
 function Test-PythonOk($cmd) {
-    try {
-        $v = & $cmd -c "import sys; print('%d %d' % sys.version_info[:2])" 2>$null
-        if ($LASTEXITCODE -ne 0 -or -not $v) { return $false }
-        $p = ($v -split ' ')
-        return ([int]$p[0] -ge 3 -and [int]$p[1] -ge 11)
-    } catch { return $false }
+    # Native call: no stderr redirect (see top-of-file comment).
+    # `python -c "import sys; print(...)"` doesn't emit stderr in normal
+    # cases, so this is quiet without help.
+    $v = $null
+    try { $v = & $cmd -c "import sys; print('%d %d' % sys.version_info[:2])" } catch { return $false }
+    if ($LASTEXITCODE -ne 0 -or -not $v) { return $false }
+    $p = ($v -split ' ')
+    return ([int]$p[0] -ge 3 -and [int]$p[1] -ge 11)
 }
 
 $py = $null
@@ -112,16 +116,19 @@ Step "step 2/4: installing pipx"
 
 $hasPipx = [bool](Get-Command pipx -ErrorAction SilentlyContinue)
 if (-not $hasPipx) {
-    & $py -m pip --version 2>$null | Out-Null
+    & $py -m pip --version | Out-Null
     if ($LASTEXITCODE -ne 0) { Fail "pip is missing on this Python install — reinstall Python with the 'pip' option enabled" }
 
-    & $py -m pip install --user --quiet --upgrade pip 2>$null | Out-Null
-    if ($LASTEXITCODE -ne 0) { Warn "pip self-upgrade had a non-zero exit, continuing..." }
+    # Self-upgrade pip first; pip's "Cache entry deserialization failed"
+    # warning prints to stderr but is harmless. Don't redirect — see
+    # top-of-file comment about PS 5.1 native stderr handling.
+    & $py -m pip install --user --quiet --upgrade pip | Out-Null
+    if ($LASTEXITCODE -ne 0) { Warn "pip self-upgrade returned non-zero, continuing..." }
 
-    & $py -m pip install --user --quiet pipx 2>$null | Out-Null
+    & $py -m pip install --user --quiet pipx | Out-Null
     if ($LASTEXITCODE -ne 0) { Fail "pip install pipx failed" }
 
-    & $py -m pipx ensurepath 2>$null | Out-Null
+    & $py -m pipx ensurepath | Out-Null
 
     foreach ($p in $pipxBinCandidates) {
         if ((Test-Path $p) -and ($env:Path -notlike "*$p*")) {
@@ -142,7 +149,7 @@ $pkg = "git+https://github.com/enzostrano/huntova-public.git"
 
 # Use `python -m pipx` for reliability — the pipx command might not be on
 # PATH yet in this session even though we updated $env:Path above.
-$pipxList = (& $py -m pipx list --short 2>$null)
+$pipxList = (& $py -m pipx list --short)
 $alreadyInstalled = $false
 if ($pipxList) {
     foreach ($line in $pipxList) {
@@ -151,16 +158,16 @@ if ($pipxList) {
 }
 
 if ($alreadyInstalled) {
-    & $py -m pipx upgrade --force huntova 2>$null | Out-Null
+    & $py -m pipx upgrade --force huntova | Out-Null
     if ($LASTEXITCODE -ne 0) {
-        & $py -m pipx install --force $pkg 2>$null | Out-Null
+        & $py -m pipx install --force $pkg | Out-Null
         if ($LASTEXITCODE -ne 0) { Fail "pipx install huntova failed" }
     }
 } else {
-    & $py -m pipx install $pkg 2>$null | Out-Null
+    & $py -m pipx install $pkg | Out-Null
     if ($LASTEXITCODE -ne 0) { Fail "pipx install $pkg failed" }
 }
-& $py -m pipx inject huntova questionary 2>$null | Out-Null
+& $py -m pipx inject huntova questionary | Out-Null
 Ok "Huntova installed"
 
 # Find huntova binary for the launch step.
