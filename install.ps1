@@ -14,6 +14,12 @@ function Install-HuntovaCore {
     # Local to this function — restores user's preferences when we return.
     $ErrorActionPreference = 'Stop'
 
+    # Force UTF-8 in Python child processes — pipx prints ✨ emojis and
+    # legacy Windows consoles default to cp1252, which trips
+    # "'charmap' codec can't encode character" on the inner pipx run.
+    $env:PYTHONIOENCODING = "utf-8"
+    $env:PYTHONUTF8 = "1"
+
     # Modern Windows Terminal handles UTF-8; legacy console will degrade to "?".
     try { [Console]::OutputEncoding = [System.Text.Encoding]::UTF8 } catch {}
 
@@ -24,6 +30,7 @@ function Install-HuntovaCore {
     # exit the function gracefully without taking the user's shell with it.
     function Fail($m){ Write-Host "$([char]10007) $m" -ForegroundColor Red; throw $m }
     function Chat($m){ Write-Host "  huntova: $m" -ForegroundColor Magenta }
+    function Hint($m){ Write-Host "  $m" -ForegroundColor DarkGray }
 
     # Why no `2>$null` or `2>&1` anywhere on native commands below:
     # In PowerShell 5.1, *any* redirection of a native exe's stderr (to
@@ -55,6 +62,7 @@ function Install-HuntovaCore {
     $pipxBinCandidates = @(
         (Join-Path $env:USERPROFILE ".local\bin"),
         (Join-Path $env:APPDATA "Python\Scripts"),
+        (Join-Path $env:APPDATA "Python\Python314\Scripts"),
         (Join-Path $env:APPDATA "Python\Python313\Scripts"),
         (Join-Path $env:APPDATA "Python\Python312\Scripts"),
         (Join-Path $env:APPDATA "Python\Python311\Scripts")
@@ -107,8 +115,12 @@ winget not found. Two options:
         }
     }
 
-    $pyVer = & $py -c "import sys; print('%d.%d.%d' % sys.version_info[:3])"
-    Ok "Python $pyVer ($py)"
+    # Resolve to absolute path so we can pin pipx's venv to this exact
+    # interpreter — protects against stale pipx state from a previous
+    # install where the original Python has since moved or been removed.
+    $pyPath = (Get-Command $py).Source
+    $pyVer = & $pyPath -c "import sys; print('%d.%d.%d' % sys.version_info[:3])"
+    Ok "Python $pyVer ($pyPath)"
 
     # ----------------------------------------------------------------
     # 2. pipx
@@ -117,18 +129,16 @@ winget not found. Two options:
 
     $hasPipx = [bool](Get-Command pipx -ErrorAction SilentlyContinue)
     if (-not $hasPipx) {
-        & $py -m pip --version | Out-Null
+        & $pyPath -m pip --version | Out-Null
         if ($LASTEXITCODE -ne 0) { Fail "pip is missing on this Python install — reinstall Python with the 'pip' option enabled" }
 
-        # pip's "Cache entry deserialization failed" warning prints to stderr
-        # but is harmless. Don't redirect — see top-of-file comment.
-        & $py -m pip install --user --quiet --upgrade pip | Out-Null
+        & $pyPath -m pip install --user --quiet --upgrade pip | Out-Null
         if ($LASTEXITCODE -ne 0) { Warn "pip self-upgrade returned non-zero, continuing..." }
 
-        & $py -m pip install --user --quiet pipx | Out-Null
+        & $pyPath -m pip install --user --quiet pipx | Out-Null
         if ($LASTEXITCODE -ne 0) { Fail "pip install pipx failed" }
 
-        & $py -m pipx ensurepath | Out-Null
+        & $pyPath -m pipx ensurepath | Out-Null
 
         foreach ($p in $pipxBinCandidates) {
             if ((Test-Path $p) -and ($env:Path -notlike "*$p*")) {
@@ -141,33 +151,38 @@ winget not found. Two options:
     }
 
     # ----------------------------------------------------------------
-    # 3. Huntova
+    # 3. Huntova — always uninstall + fresh install pinned to current Python
     # ----------------------------------------------------------------
     Step "step 3/4: installing huntova"
+    Hint "(this step downloads the package from GitHub — takes 20-40s)"
 
     $pkg = "git+https://github.com/enzostrano/huntova-public.git"
 
-    $pipxList = (& $py -m pipx list --short)
-    $alreadyInstalled = $false
-    if ($pipxList) {
-        foreach ($line in $pipxList) {
-            if ($line -match "^huntova\b") { $alreadyInstalled = $true; break }
-        }
+    # Nuke any prior install — protects against the "invalid interpreter"
+    # state where pipx's registry points at a Python that no longer exists.
+    # `pipx uninstall` exits non-zero when the package isn't installed; we
+    # don't care, just clear state.
+    & $pyPath -m pipx uninstall huntova | Out-Null
+    $global:LASTEXITCODE = 0
+
+    # Fresh install pinned to the current Python interpreter via --python.
+    # Don't pipe to Out-Null — users like seeing "creating virtual env...
+    # installing package..." progress, and on failure we want pipx's real
+    # error to be visible.
+    & $pyPath -m pipx install --python $pyPath $pkg
+    if ($LASTEXITCODE -ne 0) { Fail "pipx install failed — see error above. To debug, run manually: $pyPath -m pipx install --python `"$pyPath`" `"$pkg`"" }
+
+    # Best-effort inject of questionary for the polished TUI wizard. Don't
+    # fail the whole install if this hiccups — huntova works without it.
+    & $pyPath -m pipx inject huntova questionary | Out-Null
+    if ($LASTEXITCODE -ne 0) {
+        Warn "questionary inject returned non-zero — TUI will use the basic prompts. Not fatal."
+        $global:LASTEXITCODE = 0
     }
 
-    if ($alreadyInstalled) {
-        & $py -m pipx upgrade --force huntova | Out-Null
-        if ($LASTEXITCODE -ne 0) {
-            & $py -m pipx install --force $pkg | Out-Null
-            if ($LASTEXITCODE -ne 0) { Fail "pipx install huntova failed" }
-        }
-    } else {
-        & $py -m pipx install $pkg | Out-Null
-        if ($LASTEXITCODE -ne 0) { Fail "pipx install $pkg failed" }
-    }
-    & $py -m pipx inject huntova questionary | Out-Null
     Ok "Huntova installed"
 
+    # Find huntova binary for the launch step.
     $huntovaCmd = $null
     if (Get-Command huntova -ErrorAction SilentlyContinue) {
         $huntovaCmd = (Get-Command huntova).Source
@@ -178,7 +193,8 @@ winget not found. Two options:
         }
     }
     if (-not $huntovaCmd) {
-        Warn "huntova binary not found on PATH. Open a new PowerShell window and run: huntova onboard"
+        Warn "huntova binary not found on PATH despite a successful install."
+        Hint "Open a new PowerShell window and run: huntova onboard"
         return
     }
 
@@ -201,7 +217,6 @@ winget not found. Two options:
     New-Item -ItemType Directory -Force -Path $logDir | Out-Null
     $logFile = Join-Path $logDir "install-launch.log"
 
-    # Spawn detached. -WindowStyle Hidden + redirect = no console window flash.
     $srvProc = Start-Process -FilePath $huntovaCmd `
         -ArgumentList @('serve','--no-browser','--port',$port) `
         -WindowStyle Hidden `
@@ -209,7 +224,6 @@ winget not found. Two options:
         -RedirectStandardError "$logFile.err" `
         -PassThru
 
-    # Poll /api/runtime up to 20s.
     $ready = $false
     for ($i = 1; $i -le 20; $i++) {
         try {
@@ -223,7 +237,7 @@ winget not found. Two options:
         Warn "server didn't respond in 20s. Open a new PowerShell window and run: huntova onboard"
         if (Test-Path $logFile) {
             Write-Host ""
-            Write-Host "  last 20 lines of $logFile :" -ForegroundColor DarkGray
+            Hint "last 20 lines of $logFile :"
             Get-Content $logFile -Tail 20
         }
         return
@@ -260,7 +274,7 @@ try {
     Install-HuntovaCore
 } catch {
     Write-Host ""
-    Write-Host "Installation aborted. See the message above." -ForegroundColor DarkGray
+    Write-Host "Installation aborted. See the error message above." -ForegroundColor DarkGray
     Write-Host "Issues: https://github.com/enzostrano/huntova-public/issues" -ForegroundColor DarkGray
     Write-Host ""
 }
