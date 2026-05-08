@@ -1,0 +1,100 @@
+name: Auto bump version and release
+
+# Every push to main:
+#   1. Compute version = "0.1.0a<commit-count>"
+#   2. If it differs from the literal in cli.py / pyproject.toml, rewrite both
+#   3. Commit (with [skip ci] so we don't trigger ourselves), tag, push, release
+#
+# The huntova in-browser update banner relies on GitHub Releases API
+# (/releases/latest) to know what "latest" is. Without this workflow,
+# every push to main shipped to users with the same hardcoded version
+# string, and `huntova update --check` always replied "you're on the
+# latest" — making the banner functionally dead.
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: auto-release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    if: ${{ !contains(github.event.head_commit.message, '[skip ci]') }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Compute new version
+        id: ver
+        run: |
+          N=$(git rev-list --count HEAD)
+          NEW="0.1.0a${N}"
+          OLD=$(grep -E '^VERSION[[:space:]]*=' cli.py | head -1 | sed -E 's/.*"([^"]+)".*/\1/')
+          echo "new=$NEW"  >> "$GITHUB_OUTPUT"
+          echo "old=$OLD" >> "$GITHUB_OUTPUT"
+          echo "tag=v$NEW" >> "$GITHUB_OUTPUT"
+          echo "commits=$N" >> "$GITHUB_OUTPUT"
+          echo "::notice::Version: $OLD -> $NEW (commit count: $N)"
+
+      - name: Bump cli.py + pyproject.toml
+        if: steps.ver.outputs.new != steps.ver.outputs.old
+        run: |
+          NEW="${{ steps.ver.outputs.new }}"
+          # Use python so we don't break on regex edge-cases that sed
+          # would mishandle (e.g. version strings containing dots).
+          python - <<PY
+          import pathlib, re
+          NEW = "$NEW"
+          for p, pat in [
+              ("cli.py", r'^(VERSION\s*=\s*)"[^"]+"'),
+              ("pyproject.toml", r'^(version\s*=\s*)"[^"]+"'),
+          ]:
+              path = pathlib.Path(p)
+              text = path.read_text(encoding="utf-8")
+              new_text, n = re.subn(pat, lambda m: m.group(1) + f'"{NEW}"',
+                                    text, count=1, flags=re.MULTILINE)
+              if n != 1:
+                  raise SystemExit(f"failed to bump {p} (matches: {n})")
+              path.write_text(new_text, encoding="utf-8")
+              print(f"  bumped {p} -> {NEW}")
+          PY
+
+      - name: Commit + tag + push
+        if: steps.ver.outputs.new != steps.ver.outputs.old
+        env:
+          NEW: ${{ steps.ver.outputs.new }}
+          TAG: ${{ steps.ver.outputs.tag }}
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add cli.py pyproject.toml
+          git commit -m "chore: bump version to $NEW [skip ci]"
+          git tag "$TAG"
+          git push origin HEAD:main --follow-tags
+
+      - name: Create GitHub Release
+        if: steps.ver.outputs.new != steps.ver.outputs.old
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ steps.ver.outputs.tag }}
+          NEW: ${{ steps.ver.outputs.new }}
+        run: |
+          gh release create "$TAG" \
+            --title "$TAG" \
+            --notes-from-tag \
+            --generate-notes \
+            || gh release create "$TAG" \
+                 --title "$TAG" \
+                 --generate-notes
+
+      - name: No-op message when version is already up to date
+        if: steps.ver.outputs.new == steps.ver.outputs.old
+        run: echo "::notice::cli.py / pyproject.toml already at ${{ steps.ver.outputs.new }} (manual bump or repeated trigger). No release created."
