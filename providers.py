@@ -581,36 +581,86 @@ class _GenericOpenAICompatProvider(_OpenAICompatibleProvider):
         super().__init__(api_key=api_key or "no-key", base_url=base_url)
 
 
-def detect_local_servers() -> dict[str, dict]:
+_PROBES: dict[str, tuple[str, str]] = {
+    "ollama":   ("http://localhost:11434/api/tags", "models"),
+    "lmstudio": ("http://localhost:1234/v1/models", "data"),
+    "llamafile":("http://localhost:8080/v1/models", "data"),
+}
+
+# In-process cache for detect_local_servers(). Settings page renders fire
+# this on every load — without a cache, every render does 3x localhost
+# probes. 30s TTL is short enough that "I just started Ollama" feels live
+# but long enough that rapid-fire renders return instantly.
+import time as _time
+_DETECT_CACHE: dict[str, Any] = {"data": None, "ts": 0.0}
+_DETECT_CACHE_LOCK = _threading.Lock()
+_DETECT_CACHE_TTL = 30.0  # seconds
+
+
+def _probe_one(name: str, url: str, key: str) -> tuple[str, dict]:
+    """Single localhost probe used by detect_local_servers()'s thread
+    pool. Tight 0.5s timeout — a refused TCP connect on localhost
+    returns in milliseconds; the timeout only matters for sockets that
+    accept the connection but never respond."""
+    import urllib.request
+    import json as _json
+    info = {"available": False, "model_count": 0, "base_url": _BASE_URL[name]}
+    try:
+        req = urllib.request.Request(url, headers={"Accept": "application/json"})
+        with urllib.request.urlopen(req, timeout=0.5) as r:
+            if 200 <= r.status < 300:
+                body = _json.loads(r.read().decode("utf-8", errors="ignore") or "{}")
+                items = body.get(key) if isinstance(body, dict) else None
+                info["available"] = True
+                info["model_count"] = len(items) if isinstance(items, list) else 0
+    except Exception:
+        pass
+    return name, info
+
+
+def detect_local_servers(*, force_refresh: bool = False) -> dict[str, dict]:
     """Probe localhost ports for known local AI servers (Ollama, LM
     Studio, llamafile). Used by `huntova onboard` to auto-suggest
     detected local options before falling back to cloud.
 
+    Probes run in parallel with a 0.5s timeout each. Results are cached
+    for 30s — calls within that window return the cached snapshot
+    without re-probing. Pass force_refresh=True (e.g. from the
+    'Re-detect' button) to bypass the cache.
+
     Returns a dict {provider_name: {available: bool, model_count: int,
     base_url: str}} for each local provider.
     """
-    import urllib.request
-    import json as _json
+    from concurrent.futures import ThreadPoolExecutor
+
+    if not force_refresh:
+        with _DETECT_CACHE_LOCK:
+            if _DETECT_CACHE["data"] is not None and (_time.time() - _DETECT_CACHE["ts"]) < _DETECT_CACHE_TTL:
+                # Shallow copy so callers can't mutate cached state.
+                return dict(_DETECT_CACHE["data"])
+
     out: dict[str, dict] = {}
-    probes = {
-        "ollama":   ("http://localhost:11434/api/tags", "models"),
-        "lmstudio": ("http://localhost:1234/v1/models", "data"),
-        "llamafile":("http://localhost:8080/v1/models", "data"),
-    }
-    for name, (url, key) in probes.items():
-        info = {"available": False, "model_count": 0, "base_url": _BASE_URL[name]}
-        try:
-            req = urllib.request.Request(url, headers={"Accept": "application/json"})
-            with urllib.request.urlopen(req, timeout=1.5) as r:
-                if 200 <= r.status < 300:
-                    body = _json.loads(r.read().decode("utf-8", errors="ignore") or "{}")
-                    items = body.get(key) if isinstance(body, dict) else None
-                    info["available"] = True
-                    info["model_count"] = len(items) if isinstance(items, list) else 0
-        except Exception:
-            pass
-        out[name] = info
-    return out
+    with ThreadPoolExecutor(max_workers=len(_PROBES)) as pool:
+        futures = [pool.submit(_probe_one, name, url, key) for name, (url, key) in _PROBES.items()]
+        for fut in futures:
+            try:
+                # Per-probe is already 0.5s; this future-level timeout is
+                # belt-and-braces for the rare case of TPE itself wedging.
+                name, info = fut.result(timeout=1.0)
+                out[name] = info
+            except Exception:
+                pass
+
+    # Paranoid backfill — if a probe somehow didn't return, use the
+    # default "not available" shape so callers see a stable schema.
+    for name in _PROBES:
+        out.setdefault(name, {"available": False, "model_count": 0, "base_url": _BASE_URL[name]})
+
+    with _DETECT_CACHE_LOCK:
+        _DETECT_CACHE["data"] = out
+        _DETECT_CACHE["ts"] = _time.time()
+
+    return dict(out)
 
 
 # ── OpenAI-compat response shim ─────────────────────────────────────
