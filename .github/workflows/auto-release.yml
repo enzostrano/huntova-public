@@ -88,6 +88,16 @@ jobs:
         env:
           NEW: ${{ steps.ver.outputs.new }}
           TAG: ${{ steps.ver.outputs.tag }}
+        # Two pushes can land on main near-simultaneously, leaving the
+        # runner with a stale checkout. The previous version then tried
+        # to push and the resulting non-fast-forward also tripped a
+        # secondary GitHub rejection ("refusing to allow a GitHub App
+        # to create or update workflow ... without `workflows`
+        # permission") because the push would have reintroduced an
+        # in-flight workflow file change as part of the catchup.
+        # Rebase-before-push so this run's only delta is the bump
+        # commit + tag, and retry on failure (e.g. another push raced
+        # in between rebase and push).
         run: |
           set -euo pipefail
           git config user.name  "github-actions[bot]"
@@ -95,7 +105,21 @@ jobs:
           git add cli.py pyproject.toml
           git commit -m "chore: bump version to $NEW [skip ci]"
           git tag -a "$TAG" -m "Release $TAG"
-          git push origin HEAD:main --follow-tags
+          for attempt in 1 2 3; do
+            if git push origin HEAD:main --follow-tags; then
+              echo "::notice::push attempt ${attempt} succeeded"
+              break
+            fi
+            echo "::warning::push attempt ${attempt} rejected; rebasing"
+            git fetch origin main
+            # Rebase the bump commit on top of the latest main. The tag
+            # already points at our local bump commit, so it follows.
+            git rebase origin/main
+            if [[ $attempt -eq 3 ]]; then
+              echo "::error::push failed after 3 attempts"
+              exit 1
+            fi
+          done
 
       - name: Create GitHub Release
         env:
