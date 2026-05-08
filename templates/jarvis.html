@@ -6688,5 +6688,159 @@ body.hv-has-update-banner{padding-top:var(--hv-update-banner-h, 38px)}
   } catch (_) {}
 })();
 </script>
+
+<!-- Auto-update banner: polls /api/update-status, drives the existing
+     /api/update/run → /api/update/job/<id> → /api/update/restart flow
+     from a single click. Self-contained: injects its own CSS, no other
+     template surgery. Silently no-ops in cloud / hosted mode (where
+     /api/update-status reports unsupported=true) and on transient
+     network errors. -->
+<script>
+(function huntovaUpdateBanner(){
+  'use strict';
+  const STORAGE_DISMISS_KEY = 'hvUpdateDismissedFor';
+  const POLL_INTERVAL_MS = 6 * 60 * 60 * 1000; // re-check every 6h while tab open
+  const JOB_POLL_MS = 1500;
+  const JOB_TIMEOUT_TICKS = 200;       // ~5 min for pipx upgrade on slow net
+  const RESTART_POLL_MS = 1000;
+  const RESTART_TIMEOUT_TICKS = 90;    // ~90s for execv to land
+
+  function getCSRF(){
+    const m = document.cookie.match(/(?:^|; )hv_csrf=([^;]+)/);
+    return m ? decodeURIComponent(m[1]) : '';
+  }
+  function injectStyle(){
+    if (document.getElementById('hv-update-banner-style')) return;
+    const s = document.createElement('style');
+    s.id = 'hv-update-banner-style';
+    s.textContent = [
+      '#hv-update-banner{position:fixed;top:12px;right:12px;z-index:99999;',
+      'display:flex;align-items:center;gap:10px;max-width:min(520px,calc(100vw - 24px));',
+      'padding:10px 12px;border-radius:10px;',
+      'background:#0f172a;color:#f8fafc;border:1px solid #334155;',
+      'box-shadow:0 10px 30px -10px rgba(0,0,0,0.5);',
+      'font:500 13px/1.4 -apple-system,Segoe UI,Inter,system-ui,sans-serif;}',
+      '#hv-update-banner .hv-up-msg{flex:1;min-width:0;}',
+      '#hv-update-banner strong{color:#a5f3fc;font-weight:600;}',
+      '#hv-update-banner button{cursor:pointer;border:0;border-radius:7px;',
+      'padding:6px 10px;font:600 12px/1 inherit;}',
+      '#hv-update-banner .hv-up-go{background:#22d3ee;color:#0f172a;}',
+      '#hv-update-banner .hv-up-go:hover{background:#67e8f9;}',
+      '#hv-update-banner .hv-up-go[disabled]{opacity:0.7;cursor:wait;}',
+      '#hv-update-banner .hv-up-x{background:transparent;color:#94a3b8;font-size:18px;padding:2px 8px;line-height:1;}',
+      '#hv-update-banner .hv-up-x:hover{color:#f8fafc;}',
+      '#hv-update-banner.hv-up-error{border-color:#7f1d1d;background:#1f0b0b;}',
+      '@media (prefers-reduced-motion:no-preference){',
+      '#hv-update-banner{animation:hvUpSlide .25s ease-out;}',
+      '@keyframes hvUpSlide{from{transform:translateY(-8px);opacity:0;}to{transform:none;opacity:1;}}}'
+    ].join('');
+    document.head.appendChild(s);
+  }
+  async function jget(url){
+    const r = await fetch(url, {credentials:'same-origin', cache:'no-store'});
+    if (!r.ok) throw new Error(url + ' → ' + r.status);
+    return r.json();
+  }
+  async function jpost(url){
+    const r = await fetch(url, {method:'POST', credentials:'same-origin',
+      headers:{'X-CSRF-Token': getCSRF(), 'Content-Type':'application/json'}, body:'{}'});
+    if (!r.ok) throw new Error(url + ' → ' + r.status);
+    return r.json();
+  }
+  function show(info){
+    const current = info.current, latest = info.latest;
+    let dismissed = '';
+    try { dismissed = localStorage.getItem(STORAGE_DISMISS_KEY) || ''; } catch(_){}
+    if (dismissed === latest) return;
+    injectStyle();
+    if (document.getElementById('hv-update-banner')) return;
+
+    const banner = document.createElement('div');
+    banner.id = 'hv-update-banner';
+    banner.setAttribute('role','status');
+    banner.setAttribute('aria-live','polite');
+
+    const msg = document.createElement('div');
+    msg.className = 'hv-up-msg';
+    const cur = document.createElement('strong'); cur.textContent = current;
+    const lat = document.createElement('strong'); lat.textContent = latest;
+    msg.append('Update available: ', cur, ' → ', lat);
+
+    const go = document.createElement('button');
+    go.type = 'button'; go.className = 'hv-up-go';
+    go.textContent = 'Update now';
+
+    const x = document.createElement('button');
+    x.type = 'button'; x.className = 'hv-up-x';
+    x.setAttribute('aria-label','Dismiss');
+    x.textContent = '×';
+    x.onclick = function(){
+      try { localStorage.setItem(STORAGE_DISMISS_KEY, latest); } catch(_){}
+      banner.remove();
+    };
+
+    banner.append(msg, go, x);
+    document.body.appendChild(banner);
+
+    go.onclick = function(){ runUpdate(banner, msg, go, current); };
+  }
+  async function runUpdate(banner, msg, go, currentVer){
+    go.disabled = true;
+    msg.textContent = 'Starting update…';
+    try {
+      const start = await jpost('/api/update/run');
+      const jobId = start.job_id || start.id;
+      if (!jobId) throw new Error('no job_id in /api/update/run response');
+
+      let success = false;
+      for (let i = 0; i < JOB_TIMEOUT_TICKS; i++){
+        await new Promise(function(r){ setTimeout(r, JOB_POLL_MS); });
+        let j;
+        try { j = await jget('/api/update/job/' + encodeURIComponent(jobId)); }
+        catch(_){ continue; }
+        if (j.phase || j.status) msg.textContent = (j.phase || j.status) + '…';
+        if (j.status === 'success' || j.status === 'done' || j.ok === true){ success = true; break; }
+        if (j.status === 'error' || j.status === 'failed') throw new Error(j.error || j.message || 'update job failed');
+      }
+      if (!success) throw new Error('update timed out (still running on the server — refresh to recheck)');
+
+      msg.textContent = 'Restarting…';
+      try { await jpost('/api/update/restart'); } catch(_){}
+
+      for (let i = 0; i < RESTART_TIMEOUT_TICKS; i++){
+        await new Promise(function(r){ setTimeout(r, RESTART_POLL_MS); });
+        try {
+          const rt = await jget('/api/runtime');
+          const v = rt && rt.version;
+          if (v && v !== currentVer){ location.reload(); return; }
+        } catch(_){}
+      }
+      msg.textContent = 'Restart didn’t complete — refresh the page manually.';
+      go.textContent = 'Refresh';
+      go.disabled = false;
+      go.onclick = function(){ location.reload(); };
+    } catch (e) {
+      banner.classList.add('hv-up-error');
+      msg.textContent = 'Update failed: ' + (e && e.message ? e.message : e);
+      go.textContent = 'Dismiss';
+      go.disabled = false;
+      go.onclick = function(){ banner.remove(); };
+    }
+  }
+  async function check(){
+    try {
+      const s = await jget('/api/update-status');
+      if (s && s.available && s.latest && s.current && s.latest !== s.current) show(s);
+    } catch(_){ /* offline / cloud mode / endpoint missing - silent */ }
+  }
+
+  if (document.readyState === 'loading'){
+    document.addEventListener('DOMContentLoaded', check, {once:true});
+  } else {
+    check();
+  }
+  setInterval(check, POLL_INTERVAL_MS);
+})();
+</script>
 </body>
 </html>
