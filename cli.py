@@ -2557,6 +2557,9 @@ def metrics_emit(event: str, props: dict | None = None) -> None:
         pass
 
 
+_SETTINGS_KEYS: tuple[str, ...] = ("auto_update_on_launch",)
+
+
 def cmd_settings(args: argparse.Namespace) -> int:
     """Local-CLI settings toggle. Today supports `auto_update` (alias
     `auto_update_on_launch`) which controls whether `huntova serve`
@@ -2564,41 +2567,62 @@ def cmd_settings(args: argparse.Namespace) -> int:
     on GitHub.
 
     Examples:
-        huntova settings auto_update on
-        huntova settings auto_update off
-        huntova settings auto_update show
+        huntova settings                       # list every setting
+        huntova settings show                  # alias for above
+        huntova settings auto_update           # show one
+        huntova settings auto_update on        # toggle on
+        huntova settings auto_update off       # toggle off
     """
-    cfg = Path.home() / ".config" / "huntova" / "config.toml"
+    # Honor XDG_CONFIG_HOME — the reader (`_auto_update_enabled`) does,
+    # so the writer must too. Previous version hardcoded ~/.config which
+    # silently no-op'd on Linux/CI users with XDG set: writes landed in
+    # ~/.config but the serve-time check looked in $XDG/huntova.
+    _base = os.environ.get("XDG_CONFIG_HOME") or str(Path.home() / ".config")
+    cfg = Path(_base) / "huntova" / "config.toml"
     cfg.parent.mkdir(parents=True, exist_ok=True)
     key = (getattr(args, "key", "") or "").strip().lower()
     val = (getattr(args, "value", "") or "").strip().lower()
-    if not key:
-        print("[huntova] usage: huntova settings <key> <on|off|show>")
-        print("           keys: auto_update")
-        return 1
+
+    import re as _re
+    existing = cfg.read_text() if cfg.exists() else ""
+
+    def _read(canonical: str) -> str:
+        pat = _re.compile(
+            r"^\s*" + _re.escape(canonical) + r"\s*=\s*(\S+)",
+            _re.MULTILINE,
+        )
+        m = pat.search(existing)
+        if not m:
+            return "off"
+        v = m.group(1).strip().strip('"\'').lower()
+        return "on" if v in ("true", "1", "yes", "on") else "off"
+
+    # `huntova settings` (no key) and `huntova settings show` both list
+    # every known setting's current value. The previous behaviour
+    # rejected `show` as an unknown setting key, even though the
+    # docstring advertised it.
+    if not key or key == "show":
+        for canonical in _SETTINGS_KEYS:
+            print(f"[huntova] {canonical} = {_read(canonical)}")
+        if not key:
+            print()
+            print("           usage: huntova settings <key> <on|off|show>")
+            print("           keys:  " + ", ".join(_SETTINGS_KEYS))
+        return 0
+
     canonical = "auto_update_on_launch" if key in ("auto_update", "auto_update_on_launch") else None
     if canonical is None:
         print(f"[huntova] unknown setting: {key!r} (try `auto_update`)")
         return 1
+
     # Read existing TOML, mutate, write back. Keep it human-editable —
     # we don't pull in a TOML writer, just append/replace one line.
     # Strip any existing line that assigns the canonical key, regardless
     # of indentation (so a key inside a `[section]` is also removed).
-    # Crucially: we append the new value to the end-of-file BEFORE any
-    # `[section]` would interpret it as inside that section. We achieve
-    # this by inserting before the FIRST `[section]` header if any
-    # exists, otherwise appending at the end.
-    import re as _re
-    existing = cfg.read_text() if cfg.exists() else ""
     _key_re = _re.compile(r"^\s*" + _re.escape(canonical) + r"\s*=", _re.MULTILINE)
     lines = [ln for ln in existing.splitlines() if not _key_re.match(ln)]
     if val == "show" or not val:
-        cur = "off"
-        for ln in existing.splitlines():
-            if _key_re.match(ln):
-                cur = ln.split("=", 1)[1].strip()
-                break
-        print(f"[huntova] {canonical} = {cur}")
+        print(f"[huntova] {canonical} = {_read(canonical)}")
         return 0
     new_val = "true" if val in ("on", "true", "yes", "1") else (
               "false" if val in ("off", "false", "no", "0") else None)
@@ -2608,13 +2632,11 @@ def cmd_settings(args: argparse.Namespace) -> int:
 
     # Find the first section header — we must insert above it so the
     # new top-level key isn't sucked into that section's body.
-    insert_at = 0
+    insert_at = len(lines)
     for i, ln in enumerate(lines):
         if _re.match(r"^\s*\[", ln):
             insert_at = i
             break
-    else:
-        insert_at = len(lines)
     lines.insert(insert_at, f'{canonical} = {new_val}')
     cfg.write_text("\n".join(lines).strip() + "\n")
     if new_val == "true":
@@ -2622,8 +2644,6 @@ def cmd_settings(args: argparse.Namespace) -> int:
     else:
         print(f"[huntova] {canonical} = off")
     return 0
-    print(f"[huntova] expected on / off / show, got {val!r}")
-    return 1
 
 
 def cmd_telemetry(args: argparse.Namespace) -> int:
