@@ -2116,7 +2116,13 @@ def cmd_doctor(args: argparse.Namespace) -> int:
     # endpoint — Kimi K2.6 round-73 fix: a bad SEARXNG_URL is the #1
     # support ticket if doctor doesn't catch it. We just skip the full
     # JSON-API round-trip so a fresh CI runner without SearXNG can pass.
-    searxng = os.environ.get("SEARXNG_URL", "").strip() or "http://127.0.0.1:8888"
+    # Default URL mirrors cmd_status (a295 fix): actual `huntova hunt`
+    # falls back to https://searx.be in local mode (app.py:52), so
+    # doctor's verdict tracks what hunts actually use rather than
+    # always reporting "unreachable" against an empty localhost.
+    _is_local = os.environ.get("APP_MODE", "local") == "local"
+    _default_searxng = "https://searx.be" if _is_local else "http://127.0.0.1:8888"
+    searxng = os.environ.get("SEARXNG_URL", "").strip() or _default_searxng
     if args.quick:
         # HEAD ping with 3s timeout — fast enough for CI, real enough
         # to catch obvious typos in HV_SEARXNG_URL.
