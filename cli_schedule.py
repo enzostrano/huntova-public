@@ -36,16 +36,27 @@ def _green(s: str) -> str: return f"\033[32m{s}\033[0m"
 
 
 _DEFAULT_LABEL = "com.huntova.daily"
-_LOG_REL = "~/.local/share/huntova/logs/schedule.log"
+# Unix-shell-friendly path: cron / launchd / systemd run on Linux/macOS,
+# so the snippet must contain Unix-shaped paths even when the user
+# generated it on Windows. `$HOME` is expanded by the shell at run-time.
+_LOG_PATH = "$HOME/.local/share/huntova/logs/schedule.log"
 
 
 def _resolve_huntova_bin() -> str:
-    """Best-effort path to the installed huntova binary."""
-    found = shutil.which("huntova")
-    if found:
-        return found
-    # Fallback to pipx-default location.
-    return str(Path.home() / ".local" / "pipx" / "venvs" / "huntova" / "bin" / "huntova")
+    """Path to the huntova binary for cron / launchd / systemd snippets.
+
+    These targets only run on Linux/macOS, so we always emit a
+    Unix-shaped path regardless of the host platform. Previous version
+    returned ``shutil.which("huntova")`` directly, which on Windows
+    produced ``C:\\Users\\.../huntova.EXE`` — useless in a crontab.
+    """
+    if sys.platform.startswith(("linux", "darwin")):
+        found = shutil.which("huntova")
+        if found:
+            return found
+    # Cross-platform fallback: the pipx ensurepath symlink location on
+    # Linux/macOS. Users with a non-default install can hand-edit.
+    return "$HOME/.local/bin/huntova"
 
 
 def _parse_at(at: str) -> tuple[int, int]:
@@ -88,7 +99,7 @@ def _build_chain(bin_path: str, max_send: int, with_update: bool = True) -> str:
 def _emit_launchd(at: str, max_send: int, label: str) -> str:
     hh, mm = _parse_at(at)
     bin_path = _resolve_huntova_bin()
-    log = _LOG_REL.replace("~", str(Path.home()))
+    log = _LOG_PATH
     chain = _build_chain(bin_path, max_send)
     plist = f"""<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -123,7 +134,7 @@ def _emit_systemd(at: str, max_send: int, label: str) -> tuple[str, str, str]:
     The user pipes the contents into ~/.config/systemd/user/."""
     hh, mm = _parse_at(at)
     bin_path = _resolve_huntova_bin()
-    log = _LOG_REL.replace("~", str(Path.home()))
+    log = _LOG_PATH
     chain = _build_chain(bin_path, max_send)
     service = f"""[Unit]
 Description=Huntova daily outreach worker (sequence + inbox + pulse)
@@ -162,7 +173,7 @@ WantedBy=timers.target
 def _emit_cron(at: str, max_send: int) -> str:
     hh, mm = _parse_at(at)
     bin_path = _resolve_huntova_bin()
-    log = _LOG_REL.replace("~", str(Path.home()))
+    log = _LOG_PATH
     chain = _build_chain(bin_path, max_send)
     return (f"# Append this line to your crontab (`crontab -e`):\n"
             f"{mm} {hh} * * * {chain} >> {log} 2>&1\n")
