@@ -16,6 +16,15 @@ function Warn($m){ Write-Host "! $m" -ForegroundColor Yellow }
 function Fail($m){ Write-Host "$([char]10007) $m" -ForegroundColor Red; exit 1 }
 function Chat($m){ Write-Host "  huntova: $m" -ForegroundColor Magenta }
 
+# Run a native command silently. PS 5.1 wraps `2>&1` stderr lines as
+# NativeCommandError records and trips $ErrorActionPreference='Stop' even
+# on benign warnings (e.g. pip "Cache entry deserialization failed"). So
+# we drop stderr at the stream level instead of merging it via 2>&1.
+function Invoke-Quiet {
+    param([scriptblock]$Block)
+    & $Block 2>$null | Out-Null
+}
+
 Write-Host ""
 $logo = @'
    ##   ## ##    ## ###    ## ########  ######  ##    ##  #####
@@ -103,13 +112,16 @@ Step "step 2/4: installing pipx"
 
 $hasPipx = [bool](Get-Command pipx -ErrorAction SilentlyContinue)
 if (-not $hasPipx) {
-    & $py -m pip --version | Out-Null
+    & $py -m pip --version 2>$null | Out-Null
     if ($LASTEXITCODE -ne 0) { Fail "pip is missing on this Python install — reinstall Python with the 'pip' option enabled" }
 
-    & $py -m pip install --user --quiet --upgrade pip 2>&1 | Out-Null
-    & $py -m pip install --user --quiet pipx 2>&1 | Out-Null
+    & $py -m pip install --user --quiet --upgrade pip 2>$null | Out-Null
+    if ($LASTEXITCODE -ne 0) { Warn "pip self-upgrade had a non-zero exit, continuing..." }
+
+    & $py -m pip install --user --quiet pipx 2>$null | Out-Null
     if ($LASTEXITCODE -ne 0) { Fail "pip install pipx failed" }
-    & $py -m pipx ensurepath --quiet 2>&1 | Out-Null
+
+    & $py -m pipx ensurepath 2>$null | Out-Null
 
     foreach ($p in $pipxBinCandidates) {
         if ((Test-Path $p) -and ($env:Path -notlike "*$p*")) {
@@ -128,8 +140,8 @@ Step "step 3/4: installing huntova"
 
 $pkg = "git+https://github.com/enzostrano/huntova-public.git"
 
-# Use `python -m pipx` for reliability — pipx command might not be on PATH yet
-# in this session even though we updated $env:Path above.
+# Use `python -m pipx` for reliability — the pipx command might not be on
+# PATH yet in this session even though we updated $env:Path above.
 $pipxList = (& $py -m pipx list --short 2>$null)
 $alreadyInstalled = $false
 if ($pipxList) {
@@ -139,16 +151,16 @@ if ($pipxList) {
 }
 
 if ($alreadyInstalled) {
-    & $py -m pipx upgrade --force huntova 2>&1 | Out-Null
+    & $py -m pipx upgrade --force huntova 2>$null | Out-Null
     if ($LASTEXITCODE -ne 0) {
-        & $py -m pipx install --force $pkg 2>&1 | Out-Null
+        & $py -m pipx install --force $pkg 2>$null | Out-Null
         if ($LASTEXITCODE -ne 0) { Fail "pipx install huntova failed" }
     }
 } else {
-    & $py -m pipx install $pkg 2>&1 | Out-Null
+    & $py -m pipx install $pkg 2>$null | Out-Null
     if ($LASTEXITCODE -ne 0) { Fail "pipx install $pkg failed" }
 }
-& $py -m pipx inject huntova questionary 2>&1 | Out-Null
+& $py -m pipx inject huntova questionary 2>$null | Out-Null
 Ok "Huntova installed"
 
 # Find huntova binary for the launch step.
