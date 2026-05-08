@@ -22,7 +22,7 @@ import sys
 import webbrowser
 from pathlib import Path
 
-VERSION = "0.1.0a2014"
+VERSION = "0.1.0a2013"
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 5050  # avoid clashing with the cloud's :5000
 
@@ -7406,7 +7406,23 @@ def _attach_grouped_help(parser: argparse.ArgumentParser,
                 return _default_format_help()
 
             # Bucket every choice. Track seen-set so we can dump the
-            # leftovers into "Other" defensively.
+            # leftovers into "Other" defensively. Argparse aliases share
+            # their primary's parser object (same id), so we detect them
+            # by tracking the first name we see for each parser id and
+            # treating any subsequent name for that parser as an alias.
+            # Without this filter, aliases like `playbook` / `playbooks`
+            # (aliases of `examples`) leaked into "Other" with empty
+            # help text — `action.help` is keyed by primary `dest`, not
+            # by alias name, so the lookup found nothing.
+            _seen_parser: dict[int, str] = {}
+            aliases: set[str] = set()
+            for name, sp in choices.items():
+                pid = id(sp)
+                if pid in _seen_parser:
+                    aliases.add(name)
+                else:
+                    _seen_parser[pid] = name
+
             seen: set[str] = set()
             buckets: list[tuple[str, list[str]]] = []
             for label, names in _HELP_CATEGORIES:
@@ -7414,7 +7430,8 @@ def _attach_grouped_help(parser: argparse.ArgumentParser,
                 if present:
                     buckets.append((label, present))
                     seen.update(present)
-            leftovers = [n for n in choices.keys() if n not in seen]
+            leftovers = [n for n in choices.keys()
+                         if n not in seen and n not in aliases]
             if leftovers:
                 buckets.append(("Other", leftovers))
 
