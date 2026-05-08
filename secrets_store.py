@@ -284,7 +284,12 @@ def _plain_read() -> dict[str, str]:
     if not p.exists():
         return {}
     try:
-        return json.loads(p.read_text())
+        # Force UTF-8: Windows defaults to cp1252, which rejects any
+        # non-ASCII byte the file may contain (`_plain_write` writes
+        # JSON with str.encode() default, i.e. UTF-8 — without this the
+        # write/read pair is asymmetric and silently loses every saved
+        # secret on the next launch).
+        return json.loads(p.read_text(encoding="utf-8"))
     except Exception:
         return {}
 
