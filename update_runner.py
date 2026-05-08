@@ -133,19 +133,49 @@ def get_job(job_id: str) -> dict | None:
 
 
 def schedule_self_restart(delay_seconds: float = 1.0) -> None:
-    """Replace the running process with a fresh `os.execv` so newly-
-    upgraded code on disk is loaded. Schedules via threading.Timer so
-    the HTTP response that triggered this can be sent first.
+    """Restart the running server so newly-upgraded code on disk is
+    loaded. Schedules via threading.Timer so the HTTP response that
+    triggered this can be sent first.
 
-    After execv we ARE the new process — control never returns from
-    that call. uvicorn's listening socket is closed by the kernel as
-    part of the exec; the new process re-binds to the same port."""
+    Unix: `os.execv` replaces the current process image — control
+    never returns from that call. uvicorn's listening socket is closed
+    by the kernel as part of the exec; the new process re-binds to the
+    same port.
+
+    Windows: `os.execv` is *not* a process replacement — CPython
+    spawns a new process and exits the parent, but stdio handles and
+    console attachment are routinely lost, leaving the new process
+    detached from the user's terminal and sometimes failing to bind
+    the port before the parent's socket is reaped. The browser tab
+    that issued /api/update/restart then hangs polling /api/runtime
+    forever. Spawn a detached child explicitly and exit cleanly so
+    the user gets a reliable restart on every platform.
+    """
 
     def _exec_now() -> None:
         try:
-            os.execv(sys.executable, [sys.executable] + sys.argv)
+            if os.name == "nt":
+                # Windows: spawn a fully-detached child that survives
+                # this process's exit, then bow out so the listening
+                # socket is released for the child to re-bind.
+                DETACHED_PROCESS = 0x00000008
+                CREATE_NEW_PROCESS_GROUP = 0x00000200
+                subprocess.Popen(
+                    [sys.executable] + sys.argv,
+                    creationflags=DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP,
+                    close_fds=True,
+                )
+                # Give the child a moment to start before we drop the
+                # socket — otherwise systems with strict TIME_WAIT can
+                # reject the rebind.
+                import time as _time
+                _time.sleep(0.5)
+                os._exit(0)
+            else:
+                os.execv(sys.executable, [sys.executable] + sys.argv)
         except Exception as exc:
-            print(f"[update] execv failed: {exc}")
+            print(f"[update] restart failed ({type(exc).__name__}): {exc}",
+                  file=sys.stderr)
 
     t = threading.Timer(delay_seconds, _exec_now)
     t.daemon = True
