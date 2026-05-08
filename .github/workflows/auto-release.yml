@@ -1,15 +1,16 @@
 name: Auto bump version and release
 
 # Every push to main:
-#   1. Compute version = "0.1.0a<commit-count>"
-#   2. If it differs from the literal in cli.py / pyproject.toml, rewrite both
-#   3. Commit (with [skip ci] so we don't trigger ourselves), tag, push, release
+#   1. Read VERSION from cli.py (e.g. "0.1.0a2012")
+#   2. Increment the alpha-N suffix by 1 -> "0.1.0a2013"
+#   3. Rewrite cli.py + pyproject.toml
+#   4. Commit with [skip ci] (also: GITHUB_TOKEN pushes don't re-trigger
+#      workflows, belt-and-suspenders), tag, push, create Release.
 #
-# The huntova in-browser update banner relies on GitHub Releases API
-# (/releases/latest) to know what "latest" is. Without this workflow,
-# every push to main shipped to users with the same hardcoded version
-# string, and `huntova update --check` always replied "you're on the
-# latest" — making the banner functionally dead.
+# Why increment from existing VERSION rather than `git rev-list --count`:
+# this repo is a curated public mirror; the alpha-N suffix tracks the
+# parent project's release counter (~2012), not the public history's
+# commit count (14 at time of writing).
 
 on:
   push:
@@ -32,27 +33,36 @@ jobs:
           fetch-depth: 0
           persist-credentials: true
 
-      - name: Compute new version
+      - name: Compute new version (increment alpha-N)
         id: ver
         run: |
-          N=$(git rev-list --count HEAD)
-          NEW="0.1.0a${N}"
-          OLD=$(grep -E '^VERSION[[:space:]]*=' cli.py | head -1 | sed -E 's/.*"([^"]+)".*/\1/')
+          set -euo pipefail
+          OLD=$(grep -E '^VERSION[[:space:]]*=' cli.py | head -1 \
+                | sed -E 's/.*"([^"]+)".*/\1/')
+          if ! [[ "$OLD" =~ ^([0-9]+\.[0-9]+\.[0-9]+)a([0-9]+)$ ]]; then
+            echo "::error::Unrecognized version shape in cli.py: $OLD (expected MAJOR.MINOR.PATCHaN)"
+            exit 1
+          fi
+          BASE="${BASH_REMATCH[1]}"
+          N="${BASH_REMATCH[2]}"
+          NEW="${BASE}a$((N+1))"
+          TAG="v$NEW"
+          if git rev-parse "$TAG" >/dev/null 2>&1; then
+            echo "::error::Tag $TAG already exists; manual intervention needed."
+            exit 1
+          fi
+          echo "old=$OLD"  >> "$GITHUB_OUTPUT"
           echo "new=$NEW"  >> "$GITHUB_OUTPUT"
-          echo "old=$OLD" >> "$GITHUB_OUTPUT"
-          echo "tag=v$NEW" >> "$GITHUB_OUTPUT"
-          echo "commits=$N" >> "$GITHUB_OUTPUT"
-          echo "::notice::Version: $OLD -> $NEW (commit count: $N)"
+          echo "tag=$TAG"  >> "$GITHUB_OUTPUT"
+          echo "::notice::Version bump: $OLD -> $NEW"
 
       - name: Bump cli.py + pyproject.toml
-        if: steps.ver.outputs.new != steps.ver.outputs.old
+        env:
+          NEW: ${{ steps.ver.outputs.new }}
         run: |
-          NEW="${{ steps.ver.outputs.new }}"
-          # Use python so we don't break on regex edge-cases that sed
-          # would mishandle (e.g. version strings containing dots).
-          python - <<PY
-          import pathlib, re
-          NEW = "$NEW"
+          python - <<'PY'
+          import os, pathlib, re
+          NEW = os.environ["NEW"]
           for p, pat in [
               ("cli.py", r'^(VERSION\s*=\s*)"[^"]+"'),
               ("pyproject.toml", r'^(version\s*=\s*)"[^"]+"'),
@@ -68,33 +78,23 @@ jobs:
           PY
 
       - name: Commit + tag + push
-        if: steps.ver.outputs.new != steps.ver.outputs.old
         env:
           NEW: ${{ steps.ver.outputs.new }}
           TAG: ${{ steps.ver.outputs.tag }}
         run: |
+          set -euo pipefail
           git config user.name  "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add cli.py pyproject.toml
           git commit -m "chore: bump version to $NEW [skip ci]"
-          git tag "$TAG"
+          git tag -a "$TAG" -m "Release $TAG"
           git push origin HEAD:main --follow-tags
 
       - name: Create GitHub Release
-        if: steps.ver.outputs.new != steps.ver.outputs.old
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG: ${{ steps.ver.outputs.tag }}
-          NEW: ${{ steps.ver.outputs.new }}
         run: |
           gh release create "$TAG" \
             --title "$TAG" \
-            --notes-from-tag \
-            --generate-notes \
-            || gh release create "$TAG" \
-                 --title "$TAG" \
-                 --generate-notes
-
-      - name: No-op message when version is already up to date
-        if: steps.ver.outputs.new == steps.ver.outputs.old
-        run: echo "::notice::cli.py / pyproject.toml already at ${{ steps.ver.outputs.new }} (manual bump or repeated trigger). No release created."
+            --generate-notes
