@@ -2790,14 +2790,17 @@ def _run_self_update() -> bool:
     """Best-effort `huntova update` invocation via subprocess so the
     parent doesn't try to overwrite its own running module. Returns
     True if the update appeared to succeed."""
-    import shutil
     import subprocess
-    pipx = shutil.which("pipx")
-    if not pipx:
+    # Reuse the same pipx-resolution logic as cmd_update so launch-time
+    # auto-update succeeds inside pipx-managed venvs (where pipx.exe
+    # itself isn't on PATH but `python -m pipx` from the base
+    # interpreter works fine).
+    argv = _resolve_pipx_argv()
+    if argv is None:
         return False
     spec = "git+https://github.com/enzostrano/huntova-public.git"
     try:
-        r = subprocess.run([pipx, "install", "--force", spec],
+        r = subprocess.run(argv + ["install", "--force", spec],
                            capture_output=True, timeout=180, text=True)
         return r.returncode == 0
     except Exception:
