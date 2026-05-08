@@ -2840,11 +2840,46 @@ def _maybe_prompt_update(force: bool = False) -> None:
     print()
 
 
+def _resolve_pipx_argv() -> list[str] | None:
+    """Return the argv prefix that runs pipx (e.g. ``["pipx"]`` or
+    ``["C:/.../python.exe", "-m", "pipx"]``), or None if pipx isn't
+    reachable.
+
+    When huntova is installed via pipx, ``shutil.which("pipx")`` from
+    inside the managed venv often returns None — pipx itself lives in
+    the user's *base* Python environment, not in huntova's venv. Falling
+    back to a base interpreter that has pipx importable handles that.
+    """
+    import shutil
+    import subprocess
+    if shutil.which("pipx"):
+        return ["pipx"]
+    candidates: list[str] = []
+    base = getattr(sys, "_base_executable", "") or ""
+    if base and Path(base).is_file() and base != sys.executable:
+        candidates.append(base)
+    for name in ("python3", "python", "py"):
+        w = shutil.which(name)
+        if w and w not in candidates and w != sys.executable:
+            candidates.append(w)
+    for py in candidates:
+        try:
+            r = subprocess.call(
+                [py, "-c", "import pipx"],
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            )
+        except Exception:
+            continue
+        if r == 0:
+            return [py, "-m", "pipx"]
+    return None
+
+
 def cmd_update(args: argparse.Namespace) -> int:
     """Self-upgrade. Pulls the latest from
     `enzostrano/huntova-public` via pipx (--force re-fetches even
     when the version string matches the cached spec). Falls back
-    to `pip install --user --upgrade` when pipx isn't available.
+    to `pip install --upgrade` when pipx isn't available.
     """
     import shutil
     import subprocess
@@ -2855,11 +2890,19 @@ def cmd_update(args: argparse.Namespace) -> int:
             return 0
         print(f"[huntova] you're on the latest ({latest or VERSION}).")
         return 0
-    if shutil.which("pipx"):
-        cmd = ["pipx", "install", "--force", _UPDATE_GIT_URL]
+    pipx_argv = _resolve_pipx_argv()
+    if pipx_argv is not None:
+        cmd = pipx_argv + ["install", "--force", _UPDATE_GIT_URL]
     elif shutil.which("pip"):
-        cmd = [sys.executable, "-m", "pip", "install", "--user",
+        # `pip install --user` is rejected inside a venv with "User
+        # site-packages are not visible in this virtualenv". Drop
+        # --user when sys.prefix differs from base_prefix (i.e. we are
+        # running inside a venv — including pipx's managed venv).
+        in_venv = sys.prefix != getattr(sys, "base_prefix", sys.prefix)
+        cmd = [sys.executable, "-m", "pip", "install",
                "--upgrade", "--force-reinstall", _UPDATE_GIT_URL]
+        if not in_venv:
+            cmd.insert(4, "--user")
     else:
         print("[huntova] neither pipx nor pip found — install pipx and re-run",
               file=sys.stderr)
