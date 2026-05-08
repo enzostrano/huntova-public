@@ -86,12 +86,17 @@ def _build_chain(bin_path: str, max_send: int, with_update: bool = True) -> str:
     HOME context (launchd Aqua sessions inherit GUI HOME, but
     System-domain agents under launchctl bootout edge cases set HOME
     to /var/empty)."""
-    update_step = f"{bin_path} update --check; " if with_update else ""
+    # Quote `bin_path` so accounts with spaces in $HOME (or in any
+    # absolute install path) don't split the command at the space:
+    #   /Users/My Name/.local/bin/huntova  -> the shell would otherwise
+    # try to run /Users/My with `Name/.local/bin/huntova ...` as args.
+    bp = f'"{bin_path}"'
+    update_step = f"{bp} update --check; " if with_update else ""
     return ('mkdir -p "$HOME/.local/share/huntova/logs"; '
             f"{update_step}"
-            f"{bin_path} sequence run --max {max_send}; "
-            f"{bin_path} inbox check; "
-            f"{bin_path} pulse --since 1d")
+            f"{bp} sequence run --max {max_send}; "
+            f"{bp} inbox check; "
+            f"{bp} pulse --since 1d")
 
 
 # ── per-OS emitters ────────────────────────────────────────────────
