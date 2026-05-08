@@ -2938,7 +2938,12 @@ def cmd_update(args: argparse.Namespace) -> int:
         return 1
     print(f"[huntova] running: {' '.join(cmd)}")
     try:
-        rc = subprocess.call(cmd)
+        # Merge child's stderr into stdout so PowerShell doesn't wrap
+        # pipx's progress output ("creating virtual environment...",
+        # "installing huntova from spec ...") as NativeCommandError
+        # ErrorRecords. PS 5.1's $ErrorActionPreference='Stop' callers
+        # would otherwise abort on benign progress chatter.
+        rc = subprocess.call(cmd, stderr=subprocess.STDOUT)
     except KeyboardInterrupt:
         return 130
     # Bust the cached "latest" so the next launch immediately sees
