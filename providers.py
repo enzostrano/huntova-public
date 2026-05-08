@@ -215,7 +215,24 @@ class _OpenAICompatibleProvider:
             "timeout": timeout_s,
         }
         if response_format:
-            kwargs["response_format"] = response_format
+            rf = response_format
+            # LM Studio's strict validator rejects the legacy
+            # response_format={"type":"json_object"}, accepting only
+            # "text" or "json_schema". Translate transparently for local
+            # / custom OpenAI-compatible servers so every json_object
+            # call site keeps working unchanged.
+            if (isinstance(rf, dict)
+                and rf.get("type") == "json_object"
+                and getattr(self, "name", "") in _LOCAL_PROVIDERS + ("custom",)):
+                rf = {
+                    "type": "json_schema",
+                    "json_schema": {
+                        "name": "huntova_json",
+                        "strict": False,
+                        "schema": {"type": "object", "additionalProperties": True},
+                    },
+                }
+            kwargs["response_format"] = rf
         resp = self._client.chat.completions.create(**kwargs)
         # a240: stash real token usage from the OpenAI-compatible
         # response shape (`resp.usage.prompt_tokens` /
@@ -237,7 +254,13 @@ class _OpenAICompatibleProvider:
                 self._last_usage = None
         except Exception:
             self._last_usage = None
-        return resp.choices[0].message.content or ""
+        msg = resp.choices[0].message
+        # Qwen-style "thinking" models served via LM Studio sometimes
+        # put the entire reply (including the final JSON) into
+        # `reasoning_content` and leave `content` empty. Fall back so
+        # downstream JSON parsing keeps working.
+        return (getattr(msg, "content", None) or "").strip() \
+            or (getattr(msg, "reasoning_content", None) or "")
 
 
 class GeminiProvider(_OpenAICompatibleProvider):
