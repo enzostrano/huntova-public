@@ -264,10 +264,18 @@ def _watch_loop(token: str, allowed: set[int], *, verbose: bool = False) -> int:
     def _on_term(*_):
         _stop["flag"] = True
         sys.stderr.write("\n[remote] shutting down…\n")
+    # Register SIGINT (Ctrl+C) and SIGTERM separately. On Windows,
+    # signal.signal(SIGTERM, ...) raises ValueError — SIGTERM exists
+    # but can't have a handler installed. The previous combined try
+    # block would raise on the SIGTERM line and silently skip SIGINT
+    # registration, breaking Ctrl+C as well.
+    try:
+        signal.signal(signal.SIGINT, _on_term)
+    except (ValueError, AttributeError, OSError):
+        pass
     try:
         signal.signal(signal.SIGTERM, _on_term)
-        signal.signal(signal.SIGINT, _on_term)
-    except Exception:
+    except (ValueError, AttributeError, OSError):
         pass
 
     try:
@@ -521,15 +529,60 @@ def _cmd_status(args: argparse.Namespace) -> int:
     if pid_p.exists():
         try:
             pid = int(pid_p.read_text("utf-8").strip())
-            os.kill(pid, 0)
-            print(f"Running: yes (PID {pid})")
         except Exception:
+            pid = -1
+        if _pid_alive(pid):
+            print(f"Running: yes (PID {pid})")
+        else:
             print("Running: no (stale PID file)")
             try: pid_p.unlink()
             except Exception: pass
     else:
         print("Running: no")
     return 0
+
+
+def _pid_alive(pid: int) -> bool:
+    """Cross-platform "is this PID currently running?" probe.
+
+    Unix uses signal 0 (no-op signal) which exists only to test for
+    the process. Windows has no signal 0 — `os.kill(pid, 0)` raises
+    OSError unconditionally there, which the previous code path caught
+    and reported as "stale PID file", *then deleted the PID file*.
+    Net effect: `huntova remote status` always claimed the bot was
+    dead on Windows even when it was happily long-polling, and broke
+    `remote stop` since the PID file was gone by the time stop ran.
+    """
+    if pid <= 0:
+        return False
+    if os.name == "nt":
+        try:
+            import ctypes
+            PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+            STILL_ACTIVE = 259
+            kernel32 = ctypes.windll.kernel32
+            h = kernel32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, pid)
+            if not h:
+                return False
+            try:
+                exit_code = ctypes.c_ulong(0)
+                ok = kernel32.GetExitCodeProcess(h, ctypes.byref(exit_code))
+                return bool(ok) and exit_code.value == STILL_ACTIVE
+            finally:
+                kernel32.CloseHandle(h)
+        except Exception:
+            return False
+    try:
+        os.kill(pid, 0)
+        return True
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        # PID exists, owned by another user; we can't signal it but
+        # the process is alive — don't report it as stale.
+        return True
+    except Exception:
+        return False
 
 
 def _cmd_stop(args: argparse.Namespace) -> int:
