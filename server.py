@@ -3684,10 +3684,11 @@ async def api_setup_status():
 async def api_setup_detect_local():
     """Re-probe localhost for running local AI servers (Ollama, LM
     Studio, llamafile). Called from the setup wizard's `↻ Re-detect`
-    button after the user starts a server during setup."""
+    button after the user starts a server during setup. Bypasses the
+    detect_local_servers() cache so the button reflects current state."""
     try:
         from providers import detect_local_servers
-        return {"ok": True, "detected": detect_local_servers()}
+        return {"ok": True, "detected": detect_local_servers(force_refresh=True)}
     except Exception as e:
         return JSONResponse({"ok": False, "error": f"{type(e).__name__}"}, status_code=500)
 
@@ -4254,6 +4255,55 @@ async def api_chat(request: Request, response: Response, user: dict = Depends(re
             # If the settings read fails for any reason, don't block —
             # better to let the hunt run than to soft-lock the user.
             pass
+
+    # ── Centralized preflight gate. Every action with declared
+    # requirements in preflight.FEATURE_REQUIREMENTS goes through
+    # validate_action() before dispatch. On gap, return a structured
+    # `settings_required` envelope that the chat UI renders as
+    # clickable cards. The earlier wizard_missing branch (line ~4240)
+    # is the legacy ICP-only check; preflight is the general safety
+    # net covering AI keys, SMTP, IMAP, leads, etc. ──
+    try:
+        from preflight import validate_action as _hv_preflight
+        _preflight_action_map = {
+            "start_hunt": "hunt",
+            "spawn_agents": "hunt",
+            "research": "research",
+            "compose": "compose",
+            "sequence_run": "sequence_run",
+            "outreach_send": "outreach_send",
+            "inbox_check": "inbox_check",
+            "inbox_watch": "inbox_watch",
+            "doctor_email": "doctor_email",
+            "pulse": "pulse",
+            "show_pulse": "pulse",
+            "teach": "teach",
+        }
+        _hv_slug = _preflight_action_map.get(act)
+        if _hv_slug:
+            _hv_check = _hv_preflight(
+                _hv_slug,
+                user_id=user.get("id"),
+                dry_run=bool(parsed.get("dry_run")),
+            )
+            if not _hv_check["ok"]:
+                _hv_missing = _hv_check["missing"]
+                _hv_labels = [m["label"].lower() for m in _hv_missing]
+                if len(_hv_missing) == 1:
+                    _hv_text = f"Quick setup needed before I can do that — {_hv_labels[0]}."
+                else:
+                    _hv_text = f"A few things missing before I can run this: {', '.join(_hv_labels)}."
+                return await _persist_chat_reply({
+                    "action": "settings_required",
+                    "for_action": _hv_slug,
+                    "missing": _hv_missing,
+                    "text": _hv_text,
+                    "meta": _chat_meta,
+                })
+    except ImportError:
+        # preflight module not deployed yet — fall through to old behavior
+        # (no preflight, individual actions handle their own gating).
+        pass
 
     # ── server-side actions: execute inline + return a `done` envelope ──
     try:
@@ -4920,7 +4970,8 @@ async def api_chat(request: Request, response: Response, user: dict = Depends(re
     # a239: `wizard_missing` added so the chat-first UI can render its
     # CTA for the wizard-guard pre-flight injected above.
     _CHAT_CLIENT_ACTIONS = {"start_hunt", "answer", "done", "navigate",
-                            "spawn_agents", "list_leads", "wizard_missing"}
+                            "spawn_agents", "list_leads", "wizard_missing",
+                            "settings_required"}
     try:
         if not isinstance(parsed, dict) or parsed.get("action") not in _CHAT_CLIENT_ACTIONS:
             parsed = {"action": "answer",

@@ -237,6 +237,17 @@ def _cmd_pulse(args: argparse.Namespace) -> int:
     user_id = _bootstrap_local_env()
     if user_id is None:
         return 1
+    # Centralized preflight — pulse needs leads to summarize over and
+    # an AI provider to write the summary.
+    try:
+        import sys as _sys
+        from preflight import validate_action, format_missing_for_cli
+        _hv = validate_action("pulse", user_id=user_id)
+        if not _hv["ok"]:
+            _sys.stderr.write(format_missing_for_cli(_hv["missing"]))
+            return 2
+    except ImportError:
+        pass
     since = _parse_since(getattr(args, "since", "7d"))
     p = asyncio.run(_compute(user_id, since))
     if getattr(args, "json", False):

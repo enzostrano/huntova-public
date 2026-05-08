@@ -278,6 +278,19 @@ def cmd_teach(args: argparse.Namespace) -> int:
     from cli import _bootstrap_local_env
     user_id = _bootstrap_local_env()
     if user_id is None: return 1
+    # Centralized preflight — needs an AI provider for ICP refinement
+    # and at least one lead to teach against. Skip the gate for `status`
+    # (read-only inspection).
+    if (getattr(args, "teach_cmd", None) or "").strip() != "status":
+        try:
+            import sys as _sys
+            from preflight import validate_action, format_missing_for_cli
+            _hv = validate_action("teach", user_id=user_id)
+            if not _hv["ok"]:
+                _sys.stderr.write(format_missing_for_cli(_hv["missing"]))
+                return 2
+        except ImportError:
+            pass
     if (getattr(args, "teach_cmd", None) or "").strip() == "status":
         return _cmd_status(user_id, args)
     if getattr(args, "import_path", None):

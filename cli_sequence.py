@@ -430,6 +430,19 @@ def _cmd_run(args: argparse.Namespace) -> int:
     user_id = _bootstrap_local_env()
     if user_id is None:
         return 1
+    # Centralized preflight — sequence run needs SMTP + leads. The
+    # legacy SMTP check below stays as a backstop; preflight produces
+    # a clearer message with a dashboard URL.
+    try:
+        import sys as _sys
+        from preflight import validate_action, format_missing_for_cli
+        _hv = validate_action("sequence_run", user_id=user_id,
+                              dry_run=bool(getattr(args, "dry_run", False)))
+        if not _hv["ok"]:
+            _sys.stderr.write(format_missing_for_cli(_hv["missing"]))
+            return 2
+    except ImportError:
+        pass
     smtp_ok = all(__import__("os").environ.get(k) for k in ("SMTP_HOST", "SMTP_USER", "SMTP_PASSWORD"))
     if not smtp_ok and not args.dry_run:
         # Try DB-bridged settings (mirrors cmd_outreach in cli.py).

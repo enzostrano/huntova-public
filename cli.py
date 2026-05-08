@@ -3114,6 +3114,15 @@ def cmd_research(args: argparse.Namespace) -> int:
     user_id = _bootstrap_local_env()
     if user_id is None:
         return 1
+    # Centralized preflight — needs an AI provider for the research call.
+    try:
+        from preflight import validate_action, format_missing_for_cli
+        _hv = validate_action("research", user_id=user_id)
+        if not _hv["ok"]:
+            sys.stderr.write(format_missing_for_cli(_hv["missing"]))
+            return 2
+    except ImportError:
+        pass
     import asyncio as _aio
     import db as _db
     try:
@@ -5347,6 +5356,18 @@ def cmd_chat(args: argparse.Namespace) -> int:
     """
     os.environ.setdefault("APP_MODE", "local")
     _hydrate_env_from_local_config()
+    # Centralized preflight — chat just needs an AI provider; everything
+    # else (SMTP, IMAP, ICP) gates per-action when the user issues
+    # commands that depend on them. Surfaces the missing key with a
+    # dashboard URL the user can click instead of a cryptic stack trace.
+    try:
+        from preflight import validate_action, format_missing_for_cli
+        _hv = validate_action("chat")
+        if not _hv["ok"]:
+            sys.stderr.write(format_missing_for_cli(_hv["missing"]))
+            return 2
+    except ImportError:
+        pass
 
     try:
         from tui import bold, cyan, dim, green, red, yellow
@@ -5668,6 +5689,18 @@ def cmd_hunt(args: argparse.Namespace) -> int:
     """
     os.environ.setdefault("APP_MODE", "local")
     _hydrate_env_from_local_config()
+    # Centralized preflight — surfaces missing AI provider key + ICP
+    # profile before any AI/network work. Replaces the bespoke key
+    # check below for users running fresh installs; the legacy check
+    # stays as a backstop for unusual configs.
+    try:
+        from preflight import validate_action, format_missing_for_cli
+        _hv = validate_action("hunt", dry_run=bool(getattr(args, "dry_run", False)))
+        if not _hv["ok"]:
+            sys.stderr.write(format_missing_for_cli(_hv["missing"]))
+            return 2
+    except ImportError:
+        pass
     # Use the canonical provider resolver — it looks in env (any of the 13
     # supported providers), config.toml, and the OS keychain. The legacy
     # check only looked at HV_{GEMINI,ANTHROPIC,OPENAI}_KEY env vars and
@@ -6438,6 +6471,18 @@ def cmd_outreach(args: argparse.Namespace) -> int:
     user_id = _bootstrap_local_env()
     if user_id is None:
         return 1
+    # Centralized preflight — needs SMTP + at least one lead. dry_run
+    # relaxes the SMTP requirement (preview-only). The legacy SMTP
+    # check below still fires as a backstop for unusual env-var setups.
+    try:
+        from preflight import validate_action, format_missing_for_cli
+        _hv = validate_action("outreach_send", user_id=user_id,
+                              dry_run=bool(getattr(args, "dry_run", False)))
+        if not _hv["ok"]:
+            sys.stderr.write(format_missing_for_cli(_hv["missing"]))
+            return 2
+    except ImportError:
+        pass
     import asyncio as _asyncio
     import db as _db
 

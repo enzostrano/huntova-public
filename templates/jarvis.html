@@ -358,6 +358,20 @@ body.hv-reduced-motion .bg-orbs span{animation:none !important;display:none}
   text-decoration:none;box-shadow:var(--hv-glow-soft);transition:box-shadow .15s, transform .12s}
 .wiz-cta .wiz-go:hover{box-shadow:var(--hv-glow);transform:translateY(-1px)}
 
+/* settings_required action — clickable cards per missing setting */
+.settings-required-cards{display:flex;flex-direction:column;gap:8px;margin-top:10px}
+.settings-required-card{display:flex;align-items:center;justify-content:space-between;gap:14px;
+  padding:11px 14px;border-radius:10px;
+  background:rgba(255,180,84,.06);border:1px solid rgba(255,180,84,.25);
+  cursor:pointer;text-decoration:none;color:inherit;
+  transition:background .15s ease,border-color .15s ease}
+.settings-required-card:hover{background:rgba(255,180,84,.10);border-color:rgba(255,180,84,.45)}
+.settings-required-card .sr-label{font-weight:600;font-size:13.5px;color:#eef0f5;margin-bottom:2px}
+.settings-required-card .sr-reason{font-size:12px;color:#9aa0ad;line-height:1.45}
+.settings-required-card .sr-cta{flex-shrink:0;padding:5px 11px;border-radius:6px;
+  background:#ffb454;color:#0a0e18;font-weight:600;font-size:11px;
+  letter-spacing:.05em;text-transform:uppercase}
+
 .dock-wrap{display:flex;flex-direction:column;gap:8px;flex-shrink:0}
 .dock{position:relative;display:flex;align-items:flex-end;gap:12px;
   padding:14px 18px;border-radius:18px;
@@ -2364,6 +2378,14 @@ body.hv-has-update-banner{padding-top:var(--hv-update-banner-h, 38px)}
       return { prefix: '🚀 Launching hunt.', text: c + ' · cap ' + m + '. Switching to Agent.' };
     }
     if (action === 'wizard_missing') return { prefix: '⚠', text: text || 'Setup wizard not complete.' };
+    if (action === 'settings_required') {
+      // Centralized preflight reply — surfaces every missing prerequisite
+      // for a feature (AI key, ICP, SMTP, IMAP, leads). The cards built
+      // in the action handler below let the user click straight to the
+      // right Settings section. Prefix '⚙' marks "config needed" so it
+      // doesn't get confused with a hard error or a wizard CTA.
+      return { prefix: '⚙', text: text || 'Some settings are missing before I can run this.' };
+    }
     if (action === 'navigate') {
       const map = { leads:'leads', hunts:'hunts', agent:'agent', settings:'settings',
                     wizard:'settings', providers:'settings' };
@@ -2607,6 +2629,52 @@ body.hv-has-update-banner{padding-top:var(--hv-update-banner-h, 38px)}
           link.textContent = '🧠 Open the brain →';
         }
       }, 30);
+    }
+    if (action === 'settings_required') {
+      // Render each missing setting as a clickable card. Clicking the
+      // card switches to the relevant in-app view (settings / brain /
+      // leads) so the user can fix the gap without leaving the chat.
+      const missing = (result && result.missing) || [];
+      const wrap = document.createElement('div');
+      wrap.className = 'settings-required-cards';
+      missing.forEach((m) => {
+        const card = document.createElement('a');
+        card.className = 'settings-required-card';
+        card.href = m.nav_url || '/setup';
+        const title = document.createElement('div');
+        title.className = 'sr-label';
+        title.textContent = m.label || m.key || 'Setting';
+        const reason = document.createElement('div');
+        reason.className = 'sr-reason';
+        reason.textContent = m.reason || '';
+        const left = document.createElement('div');
+        left.appendChild(title); left.appendChild(reason);
+        const cta = document.createElement('span');
+        cta.className = 'sr-cta';
+        cta.textContent = m.nav_label || 'Fix';
+        card.appendChild(left);
+        card.appendChild(cta);
+        // Map nav_url → in-app view so we don't leave the chat. Anything
+        // not in the map falls through to a plain link click (full-page
+        // navigation), which is the right fallback for unknown URLs.
+        const navMap = {
+          '/setup#providers': 'settings',
+          '/setup#icp': 'brain',
+          '/setup#smtp': 'settings',
+          '/setup#imap': 'settings',
+          '/setup': 'settings',
+          '/leads': 'leads',
+        };
+        const target = navMap[m.nav_url];
+        if (target) {
+          card.addEventListener('click', (e) => {
+            e.preventDefault();
+            setView(target);
+          });
+        }
+        wrap.appendChild(card);
+      });
+      extras = [ wrap ];
     }
     appendBotPrefixed(desc.prefix, desc.text, _now(), meta, extras);
     // a287 fix: spawn_agents was a dead claim — chat returned the

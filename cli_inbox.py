@@ -591,6 +591,17 @@ def _cmd_check(args: argparse.Namespace) -> int:
     user_id = _bootstrap_local_env()
     if user_id is None:
         return 1
+    # Centralized preflight — inbox check needs IMAP creds + an AI
+    # provider for reply classification.
+    try:
+        import sys as _sys
+        from preflight import validate_action, format_missing_for_cli
+        _hv = validate_action("inbox_check", user_id=user_id)
+        if not _hv["ok"]:
+            _sys.stderr.write(format_missing_for_cli(_hv["missing"]))
+            return 2
+    except ImportError:
+        pass
     res = asyncio.run(_scan_inbox(user_id, since_days=int(args.since or 14), dry_run=bool(args.dry_run)))
     if not res.get("ok"):
         print(_red(res.get("error", "scan failed")), file=sys.stderr); return 1
@@ -623,6 +634,16 @@ def _cmd_watch(args: argparse.Namespace) -> int:
     user_id = _bootstrap_local_env()
     if user_id is None:
         return 1
+    # Centralized preflight — watch loops on inbox_check, same deps.
+    try:
+        import sys as _sys
+        from preflight import validate_action, format_missing_for_cli
+        _hv = validate_action("inbox_watch", user_id=user_id)
+        if not _hv["ok"]:
+            _sys.stderr.write(format_missing_for_cli(_hv["missing"]))
+            return 2
+    except ImportError:
+        pass
     interval = max(60, int(args.interval or 300))
     print(f"{_bold('huntova inbox watch')} — polling every {interval}s. Ctrl-C to stop.")
     while True:
