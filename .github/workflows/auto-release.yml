@@ -2,15 +2,11 @@ name: Auto bump version and release
 
 # Every push to main:
 #   1. Read VERSION from cli.py (e.g. "0.1.0a2012")
-#   2. Increment the alpha-N suffix by 1 -> "0.1.0a2013"
+#   2. Increment alpha-N until we land on a tag that doesn't exist yet
+#      (defensive against races where two pushes land in quick
+#      succession and the second push reads a stale VERSION).
 #   3. Rewrite cli.py + pyproject.toml
-#   4. Commit with [skip ci] (also: GITHUB_TOKEN pushes don't re-trigger
-#      workflows, belt-and-suspenders), tag, push, create Release.
-#
-# Why increment from existing VERSION rather than `git rev-list --count`:
-# this repo is a curated public mirror; the alpha-N suffix tracks the
-# parent project's release counter (~2012), not the public history's
-# commit count (14 at time of writing).
+#   4. Commit with [skip ci], tag, push, create Release.
 
 on:
   push:
@@ -33,7 +29,7 @@ jobs:
           fetch-depth: 0
           persist-credentials: true
 
-      - name: Compute new version (increment alpha-N)
+      - name: Compute new version (skip existing tags)
         id: ver
         run: |
           set -euo pipefail
@@ -45,16 +41,27 @@ jobs:
           fi
           BASE="${BASH_REMATCH[1]}"
           N="${BASH_REMATCH[2]}"
-          NEW="${BASE}a$((N+1))"
-          TAG="v$NEW"
-          if git rev-parse "$TAG" >/dev/null 2>&1; then
-            echo "::error::Tag $TAG already exists; manual intervention needed."
+          # Increment until we find a free tag — handles the race where
+          # two pushes overlap and the second sees a stale VERSION (e.g.
+          # because a code edit via the GitHub API reverted the bump
+          # commit's version line).
+          for _ in $(seq 1 50); do
+            N=$((N+1))
+            CANDIDATE="${BASE}a${N}"
+            if ! git rev-parse "v${CANDIDATE}" >/dev/null 2>&1; then
+              NEW="$CANDIDATE"
+              break
+            fi
+          done
+          if [[ -z "${NEW:-}" ]]; then
+            echo "::error::No free tag found in 50 increments — manual intervention needed."
             exit 1
           fi
+          TAG="v$NEW"
           echo "old=$OLD"  >> "$GITHUB_OUTPUT"
           echo "new=$NEW"  >> "$GITHUB_OUTPUT"
           echo "tag=$TAG"  >> "$GITHUB_OUTPUT"
-          echo "::notice::Version bump: $OLD -> $NEW"
+          echo "::notice::Version bump: $OLD -> $NEW (tag $TAG)"
 
       - name: Bump cli.py + pyproject.toml
         env:
