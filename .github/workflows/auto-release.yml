@@ -101,7 +101,19 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG: ${{ steps.ver.outputs.tag }}
+        # Idempotent: if the tag was pushed in a prior attempt but
+        # `gh release create` failed (network blip, rate limit), the
+        # next run's tag-existence check would skip past this version
+        # and the release would be permanently missing. Detect the
+        # already-exists case and edit-in-place so the release always
+        # shows up exactly once.
         run: |
-          gh release create "$TAG" \
-            --title "$TAG" \
-            --generate-notes
+          set -euo pipefail
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "::notice::Release $TAG already exists — refreshing notes"
+            gh release edit "$TAG" --draft=false --generate-notes
+          else
+            gh release create "$TAG" \
+              --title "$TAG" \
+              --generate-notes
+          fi
