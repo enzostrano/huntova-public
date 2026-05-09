@@ -125,7 +125,48 @@ def _safe_urlopen(req, timeout=8):
     with _lock:
         _sock.getaddrinfo = _pinned_getaddrinfo
         try:
-            return _safe_opener.open(req, timeout=timeout)
+            # Tiny retry loop with exponential backoff for transient
+            # outbound failures (Slack 429, Discord 5xx, Twilio rate-
+            # limit). Without this, every webhook plugin's bare
+            # `except Exception: pass` silently dropped the message
+            # on the first hiccup, producing invisible delivery loss
+            # under normal cloud-provider behavior.
+            import time as _time
+            import urllib.error as _uerr
+            _last_exc: Exception | None = None
+            for _attempt in range(3):
+                try:
+                    _resp = _safe_opener.open(req, timeout=timeout)
+                    _status = getattr(_resp, "status", None) or _resp.getcode()
+                    if _status in (429, 502, 503, 504) and _attempt < 2:
+                        try:
+                            _ra = float(_resp.headers.get("Retry-After") or 0)
+                        except (TypeError, ValueError):
+                            _ra = 0.0
+                        try: _resp.read(0)
+                        except Exception: pass
+                        _time.sleep(max(_ra, 0.5 * (2 ** _attempt)))
+                        continue
+                    return _resp
+                except _uerr.HTTPError as _e:
+                    if _e.code in (429, 502, 503, 504) and _attempt < 2:
+                        try:
+                            _ra = float(_e.headers.get("Retry-After") or 0)
+                        except (TypeError, ValueError):
+                            _ra = 0.0
+                        _time.sleep(max(_ra, 0.5 * (2 ** _attempt)))
+                        _last_exc = _e
+                        continue
+                    raise
+                except (TimeoutError, _uerr.URLError, ConnectionError) as _e:
+                    if _attempt < 2:
+                        _time.sleep(0.5 * (2 ** _attempt))
+                        _last_exc = _e
+                        continue
+                    raise
+            if _last_exc is not None:
+                raise _last_exc
+            raise RuntimeError("retry loop exited without returning")
         finally:
             _sock.getaddrinfo = _orig_getaddrinfo
 from datetime import datetime, timezone

@@ -6,6 +6,19 @@ Versioning: `0.1.0aNN` alpha increments. Public install path: `pipx install hunt
 
 ---
 
+## v0.1.0a2038 -- May 9 2026 -- webhook plugin retry/backoff
+
+### Bug fixes -- bundled plugins
+
+- **Slack / Discord / Telegram / WhatsApp / generic webhook plugins silently dropped messages on transient failures** (`bundled_plugins.py:_safe_urlopen`). Each plugin's `post_save` wrapped `_safe_urlopen` in a bare `except Exception: pass`, so a single 429 (Slack burst limit), 5xx (Discord transient), or `URLError` (network blip) lost the lead notification with no retry. The fix lives in `_safe_urlopen` itself so every plugin that uses it gets retry for free: 3 attempts with `0.5s, 1.0s, 2.0s` exponential backoff, honoring `Retry-After` headers on 429/503/504. Permanent errors (4xx other than 429, malformed responses) still raise on the first attempt -- no waste-of-time retries.
+
+### Tests
+
+Pytest baseline pending re-run.
+
+
+---
+
 ## v0.1.0a2037 -- May 9 2026 -- admin endpoint hardening + Windows ACL on secrets
 
 ### Bug fixes -- admin endpoints
