@@ -6,6 +6,20 @@ Versioning: `0.1.0aNN` alpha increments. Public install path: `pipx install hunt
 
 ---
 
+## v0.1.0a2033 -- May 9 2026 -- Stripe checkout idempotency + partial-refund classification
+
+### Bug fixes -- payments
+
+- **Stripe checkout creation sent no Idempotency-Key** (`payments.py:_stripe`, `create_checkout`). A double-clicked Upgrade button or a network-stutter retry within seconds minted two distinct Stripe checkout sessions; both could complete and both could fire `checkout.session.completed` webhooks, double-applying credits if the de-dupe at the webhook side ever lost. Now `_stripe()` accepts an optional `idempotency_key` and `create_checkout` passes one bucketed per `(user_id, product_id, minute)`. Stripe returns the SAME session for retries inside the same 60s window.
+- **`charge.refunded` handler treated partial and full refunds identically** (`payments.py:403`). The admin alert email said only "refunded X currency" without comparison to the original charge amount, leaving operators unable to tell whether a customer was made whole or merely partially. Now the handler reads `charge.amount`, computes whether the refund is PARTIAL or FULL, and surfaces that explicitly in the admin alert subject + body. Behavior unchanged for the credit ledger; this is a visibility fix.
+
+### Tests
+
+Pytest baseline pending re-run (no changes to existing logic — Idempotency-Key is purely defensive; refund delta is additive).
+
+
+---
+
 ## v0.1.0a2032 -- May 9 2026 -- SSRF gate on sitemap + oEmbed video metadata
 
 ### Security fixes -- SSRF gate bypass on oEmbed + sitemap fetches

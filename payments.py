@@ -67,11 +67,18 @@ PRODUCTS = {
 }
 
 
-def _stripe(method, endpoint, **kwargs):
+def _stripe(method, endpoint, *, idempotency_key: str | None = None, **kwargs):
     if not STRIPE_SECRET:
         raise RuntimeError("Stripe not configured")
     url = f"{STRIPE_API}/{endpoint}"
     headers = {"Authorization": f"Bearer {STRIPE_SECRET}"}
+    # Stripe officially recommends an Idempotency-Key on every POST so
+    # a double-clicked checkout doesn't mint two sessions, and a
+    # network blip during a retry doesn't apply a charge twice. GETs
+    # are naturally idempotent so the header is only meaningful on
+    # mutating verbs.
+    if idempotency_key and method != "GET":
+        headers["Idempotency-Key"] = idempotency_key
     if method == "GET":
         r = _req.get(url, headers=headers, params=kwargs, timeout=15)
     else:
@@ -117,7 +124,17 @@ async def create_checkout(user_id: int, product_id: str) -> dict:
         params["subscription_data[metadata][product_id]"] = product_id
 
     import asyncio
-    result = await asyncio.to_thread(_stripe, "POST", "checkout/sessions", **params)
+    # Idempotency-Key bucketed per (user, product, 60s window): a
+    # double-clicked "Upgrade" button or a network-stutter retry
+    # within one minute returns the SAME checkout session instead of
+    # minting two. Wider window would be wrong (legitimate "I want to
+    # try a different plan" within minutes); shorter is fine but 60s
+    # covers retry storms.
+    import time as _time
+    _idem = f"checkout:{user_id}:{product_id}:{int(_time.time() // 60)}"
+    result = await asyncio.to_thread(
+        _stripe, "POST", "checkout/sessions", idempotency_key=_idem, **params
+    )
     if not result.get("url"):
         raise RuntimeError("Stripe did not return a checkout URL")
     return {"url": result["url"], "session_id": result.get("id", "")}
@@ -403,6 +420,18 @@ async def _dispatch_webhook_event(event: dict, event_type: str, event_id: str) -
     if event_type == "charge.refunded":
         charge = event.get("data", {}).get("object", {})
         amount_refunded = charge.get("amount_refunded", 0)
+        # Original charge amount, for partial- vs full-refund classification.
+        # `amount` on a Stripe Charge is the captured amount in the smallest
+        # currency unit. Without comparing, the previous version treated a
+        # 10 EUR partial refund identically to a 49 EUR full one — same
+        # admin alert, same zero-credit ledger entry — leaving operators
+        # without visibility into whether the customer was made whole.
+        charge_amount = charge.get("amount", 0)
+        is_partial = (
+            isinstance(charge_amount, int)
+            and isinstance(amount_refunded, int)
+            and 0 < amount_refunded < charge_amount
+        )
         currency = charge.get("currency", "")
         receipt_email = charge.get("receipt_email") or charge.get("billing_details", {}).get("email", "")
         charge_id = charge.get("id", "")
@@ -438,8 +467,10 @@ async def _dispatch_webhook_event(event: dict, event_type: str, event_id: str) -
             from config import ADMIN_EMAILS
             import email_service
             if ADMIN_EMAILS and email_service.is_email_configured():
-                _subj = f"[Huntova] Stripe refund {charge_id}"
-                _body = (f"Stripe refunded {amount_refunded} {currency} on charge {charge_id}.\n\n"
+                _refund_kind = "PARTIAL" if is_partial else "FULL"
+                _subj = f"[Huntova] Stripe refund {charge_id} ({_refund_kind})"
+                _body = (f"Stripe refunded {amount_refunded} {currency} on charge {charge_id}.\n"
+                         f"Original charge amount: {charge_amount} {currency} -> {_refund_kind}.\n\n"
                          f"User: {target_user.get('email') if target_user else (receipt_email or 'unknown')}\n"
                          f"User ID: {target_user.get('id') if target_user else 'not found'}\n\n"
                          "ACTION: review credits + tier manually. Auto-deduction was not applied.")
