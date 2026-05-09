@@ -2131,16 +2131,37 @@ def fetch_video_metrics(page, video, return_url=""):
     url = video.get("url","")
     plat = video.get("platform","")
     try:
+        # Same SSRF gate the requests-based variant uses below: only
+        # accept https YouTube/Vimeo URLs and quote-escape them into
+        # the oEmbed query, so an attacker-served iframe with
+        # `src="http://10.0.0.1/admin"` can't have us proxy a LAN
+        # request through oEmbed.
+        from urllib.parse import quote as _u_quote
+        def _vmu_safe(u: str, hosts: tuple[str, ...]) -> str | None:
+            try:
+                p = urlparse(u)
+            except Exception:
+                return None
+            if p.scheme != "https":
+                return None
+            if not any(p.netloc.endswith(h) for h in hosts):
+                return None
+            return u
         if plat == "youtube" and url:
             # oEmbed first (fast, no page load)
-            try:
-                import urllib.request as _ur
-                _oe = _ur.urlopen(f"https://www.youtube.com/oembed?url={url}&format=json", timeout=5)
-                _od = json.loads(_oe.read().decode())
-                metrics["title"] = _od.get("title","")
-                metrics["channel"] = _od.get("author_name","")
-                metrics["thumbnail"] = _od.get("thumbnail_url","")
-            except Exception: pass
+            _safe = _vmu_safe(url, ("youtube.com", "youtu.be"))
+            if _safe:
+                try:
+                    import urllib.request as _ur
+                    _oe = _ur.urlopen(
+                        "https://www.youtube.com/oembed?url="
+                        + _u_quote(_safe, safe="") + "&format=json",
+                        timeout=5)
+                    _od = json.loads(_oe.read().decode())
+                    metrics["title"] = _od.get("title","")
+                    metrics["channel"] = _od.get("author_name","")
+                    metrics["thumbnail"] = _od.get("thumbnail_url","")
+                except Exception: pass
             # Visit page for view count + subscriber count
             try:
                 _page_op_start()
@@ -2164,15 +2185,20 @@ def fetch_video_metrics(page, video, return_url=""):
             v = metrics["view_count"]
             metrics["production_score"] = 5 if v > 1000000 else 4 if v > 100000 else 3 if v > 10000 else 2 if v > 1000 else 1
         elif plat == "vimeo" and url:
-            try:
-                import urllib.request as _ur
-                _oe = _ur.urlopen(f"https://vimeo.com/api/oembed.json?url={url}", timeout=5)
-                _od = json.loads(_oe.read().decode())
-                metrics["title"] = _od.get("title","")
-                metrics["channel"] = _od.get("author_name","")
-                metrics["thumbnail"] = _od.get("thumbnail_url","")
-                metrics["production_score"] = 3  # Vimeo = usually decent quality
-            except Exception: pass
+            _safe = _vmu_safe(url, ("vimeo.com",))
+            if _safe:
+                try:
+                    import urllib.request as _ur
+                    _oe = _ur.urlopen(
+                        "https://vimeo.com/api/oembed.json?url="
+                        + _u_quote(_safe, safe=""),
+                        timeout=5)
+                    _od = json.loads(_oe.read().decode())
+                    metrics["title"] = _od.get("title","")
+                    metrics["channel"] = _od.get("author_name","")
+                    metrics["thumbnail"] = _od.get("thumbnail_url","")
+                    metrics["production_score"] = 3  # Vimeo = usually decent quality
+                except Exception: pass
         elif plat in ("wistia","vidyard","brightcove"):
             metrics["production_score"] = 4  # Professional hosting = invested in video
             metrics["title"] = f"[{plat} hosted content]"
@@ -2456,6 +2482,15 @@ def extract_sitemap_urls(base_url):
     try:
         parsed = urlparse(base_url)
         sitemap_url = f"{parsed.scheme}://{parsed.netloc}/sitemap.xml"
+        # Gate on is_private_url + scheme allowlist before issuing the
+        # request — the SearXNG result origin can be hostile and an
+        # attacker-controlled `base_url` of `http://10.0.0.1/` would
+        # otherwise have us fetch the LAN sitemap and surface internal
+        # endpoints into the lead-extraction pipeline.
+        if parsed.scheme not in ("http", "https"):
+            return event_urls
+        if is_private_url(sitemap_url):
+            return event_urls
         r = requests.get(sitemap_url, timeout=8, headers={"User-Agent": USER_AGENT})
         if r.status_code == 200 and "<urlset" in r.text.lower():
             # Extract URLs matching event keywords
@@ -2739,12 +2774,39 @@ def deep_investigate(lead, page, base_url, page_text=""):
             dossier["video_embeds"] = vid_embeds[:5]
             platforms = list(set(v["platform"] for v in vid_embeds))
             emit_log(f"📹 Found {len(vid_embeds)} video embeds: {', '.join(platforms[:4])}", "ai")
-            # Enrich with YouTube metadata via oEmbed (non-blocking)
+            # Enrich with YouTube metadata via oEmbed (non-blocking).
+            # Validate vid["url"] is an https YouTube/Vimeo link before
+            # interpolating into oEmbed — otherwise an attacker-served
+            # iframe with `src="http://10.0.0.1/admin"` would have us
+            # ask oEmbed to crawl that LAN URL on our behalf, AND a
+            # 302 from oEmbed could lead the requests session to a
+            # private network. urllib.parse.quote also stops the embed
+            # URL from injecting `&format=html` and similar on the
+            # querystring.
+            from urllib.parse import quote as _u_quote
+            def _safe_video_url(vid_url: str, allowed_hosts: tuple[str, ...]) -> str | None:
+                try:
+                    p = urlparse(vid_url)
+                except Exception:
+                    return None
+                if p.scheme != "https":
+                    return None
+                if not any(p.netloc.endswith(h) for h in allowed_hosts):
+                    return None
+                return vid_url
             for vid in vid_embeds[:2]:
                 if vid["platform"] == "youtube":
+                    safe = _safe_video_url(vid.get("url", ""),
+                                           ("youtube.com", "youtu.be"))
+                    if not safe:
+                        continue
                     try:
-                        oembed_url = f"https://www.youtube.com/oembed?url={vid['url']}&format=json"
-                        r = requests.get(oembed_url, timeout=5)
+                        oembed_url = (
+                            "https://www.youtube.com/oembed?url="
+                            + _u_quote(safe, safe="") + "&format=json"
+                        )
+                        r = requests.get(oembed_url, timeout=5,
+                                         allow_redirects=False)
                         if r.status_code == 200:
                             meta = r.json()
                             vid["title"] = meta.get("title","")[:100]
@@ -2753,9 +2815,15 @@ def deep_investigate(lead, page, base_url, page_text=""):
                             emit_log(f"📹 YT: {vid['title'][:50]} by {vid['channel'][:30]}", "ai")
                     except Exception: pass
                 elif vid["platform"] == "vimeo":
+                    safe = _safe_video_url(vid.get("url", ""),
+                                           ("vimeo.com",))
+                    if not safe:
+                        continue
                     try:
-                        oembed_url = f"https://vimeo.com/api/oembed.json?url={vid['url']}"
-                        r = requests.get(oembed_url, timeout=5)
+                        oembed_url = ("https://vimeo.com/api/oembed.json?url="
+                                      + _u_quote(safe, safe=""))
+                        r = requests.get(oembed_url, timeout=5,
+                                         allow_redirects=False)
                         if r.status_code == 200:
                             meta = r.json()
                             vid["title"] = meta.get("title","")[:100]

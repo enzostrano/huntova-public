@@ -6,6 +6,20 @@ Versioning: `0.1.0aNN` alpha increments. Public install path: `pipx install hunt
 
 ---
 
+## v0.1.0a2032 -- May 9 2026 -- SSRF gate on sitemap + oEmbed video metadata
+
+### Security fixes -- SSRF gate bypass on oEmbed + sitemap fetches
+
+- **`extract_sitemap_urls(base_url)` issued requests without checking `is_private_url`** (`app.py:2453`). The `base_url` originates from a SearXNG result page and is therefore attacker-influenceable; a hostile result page advertising `http://10.0.0.1/` would have us fetch the LAN sitemap and surface internal URLs into the lead-extraction pipeline. Now gates on scheme allowlist (`http`, `https`) + `is_private_url(sitemap_url)` before issuing.
+- **YouTube/Vimeo oEmbed enrichment interpolated unvalidated `vid["url"]` into the oEmbed querystring** (`app.py:2138, 2169, 2755, 2766`). An attacker-served iframe with `src="http://10.0.0.1/admin"` would have us ask oEmbed to crawl that LAN URL on our behalf, AND a 302 from oEmbed could lead the requests session to a private network. Now: validate the URL is `https` + ends in `youtube.com|youtu.be|vimeo.com`, URL-encode it via `urllib.parse.quote`, and pass `allow_redirects=False` to the requests variant so a 302 to a private host can't pivot the session.
+
+### Tests
+
+Pytest baseline pending re-run.
+
+
+---
+
 ## v0.1.0a2031 -- May 9 2026 -- IMAP watch loop hardening + auto-reply detection
 
 ### Bug fixes -- inbox
