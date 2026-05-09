@@ -119,8 +119,14 @@ async def signup(email: str, password: str, display_name: str = "") -> dict:
     email = email.lower().strip()
     if not email or "@" not in email or len(email) < 5:
         raise ValueError("Invalid email address")
-    if len(password) < 6:
-        raise ValueError("Password must be at least 6 characters")
+    # 10 characters minimum: 6 was below NIST 800-63B guidance and
+    # offline-crackable in seconds against a leaked DB. Existing
+    # accounts with shorter passwords keep working at login (this gate
+    # only fires on new signup / change-password); they only need to
+    # rotate when they update their password. Don't raise further than
+    # 10 without a parallel migration plan.
+    if len(password) < 10:
+        raise ValueError("Password must be at least 10 characters")
 
     existing = await db.get_user_by_email(email)
     if existing:

@@ -2505,12 +2505,31 @@ def extract_sitemap_urls(base_url):
 def extract_whois_age(domain):
     """Estimate domain age from WHOIS-like signals (non-blocking best effort)."""
     try:
-        # Use Wayback Machine CDX API to check first archived date
+        # Use Wayback Machine CDX API to check first archived date.
+        # URL-encode `clean` so a domain string carrying `&` / `?` /
+        # spaces can't smuggle extra query params into the CDX URL,
+        # and stream the response with a 64 KB cap so a wedged or
+        # malicious CDX endpoint serving an unbounded body can't OOM
+        # the worker.
+        from urllib.parse import quote as _u_quote
         clean = domain.lower().replace("www.","")
-        r = requests.get(f"https://web.archive.org/cdx/search/cdx?url={clean}&output=json&limit=1&fl=timestamp",
-                        timeout=5, headers={"User-Agent": USER_AGENT})
-        if r.status_code == 200:
-            data = r.json()
+        cdx_url = ("https://web.archive.org/cdx/search/cdx?url="
+                   + _u_quote(clean, safe="") + "&output=json&limit=1&fl=timestamp")
+        with requests.get(cdx_url, timeout=5,
+                          headers={"User-Agent": USER_AGENT},
+                          stream=True) as r:
+            if r.status_code != 200:
+                return None
+            buf = bytearray()
+            _CAP = 65536  # 64 KB -- this endpoint should return ~100 bytes
+            for chunk in r.iter_content(chunk_size=8192):
+                if not chunk:
+                    break
+                buf.extend(chunk)
+                if len(buf) > _CAP:
+                    return None
+            import json as _j
+            data = _j.loads(buf.decode("utf-8", errors="replace") or "[]")
             if len(data) > 1 and isinstance(data[1], list) and len(data[1]) > 0:
                 ts = str(data[1][0])
                 year = int(ts[:4])

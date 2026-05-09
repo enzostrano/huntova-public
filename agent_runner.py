@@ -303,9 +303,15 @@ class AgentRunner:
         # — no clue anything went wrong.
         _final_ui_status = ("Idle — click START to run agent", "idle")
         try:
-            # Create run record (uses shared loop)
+            # Create run record (uses shared loop). Hard 10s timeout
+            # so a wedged DB pool doesn't pin the worker thread before
+            # the actual hunt even starts -- the queued user just sees
+            # an error log line instead of an indefinite "queued" state.
+            import asyncio as _asyncio_local
             try:
-                run_id = loop.run_until_complete(db.create_agent_run(user_id))
+                run_id = loop.run_until_complete(_asyncio_local.wait_for(
+                    db.create_agent_run(user_id), timeout=10
+                ))
                 ctx.run_id = run_id
             except Exception as _cr_err:
                 ctx.emit_log(f"create_agent_run failed: {_cr_err}", "warn")
@@ -336,7 +342,9 @@ class AgentRunner:
             _recipe_name = (getattr(ctx, "agent_config", None) or {}).get("recipe_name") or None
             if _recipe_name:
                 try:
-                    _rec = loop.run_until_complete(db.get_hunt_recipe(user_id, _recipe_name))
+                    _rec = loop.run_until_complete(_asyncio_local.wait_for(
+                        db.get_hunt_recipe(user_id, _recipe_name), timeout=10
+                    ))
                     _adapt = (_rec or {}).get("adaptation_json")
                     if isinstance(_adapt, str):
                         import json as _j
@@ -363,13 +371,17 @@ class AgentRunner:
                     import os as _os
                     _os.environ.pop("HV_RECIPE_ADAPTATION", None)
 
-            # Mark completed (shared loop)
+            # Mark completed (shared loop). Wrapped in wait_for so a
+            # wedged DB doesn't pin the worker thread post-hunt and
+            # block `_process_queue` from promoting the next user.
             try:
                 if run_id:
-                    loop.run_until_complete(db.update_agent_run(
-                        run_id, status="completed",
-                        leads_found=len(ctx.all_leads),
-                        ended_at=datetime.now(timezone.utc).isoformat()
+                    loop.run_until_complete(_asyncio_local.wait_for(
+                        db.update_agent_run(
+                            run_id, status="completed",
+                            leads_found=len(ctx.all_leads),
+                            ended_at=datetime.now(timezone.utc).isoformat()
+                        ), timeout=10
                     ))
             except Exception as _upd_err:
                 ctx.emit_log(f"mark_completed failed: {_upd_err}", "warn")
@@ -414,12 +426,17 @@ class AgentRunner:
                             pass
             except Exception:
                 pass
-            # Update run record (shared loop)
+            # Update run record (shared loop). Same 10s timeout as
+            # the success-path update_agent_run -- a wedged DB on the
+            # crash path was pinning workers permanently while the
+            # crash had already happened.
             try:
                 if run_id:
-                    loop.run_until_complete(db.update_agent_run(
-                        run_id, status="crashed",
-                        ended_at=datetime.now(timezone.utc).isoformat()
+                    loop.run_until_complete(_asyncio_local.wait_for(
+                        db.update_agent_run(
+                            run_id, status="crashed",
+                            ended_at=datetime.now(timezone.utc).isoformat()
+                        ), timeout=10
                     ))
             except Exception:
                 pass

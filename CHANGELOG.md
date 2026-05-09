@@ -6,6 +6,27 @@ Versioning: `0.1.0aNN` alpha increments. Public install path: `pipx install hunt
 
 ---
 
+## v0.1.0a2040 -- May 9 2026 -- password length, agent_runner DB timeouts, Wayback size cap
+
+### Bug fixes -- auth
+
+- **Minimum password length raised from 6 to 10** (`auth.py:122`, `server.py:2225, 2422, 2713`). NIST 800-63B guidance + the offline-crackable-in-seconds reality of 6-char passwords against a leaked DB. Existing accounts with shorter passwords keep working at login (this gate only fires on signup / change-password / reset-password); they only need to satisfy the new minimum when they next rotate.
+
+### Bug fixes -- agent runner
+
+- **Remaining `loop.run_until_complete(db.*)` calls had no timeout** (`agent_runner.py:308, 339, 369, 432`). A wedged DB pool (network blip, exhausted connections) would pin the worker thread forever -- starting create_agent_run, mid-run get_hunt_recipe, and post-run update_agent_run on both the success and crash paths. Wrapped each in `asyncio.wait_for(timeout=10)` matching the v2039 crash-email pattern. Worst case is a logged warning + faster slot recovery instead of indefinite block.
+
+### Bug fixes -- app
+
+- **`extract_whois_age` had no response-size cap and didn't URL-encode the domain** (`app.py:2505`). The Wayback Machine CDX endpoint should return ~100 bytes; a malicious or wedged endpoint serving an unbounded body would OOM the worker. Plus the unencoded `domain` could smuggle `&` / `?` into the query string. Now: `urllib.parse.quote(clean, safe="")` + streamed response with a 64 KB cap.
+
+### Tests
+
+Pytest baseline pending re-run.
+
+
+---
+
 ## v0.1.0a2039 -- May 9 2026 -- TrustedHost gate (local mode) + crash-email timeout
 
 ### Bug fixes -- security defense in depth

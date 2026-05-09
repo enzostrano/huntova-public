@@ -2222,8 +2222,8 @@ async def reset_password_submit(request: Request):
     body = await request.json()
     token = body.get("token", "")
     new_password = body.get("password", "")
-    if len(new_password) < 6:
-        return JSONResponse({"ok": False, "error": "Password must be at least 6 characters"}, status_code=400)
+    if len(new_password) < 10:
+        return JSONResponse({"ok": False, "error": "Password must be at least 10 characters"}, status_code=400)
     _verified = auth.verify_reset_token(token)
     if not _verified:
         return JSONResponse({"ok": False, "error": "Invalid or expired reset link. Request a new one."}, status_code=400)
@@ -2419,8 +2419,8 @@ async def change_password(request: Request, user: dict = Depends(require_user)):
     body = await request.json()
     current = body.get("current_password", "")
     new_pass = body.get("new_password", "")
-    if len(new_pass) < 6:
-        return JSONResponse({"ok": False, "error": "Password must be at least 6 characters"}, status_code=400)
+    if len(new_pass) < 10:
+        return JSONResponse({"ok": False, "error": "Password must be at least 10 characters"}, status_code=400)
     full_user = await db.get_user_by_id(user["id"])
     if full_user.get("password_hash"):
         if not auth.verify_password(current, full_user["password_hash"]):
@@ -2710,8 +2710,8 @@ button:disabled{{opacity:.4;cursor:not-allowed}}
 <div class="logo"><span class="a">Hunt</span><span class="b">ova</span></div>
 <h2>Set new password</h2>
 <form onsubmit="return doReset(event)">
-<label>New Password</label><input type="password" id="pw1" placeholder="At least 6 characters" required minlength="6">
-<label>Confirm Password</label><input type="password" id="pw2" placeholder="Repeat password" required minlength="6">
+<label>New Password</label><input type="password" id="pw1" placeholder="At least 10 characters" required minlength="10">
+<label>Confirm Password</label><input type="password" id="pw2" placeholder="Repeat password" required minlength="10">
 <button type="submit" id="rbtn">Reset Password</button>
 </form>
 <div class="msg" id="rmsg"></div>
