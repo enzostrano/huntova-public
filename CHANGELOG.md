@@ -6,6 +6,20 @@ Versioning: `0.1.0aNN` alpha increments. Public install path: `pipx install hunt
 
 ---
 
+## v0.1.0a2031 -- May 9 2026 -- IMAP watch loop hardening + auto-reply detection
+
+### Bug fixes -- inbox
+
+- **`huntova inbox watch` would auth-flood Gmail/O365 after a password rotation, locking the account** (`cli_inbox.py:_cmd_watch`). The poll loop caught all exceptions identically and re-tried at the configured interval (60-300s), so a wrong password produced an indefinite `LOGIN FAILED` storm against the IMAP server until the provider's automated fraud system suspended the account. Now: detect "AUTHENTICATIONFAILED" / "login failed" / "invalid credentials" in the error string and **abort the loop with a clear error** + a pointer to `huntova inbox setup`. For other transient errors, **exponential backoff** (capped at 15 min) replaces the fixed cadence, so a flaky network doesn't busy-spin.
+- **Out-of-office and bounce auto-replies were being counted as positive replies** (`cli_inbox.py:_is_autoreply`). The existing `_is_autoreply` filter caught `Auto-Submitted` / `X-Autoreply` / `X-Auto-Response-Suppress` but missed `X-Autorespond` (older MTAs), `Precedence: auto_reply|bulk|list|junk` (Mailman / many ESPs), and the empty `Return-Path: <>` (SMTP DSN / bounce signal). Uncaught auto-replies were promoted to `email_status="replied"` and fed a `good` signal back into the adaptive scorer, inflating apparent reply rate and corrupting the learning loop. Filter extended to cover all four signals.
+
+### Tests
+
+Pytest baseline pending re-run.
+
+
+---
+
 ## v0.1.0a2030 -- May 9 2026 -- Windows-platform CLI fixes (logs + benchmark)
 
 ### Bug fixes -- Windows path conventions

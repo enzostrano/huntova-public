@@ -193,6 +193,21 @@ def _is_autoreply(subject: str, headers: list[tuple[str, str]]) -> bool:
         return True
     if h.get("x-autoreply") or h.get("x-auto-response-suppress"):
         return True
+    # Additional auto-responder signals from less-common MTAs and the
+    # broader RFC ecosystem. Matters because uncaught auto-replies get
+    # promoted to email_status="replied" and feed a `good` signal back
+    # into the adaptive scorer — they corrupt the learning loop and
+    # inflate apparent reply rate.
+    if h.get("x-autorespond"):
+        return True
+    _prec = (h.get("precedence") or "").strip()
+    if _prec in ("auto_reply", "bulk", "list", "junk"):
+        return True
+    # Empty / null Return-Path (`<>`) is the standard SMTP signal for
+    # bounce / DSN messages — never treat as a real reply.
+    _rp = (h.get("return-path") or "").strip()
+    if _rp in ("", "<>", "< >"):
+        return True
     return False
 
 
@@ -646,24 +661,37 @@ def _cmd_watch(args: argparse.Namespace) -> int:
         pass
     interval = max(60, int(args.interval or 300))
     print(f"{_bold('huntova inbox watch')} — polling every {interval}s. Ctrl-C to stop.")
+    consecutive_failures = 0
     while True:
-        # Stability fix (audit wave 30): the previous version did
-        # `time.sleep(interval)` after the scan finished, so the
-        # actual cadence drifted to `scan_duration + interval`. A
-        # scan can take 10-60s+ (IMAP connect/login/search/fetch +
-        # AI classification per reply); on large mailboxes a poll
-        # could stretch past several minutes — silently widening
-        # the user's configured 5-min interval to 6+ min, drift
-        # compounding across the day. Capture next-tick deadline
-        # at top of loop and sleep until then so cadence is
-        # wall-clock-stable regardless of scan duration.
+        # Capture next-tick deadline at top of loop and sleep until
+        # then so cadence is wall-clock-stable regardless of scan
+        # duration (audit wave 30 fix).
         next_at = time.monotonic() + interval
         try:
             res = asyncio.run(_scan_inbox(user_id, since_days=int(args.since or 3)))
             ts = datetime.now().strftime("%H:%M:%S")
             if not res.get("ok"):
-                print(f"  {ts} {_red('!')} {res.get('error')}", file=sys.stderr)
+                _err = (res.get("error") or "")
+                _err_lo = _err.lower()
+                # Bail out on credential failures — looping every
+                # `interval` seconds against a wrong password gets the
+                # account flagged + locked by Gmail / O365. Better to
+                # stop loudly and let the user fix the password than
+                # silently grind toward a lockout.
+                if any(s in _err_lo for s in
+                       ("authenticationfailed", "login failed",
+                        "invalid credentials", "auth_failed",
+                        "[authenticationfailed]")):
+                    print(f"  {ts} {_red('✗')} IMAP authentication failed: {_err}",
+                          file=sys.stderr)
+                    print(f"  {_dim('aborting watch loop — fix credentials with')} "
+                          f"{_bold('huntova inbox setup')} {_dim('and re-run.')}",
+                          file=sys.stderr)
+                    return 3
+                print(f"  {ts} {_red('!')} {_err}", file=sys.stderr)
+                consecutive_failures += 1
             else:
+                consecutive_failures = 0
                 m = res.get("matched", 0)
                 if m:
                     print(f"  {ts} {_green('✓')} {m} new "
@@ -675,9 +703,17 @@ def _cmd_watch(args: argparse.Namespace) -> int:
             print(f"\n{_dim('stopped')}"); return 0
         except Exception as e:
             print(f"  {_red('!')} poll error: {type(e).__name__}: {e}", file=sys.stderr)
-        # Sleep until the deadline; if the scan already ran longer
-        # than the interval, max(0, …) makes us re-poll immediately.
-        time.sleep(max(0.0, next_at - time.monotonic()))
+            consecutive_failures += 1
+        # Exponential backoff on repeat failures — caps at ~15 min
+        # so a flaky network doesn't busy-spin and so a misconfig
+        # doesn't auth-flood the IMAP server. On success the counter
+        # resets above so cadence returns to the user's --interval.
+        if consecutive_failures > 0:
+            backoff = min(900.0, interval * (2 ** min(consecutive_failures - 1, 5)))
+            target = time.monotonic() + backoff
+            time.sleep(max(0.0, target - time.monotonic()))
+        else:
+            time.sleep(max(0.0, next_at - time.monotonic()))
 
 
 # ── argparse wiring ─────────────────────────────────────────────────
