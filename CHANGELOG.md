@@ -6,6 +6,24 @@ Versioning: `0.1.0aNN` alpha increments. Public install path: `pipx install hunt
 
 ---
 
+## v0.1.0a2037 -- May 9 2026 -- admin endpoint hardening + Windows ACL on secrets
+
+### Bug fixes -- admin endpoints
+
+- **`/api/ops/rerun-pass3` had no rate limit and leaked `str(e)` in errors** (`server.py:13555`). Every other `/api/ops/*` mutator goes through `_check_admin_mutator_rate`; this one didn't, so a stolen admin cookie or a bored insider could hammer Pass-3 (full Gemini rank-and-rewrite over the entire lead set) unbounded and burn provider quota / dollar budget. Added the gate. Also stopped echoing raw exceptions to the response (file paths / SQL fragments / provider error bodies that name the prompt template would surface to clients) -- log to stderr, return generic envelope.
+- **`/api/admin/cloud-token` accepted unbounded `daily_quota` + invalid `expires_at`** (`server.py:3178`). An attacker holding HV_ADMIN_TOKEN (CI log leak, env dump) could mint a token with `daily_quota=2**31` that effectively never throttles, draining provider budget. Now clamped to `max(1, min(_q, 5000))` and `expires_at` validated as ISO-8601 before storage.
+
+### Bug fixes -- Windows secrets ACL
+
+- **`secrets_store._atomic_write_0600` Windows path skipped ACL hardening** (`secrets_store.py:243`). Previous version called `p.write_bytes(data)` and returned -- inheriting parent-dir ACLs which on a multi-user profile may include `BUILTIN\Users:(R)`. Now: O_CREAT|O_EXCL|O_WRONLY on a temp sibling, write+fsync, atomic rename, plus a best-effort `icacls /inheritance:r /grant:r %USERNAME%:(F)` so any inherited group-read is dropped. Failure of icacls is non-fatal.
+
+### Tests
+
+Pytest baseline pending re-run.
+
+
+---
+
 ## v0.1.0a2036 -- May 9 2026 -- runtime config defensiveness
 
 ### Bug fixes -- config / runtime

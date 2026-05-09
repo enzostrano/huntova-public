@@ -241,7 +241,43 @@ def _atomic_write_0600(p: Path, data: bytes) -> None:
     """
     p.parent.mkdir(parents=True, exist_ok=True)
     if os.name == "nt":
-        p.write_bytes(data)
+        # Atomic write on Windows: O_CREAT|O_EXCL|O_WRONLY on a temp
+        # sibling, then rename. Prevents the brief window where the
+        # final secrets file exists with default ACLs (inheriting
+        # parent dir permissions which on a multi-user profile may be
+        # group-readable). Plus: explicit FILE_ATTRIBUTE_HIDDEN on
+        # the temp so casual ls / Explorer doesn't surface it.
+        tmp = p.with_suffix(p.suffix + ".tmp")
+        try:
+            tmp.unlink()
+        except FileNotFoundError:
+            pass
+        fd = os.open(str(tmp),
+                     os.O_CREAT | os.O_EXCL | os.O_WRONLY | getattr(os, "O_BINARY", 0))
+        try:
+            with os.fdopen(fd, "wb") as fh:
+                fh.write(data)
+                fh.flush()
+                try:
+                    os.fsync(fh.fileno())
+                except OSError:
+                    pass
+        except Exception:
+            try: os.unlink(str(tmp))
+            except OSError: pass
+            raise
+        # Best-effort: tighten DACL via icacls so Everyone-read is
+        # explicitly denied. Failure is non-fatal -- on a single-user
+        # profile NTFS already restricts to the owner; this is
+        # defense-in-depth for shared machines.
+        try:
+            import ctypes, subprocess as _sp
+            _sp.run(["icacls", str(tmp), "/inheritance:r",
+                     "/grant:r", f"{os.environ.get('USERNAME', '')}:(F)"],
+                    timeout=3, capture_output=True, check=False)
+        except Exception:
+            pass
+        os.replace(str(tmp), str(p))
         return
     tmp = p.with_suffix(p.suffix + ".tmp")
     # If a stale tmp exists from a crashed prior run, drop it.

@@ -3196,12 +3196,36 @@ async def api_admin_cloud_token(request: Request):
         body = {}
     if not isinstance(body, dict):
         body = {}
+    # Clamp daily_quota: an attacker holding HV_ADMIN_TOKEN (leaked
+    # via CI logs, env dump, etc.) can otherwise mint a token with
+    # `daily_quota=2**31` that effectively never throttles, draining
+    # provider budget. 5,000/day is well above any plausible
+    # legitimate design-partner allocation.
+    try:
+        _q = int(body.get("daily_quota") or 200)
+    except (ValueError, TypeError):
+        _q = 200
+    daily_quota = max(1, min(_q, 5000))
+    # Validate expires_at parses as ISO-8601 if provided. Invalid
+    # values were previously stored verbatim, producing tokens whose
+    # expiry the cleanup job couldn't reason about.
+    expires_at = body.get("expires_at")
+    if expires_at:
+        try:
+            from datetime import datetime as _dt
+            _dt.fromisoformat(str(expires_at).replace("Z", "+00:00"))
+        except Exception:
+            return JSONResponse(
+                {"ok": False, "error": "invalid_expires_at",
+                 "message": "expires_at must be ISO-8601 (e.g. 2026-12-31T23:59:59Z)"},
+                status_code=400,
+            )
     try:
         tok = await db.mint_cloud_proxy_token(
             user_email=(body.get("email") or "")[:200],
             plan=(body.get("plan") or "design_partner")[:32],
-            daily_quota=int(body.get("daily_quota") or 200),
-            expires_at=body.get("expires_at"),
+            daily_quota=daily_quota,
+            expires_at=expires_at,
             notes=(body.get("notes") or "")[:400],
         )
     except Exception as e:
@@ -13555,9 +13579,21 @@ async def api_runtime():
 @app.post("/api/ops/rerun-pass3")
 async def api_rerun_pass3(user: dict = Depends(require_admin)):
     """Dev/test: rerun Pass 3 rank+rewrite on existing leads without a full agent run."""
+    # Rate-limit gate: this endpoint runs Gemini Pass-3 over the
+    # entire admin's lead set with no other budget cap. A stolen
+    # admin cookie or a bored insider can hammer it and burn the
+    # provider quota / dollar budget unbounded; every other
+    # /api/ops/* mutator goes through this same gate.
+    if _check_admin_mutator_rate(user["id"]):
+        return JSONResponse(
+            {"ok": False, "error": "rate_limited",
+             "message": "rerun-pass3 throttled -- try again in a minute"},
+            status_code=429,
+        )
     leads = await db.get_leads(user["id"])
     if not leads:
-        return {"ok": False, "error": "no leads"}
+        return JSONResponse(
+            {"ok": False, "error": "no_leads"}, status_code=400)
     try:
         from app import rank_and_rewrite
         rewritten = await asyncio.to_thread(rank_and_rewrite, leads)
@@ -13566,7 +13602,15 @@ async def api_rerun_pass3(user: dict = Depends(require_admin)):
         fu_count = sum(1 for l in top if l.get("email_followup_2"))
         return {"ok": True, "total": len(rewritten), "top10": len(top), "with_followups": fu_count}
     except Exception as e:
-        return JSONResponse({"ok": False, "error": str(e)[:200]}, status_code=500)
+        # Don't echo the raw exception text in the response -- it can
+        # include file paths, SQL fragments, or provider-side error
+        # bodies that name the prompt template. Log to stderr for the
+        # operator and return a generic envelope.
+        import sys as _sys, traceback as _tb
+        print(f"[api_rerun_pass3] {type(e).__name__}: {e}", file=_sys.stderr)
+        _tb.print_exc(file=_sys.stderr)
+        return JSONResponse(
+            {"ok": False, "error": "internal_error"}, status_code=500)
 
 
 @app.get("/api/status")
