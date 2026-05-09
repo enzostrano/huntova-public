@@ -115,7 +115,12 @@ TIER_PAGE_LIMITS = {
 
 # ── Paths ──
 BASE_DIR = os.environ.get("HV_BASE_DIR", os.path.dirname(os.path.abspath(__file__)))
-PORT = int(os.environ.get("HV_PORT", "5000"))
+# `os.environ.get("HV_PORT", "5000")` returns the env value if set
+# to ANY string -- including the empty string. Railway/Render/some
+# Docker-compose configs inject blank env vars, and `int("")` raises
+# ValueError at import time, killing the process before serve can
+# reach its first log line. `or "5000"` falls through on empty.
+PORT = int((os.environ.get("HV_PORT") or "5000").strip() or "5000")
 SECRET_KEY = os.environ.get("HV_SECRET_KEY", "")
 if not SECRET_KEY:
     if os.environ.get("RAILWAY_ENVIRONMENT") or os.environ.get("RENDER"):
@@ -135,7 +140,8 @@ GOOGLE_REDIRECT_URI_PATH = "/auth/google/callback"
 
 # ── Email (SMTP) ──
 SMTP_HOST = os.environ.get("SMTP_HOST", "")
-SMTP_PORT = int(os.environ.get("SMTP_PORT", "587"))
+# Same empty-env-string defense as PORT above.
+SMTP_PORT = int((os.environ.get("SMTP_PORT") or "587").strip() or "587")
 SMTP_USER = os.environ.get("SMTP_USER", "")
 SMTP_PASSWORD = os.environ.get("SMTP_PASSWORD", "")
 SMTP_FROM_EMAIL = os.environ.get("SMTP_FROM_EMAIL", "noreply@huntova.com")

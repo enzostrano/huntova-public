@@ -6,6 +6,21 @@ Versioning: `0.1.0aNN` alpha increments. Public install path: `pipx install hunt
 
 ---
 
+## v0.1.0a2036 -- May 9 2026 -- runtime config defensiveness
+
+### Bug fixes -- config / runtime
+
+- **Empty-string `HV_PORT` / `SMTP_PORT` env vars crashed at import** (`config.py:118, 138`). Railway / Render / some Docker-compose configs inject blank env vars; `int(os.environ.get("HV_PORT", "5000"))` returns the empty string and `int("")` raises `ValueError` before the process can even reach its first log line. Replaced with `or "5000"` fallback that handles None and empty strings.
+- **`HV_SINGLE_USER=1 + HV_AUTH=1` left the operator locked out** (`runtime.py`). single_user_mode means "everything belongs to the one local operator" -- which implies no per-user gate; auth_enabled means "force a cookie session before any data access". The two together leave the request layer asking for a login while storage has only one user. Reconciled toward "single_user wins" with a stderr warning so an accidentally-set HV_AUTH=1 in staging env doesn't lock the local operator out of their own data.
+- **`UserContext._run_log` lazy `hasattr` init was a TOCTOU race** (`user_context.py:191, 263`). Two threads concurrently in `emit_log` could both pass `not hasattr(self, '_run_log')`, both create fresh empty lists, and the loser's writes vanish. Initialised in `__init__` instead.
+
+### Tests
+
+Pytest baseline pending re-run.
+
+
+---
+
 ## v0.1.0a2035 -- May 9 2026 -- atomic cloud-proxy quota gate + Windows VT for colored output
 
 ### Bug fixes -- DB

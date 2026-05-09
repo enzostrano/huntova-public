@@ -75,11 +75,30 @@ def _resolve() -> RuntimeCapabilities:
     # for a staging deploy without setting the client_id. Match the
     # other 7 flags: HV_GOOGLE_OAUTH overrides; default tracks the
     # presence of GOOGLE_CLIENT_ID.
+    auth_enabled = _truthy(os.environ.get("HV_AUTH"), True)
+    single_user_mode = _truthy(os.environ.get("HV_SINGLE_USER"), False)
+    # Reconcile contradictory combinations. `single_user_mode=True`
+    # means "everything belongs to the one local operator" -- which
+    # implies no per-user gate. `auth_enabled=True` means "force a
+    # cookie session before any data access". The two together leave
+    # the request layer asking for a login while the storage layer
+    # has only one user; legitimate use cases for that combo are
+    # vanishingly rare and the more common scenario is operator
+    # misconfiguration. Resolve toward "single_user wins" so the
+    # local operator isn't locked out of their own data by an
+    # accidentally-set HV_AUTH=1 in staging env.
+    if single_user_mode and auth_enabled:
+        import sys as _sys
+        print("[runtime] WARN: HV_SINGLE_USER=1 + HV_AUTH=1 contradicts -- "
+              "disabling auth so the single owner isn't locked out. Set "
+              "HV_SINGLE_USER=0 explicitly to enable per-user auth.",
+              file=_sys.stderr)
+        auth_enabled = False
     return RuntimeCapabilities(
         mode="cloud",
         billing_enabled=_truthy(os.environ.get("HV_BILLING"), True),
-        auth_enabled=_truthy(os.environ.get("HV_AUTH"), True),
-        single_user_mode=_truthy(os.environ.get("HV_SINGLE_USER"), False),
+        auth_enabled=auth_enabled,
+        single_user_mode=single_user_mode,
         hosted_mode=_truthy(os.environ.get("HV_HOSTED"), True),
         smtp_enabled=_truthy(os.environ.get("HV_SMTP"), True),
         public_share_enabled=_truthy(os.environ.get("HV_PUBLIC_SHARE"), True),

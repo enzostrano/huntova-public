@@ -214,6 +214,14 @@ class UserAgentContext:
         self.found_domains: list = []
         self.current_session_log = ""
 
+        # Run log buffer. Initialised here (not lazily on first write)
+        # because emit_log can fire from multiple threads simultaneously
+        # -- the previous lazy init `if not hasattr(self, '_run_log'):`
+        # was a TOCTOU window that, under concurrent agent activity,
+        # could race two callers into both creating fresh empty lists,
+        # losing all log lines from the loser.
+        self._run_log: list[str] = []
+
         # Agent run tracking
         self.run_id: int | None = None
         self.run_ts = ""
@@ -260,8 +268,8 @@ class UserAgentContext:
         # 5000+ lines, which then linger in RAM for the lifetime of
         # the per-user context. Trim oldest 200 when we hit the cap so
         # the eviction is amortised, not on every line.
-        if not hasattr(self, '_run_log'):
-            self._run_log = []
+        # _run_log is now initialised in __init__ (no more lazy hasattr
+        # check — that was a TOCTOU race under concurrent emit_log).
         self._run_log.append(f"[{ts}] [{level.upper():5s}] {msg}")
         if len(self._run_log) > 1000:
             del self._run_log[:200]
