@@ -123,7 +123,20 @@ def _load_actions(drv, user_id: int, cutoff: str | None) -> list[dict]:
 
 
 def _daemon_log_dir() -> Path:
-    base = os.environ.get("XDG_DATA_HOME") or str(Path.home() / ".local" / "share")
+    """Where the huntova daemon writes daemon.out / daemon.err.
+
+    On Linux/macOS we honour XDG_DATA_HOME, falling back to the
+    ~/.local/share convention. On Windows there's no XDG and the
+    `.local/share` path doesn't match the platform — use LOCALAPPDATA
+    (or AppData/Local as the fallback) so log tailing actually finds
+    the files. Without this gate, `huntova logs daemon` reported "no
+    log events found" forever on Windows even when the daemon was
+    happily writing logs to a different directory.
+    """
+    if os.name == "nt":
+        base = os.environ.get("LOCALAPPDATA") or str(Path.home() / "AppData" / "Local")
+    else:
+        base = os.environ.get("XDG_DATA_HOME") or str(Path.home() / ".local" / "share")
     return Path(base) / "huntova" / "logs"
 
 
@@ -160,7 +173,17 @@ def _load_daemon() -> list[dict]:
             st = _os.stat(p)
         except OSError:
             continue
-        key = (name, st.st_ino)
+        # `st.st_ino` is reliable on Unix and on Python 3.12+ on Windows.
+        # On Windows < 3.12 it returns 0 for every file — both daemon.out
+        # and daemon.err collide on the same key (`name`, 0) and one
+        # overwrites the other's offset, silently dropping log lines.
+        # Mix in size + mtime_ns so the key is stable per-file even
+        # without a real inode, and still rotates when the file is
+        # truncated/recreated (size jumps back to 0 on the new file).
+        if st.st_ino == 0:
+            key = (name, st.st_dev, st.st_size, st.st_mtime_ns)
+        else:
+            key = (name, st.st_ino)
         try:
             with open(p, "rb") as f:
                 f.seek(0, 2)

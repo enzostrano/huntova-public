@@ -149,20 +149,30 @@ def _parse_score(raw: str) -> dict[str, int] | None:
 
 # ── persistence ────────────────────────────────────────────────────
 def _store_path() -> Path:
-    base = os.environ.get("XDG_DATA_HOME") or str(Path.home() / ".local" / "share")
+    """Persistent location for benchmark history. Mirrors the daemon
+    log dir helper: on Windows `~/.local/share` is not a real
+    convention; use LOCALAPPDATA (or AppData/Local as fallback)."""
+    if os.name == "nt":
+        base = os.environ.get("LOCALAPPDATA") or str(Path.home() / "AppData" / "Local")
+    else:
+        base = os.environ.get("XDG_DATA_HOME") or str(Path.home() / ".local" / "share")
     return Path(base) / "huntova" / "benchmarks.json"
 
 
 def _load_runs() -> list[dict[str, Any]]:
     p = _store_path()
     if not p.exists(): return []
-    try: return _json.loads(p.read_text() or "[]") or []
+    # encoding="utf-8": Windows defaults to cp1252; benchmark fixtures
+    # routinely contain non-ASCII (em-dashes, accented EU names) and
+    # AI replies often include emoji. Without a forced encoding the
+    # round-trip silently corrupts the JSON store.
+    try: return _json.loads(p.read_text(encoding="utf-8") or "[]") or []
     except Exception: return []
 
 
 def _save_runs(runs: list[dict[str, Any]]) -> None:
     p = _store_path(); p.parent.mkdir(parents=True, exist_ok=True)
-    p.write_text(_json.dumps(runs, indent=2, default=str))
+    p.write_text(_json.dumps(runs, indent=2, default=str), encoding="utf-8")
 
 
 # ── benchmark execution ────────────────────────────────────────────

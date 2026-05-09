@@ -6,6 +6,25 @@ Versioning: `0.1.0aNN` alpha increments. Public install path: `pipx install hunt
 
 ---
 
+## v0.1.0a2030 -- May 9 2026 -- Windows-platform CLI fixes (logs + benchmark)
+
+### Bug fixes -- Windows path conventions
+
+- **`huntova logs daemon` reported "no log events found" on Windows even when the daemon was running** (`cli_logs.py:_daemon_log_dir`). The function hardcoded `~/.local/share/huntova/logs/`, but Windows has no XDG and no `.local/share`. Daemon writes were going to `%LOCALAPPDATA%/huntova/logs/` while the reader looked under the home directory. Now branches on `os.name == 'nt'` to use `LOCALAPPDATA` (or AppData/Local fallback).
+- **Same path bug on `cli_benchmark._store_path`** (`cli_benchmark.py:151`). Benchmark history wrote to a non-existent `~/.local/share/huntova/benchmarks.json` on Windows; round-trip across Windows machines lost history. Same os-aware base helper.
+- **`benchmarks.json` round-trip silently corrupted non-ASCII content on Windows** (`cli_benchmark.py:159, 165`). `read_text` / `write_text` defaulted to cp1252; emoji in AI responses or accented EU names in fixtures mojibake'd on save and crashed on load. Forced `encoding="utf-8"` on both sides.
+
+### Bug fixes -- log rotation tracking
+
+- **`st_ino == 0` collision on Windows < Python 3.12** (`cli_logs.py:163`). On older Python on NTFS, `os.stat().st_ino` returns 0 for every file. The rotation key `(name, st_ino)` collided between `daemon.out` and `daemon.err`; one file's offset overwrote the other and lines were silently skipped. Now falls back to `(name, st_dev, st_size, st_mtime_ns)` when `st_ino == 0`, which still rotates correctly when a file is truncated/recreated (size jumps to 0 on the new file).
+
+### Tests
+
+Pytest baseline pending re-run.
+
+
+---
+
 ## v0.1.0a2029 -- May 9 2026 -- security: SQL-injection allowlist, OAuth pre-emption gate, plugin RCE filter, TLS verification
 
 10-agent bug-hunt rolled up the four highest-severity findings into a single security release.
