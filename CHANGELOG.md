@@ -6,11 +6,22 @@ Versioning: `0.1.0aNN` alpha increments. Public install path: `pipx install hunt
 
 ---
 
+## v0.1.0a2045 -- May 9 2026 -- CHANGELOG hygiene follow-up
+
+The v2044 scrub entry itself contained one residual reference to a private collaborator's first name. Removed.
+
+### Tests
+
+Pytest baseline pending re-run.
+
+
+---
+
 ## v0.1.0a2044 -- May 9 2026 -- CHANGELOG hygiene: scrub internal collaborator + memory-file references
 
 ### Process
 
-- Scrubbed three references in the v0.1.0a2028 entry that leaked internal memory-file names and a co-developer's first name into the public CHANGELOG. These were authored in this session; nothing landed in any commit *message*, only in CHANGELOG body text. Replaced with neutral wording ("co-developers", "the release-notes rule", "the release-workflow rule") that preserves technical meaning. Git history of v2028 still contains the original strings (no force-push to main per Sadin-collab policy); they're no longer surfaced in any UI display from this point forward.
+- Scrubbed three references in the v0.1.0a2028 entry that leaked internal memory-file names and a co-developer's first name into the public CHANGELOG. These were authored in this session; nothing landed in any commit *message*, only in CHANGELOG body text. Replaced with neutral wording ("co-developers", "the release-notes rule", "the release-workflow rule") that preserves technical meaning. Git history of v2028 still contains the original strings (no force-push to main per the never-rewrite-shared-history rule); they're no longer surfaced in any UI display from this point forward.
 
 ### Tests
 
