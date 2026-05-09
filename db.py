@@ -852,12 +852,26 @@ async def get_user_by_id(user_id: int) -> dict | None:
     return await _afetchone("SELECT * FROM users WHERE id = %s", [user_id])
 
 
+_ALLOWED_USER_FIELDS = frozenset({
+    "display_name", "tier", "last_login", "email_verified",
+    "is_suspended", "role", "google_id", "auth_provider",
+    "avatar_url", "password_hash",
+})
+
+
 async def update_user(user_id: int, **fields):
     if not fields:
         return
+    bad = [k for k in fields if k not in _ALLOWED_USER_FIELDS]
+    if bad:
+        raise ValueError(
+            "update_user rejecting unknown fields " + repr(bad)
+            + "; allowed: " + repr(sorted(_ALLOWED_USER_FIELDS))
+        )
     sets = ", ".join(f"{k} = %s" for k in fields)
     vals = list(fields.values()) + [user_id]
-    await _aexec(f"UPDATE users SET {sets} WHERE id = %s", vals)
+    sql = f"UPDATE users SET {sets} WHERE id = %s"
+    await _aexec(sql, vals)
 
 
 async def update_last_login(user_id: int):

@@ -333,8 +333,38 @@ class PluginRegistry:
         plug_dir = self._local_plugin_dir()
         if not plug_dir.exists():
             return loaded
+        # Resolve the plugin dir once so we can require every loaded
+        # script's real path to live inside it. Without this check, a
+        # symlink under `~/.config/huntova/plugins/x.py -> /tmp/payload.py`
+        # would be exec'd at full huntova privilege — turning any
+        # writable directory on the machine into an RCE primitive.
+        try:
+            _real_plug_dir = plug_dir.resolve(strict=True)
+        except OSError:
+            return loaded
         for py_file in sorted(plug_dir.glob("*.py")):
             try:
+                # Refuse to load symlinks at all; refuse anything whose
+                # resolved real path escapes the plugin dir.
+                if py_file.is_symlink():
+                    self._record_load_error(
+                        py_file.name,
+                        "symlinked plugin files are refused (real path may "
+                        "live outside the plugin directory and is therefore "
+                        "untrusted)",
+                    )
+                    continue
+                try:
+                    _real = py_file.resolve(strict=True)
+                except OSError:
+                    continue
+                if not str(_real).startswith(str(_real_plug_dir) + os.sep):
+                    self._record_load_error(
+                        py_file.name,
+                        f"refusing plugin whose real path {str(_real)!r} "
+                        f"is outside {str(_real_plug_dir)!r}",
+                    )
+                    continue
                 spec = importlib.util.spec_from_file_location(
                     f"huntova_plugin_{py_file.stem}", py_file
                 )

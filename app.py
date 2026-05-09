@@ -6273,9 +6273,15 @@ def fetch_page_requests(url, limit=10000):
             # we decided to bail. Now we stream, check Content-Length
             # up front when present, and abort during iter_content if
             # the running total exceeds 2MB.
+            # verify=True (default): the previous `verify=False` accepted
+            # any TLS cert including spoofed ones, letting an on-path
+            # attacker inject content into the LLM prompt downstream.
+            # If a target's CA chain is genuinely flaky the right answer
+            # is to fall back to the Jina reader (already wired below),
+            # not to drop verification globally.
             with requests.get(url, headers=headers,
                               timeout=SEARCH_TIMEOUT + (attempt-1)*5,
-                              verify=False, stream=True) as r:
+                              stream=True) as r:
                 r.raise_for_status()
                 # Check final URL after redirects against blocklist
                 if r.url != url and is_blocked(r.url):
@@ -6346,7 +6352,9 @@ def crawl_prospect(url, max_subpages=4):
         _CAP = 2_000_000
         try:
             if _check_stop(): return "", ""
-            with requests.get(u, headers=_ua, timeout=10, verify=False, stream=True) as r:
+            # verify=True (default) — accepting spoofed certs lets an
+            # on-path attacker swap content into the LLM analyser.
+            with requests.get(u, headers=_ua, timeout=10, stream=True) as r:
                 if r.url != u and is_blocked(r.url):
                     return "", ""
                 if r.status_code != 200:

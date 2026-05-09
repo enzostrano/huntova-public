@@ -2351,7 +2351,16 @@ async def auth_google_callback(request: Request, code: str = "", state: str = ""
         auth.set_session_cookie(response, session_token)
         response.delete_cookie("gauth_state")
         return response
-    # New user
+    # New user — but only if Google has verified the email. Skipping
+    # this gate would let an attacker register a hostile Google
+    # Workspace, claim a victim's address that has no Huntova account
+    # yet, get email_verified=1 server-side, and pre-empt the
+    # legitimate user's eventual signup. The link-existing branch
+    # above already gates on this; the new-user branch must too.
+    if not g_email_verified:
+        resp = RedirectResponse("/landing?auth_error=google_email_unverified")
+        resp.delete_cookie("gauth_state")
+        return resp
     user_id = await db.create_google_user(g_email, google_id, g_name, g_avatar)
     session_token = auth.generate_token()
     await db.create_session(session_token, user_id)

@@ -6,6 +6,24 @@ Versioning: `0.1.0aNN` alpha increments. Public install path: `pipx install hunt
 
 ---
 
+## v0.1.0a2029 -- May 9 2026 -- security: SQL-injection allowlist, OAuth pre-emption gate, plugin RCE filter, TLS verification
+
+10-agent bug-hunt rolled up the four highest-severity findings into a single security release.
+
+### Security fixes
+
+- **SQL injection -- `db.update_user(**fields)` interpolated keys directly into UPDATE column list** (`db.py:855`). Every current caller uses hardcoded keys, but a future regression that forwards request-body keys (`update_user(uid, **body)`) becomes a column-name injection vector. Added `_ALLOWED_USER_FIELDS` allowlist; unknown keys raise `ValueError` instead of executing.
+- **Google OAuth account pre-emption** (`server.py:2354`). The link-existing-user branch refused unverified Google emails, but the new-user branch called `db.create_google_user(...)` regardless of `g_email_verified`. An attacker with a hostile Google Workspace could claim a victim's email before the legitimate user signs up, get `email_verified=1` server-side, and (combined with the ADMIN_EMAILS auto-promote in `auth.py`) gain superadmin on first hit. Now the new-user branch gates on `g_email_verified` like the link branch.
+- **Plugin RCE escalation via symlinked local scripts** (`plugins.py:_load_local_scripts`). `glob("*.py")` follows symlinks; a symlink under `~/.config/huntova/plugins/x.py -> /tmp/payload.py` was loaded at full huntova privilege. Refuse symlinked plugin files; refuse anything whose resolved real path escapes the plugin directory.
+- **TLS verification disabled on prospect crawler** (`app.py:6276,6349`). `requests.get(..., verify=False)` accepted spoofed certificates on the SearXNG-result-page fetcher and the Jina-fallback reader. An on-path attacker could swap content into the LLM analyser at `app.py:6901` and influence fit-score / email-rewrite output. Removed `verify=False`; on flaky CAs the existing Jina-reader fallback handles it.
+
+### Tests
+
+Pytest baseline pending re-run.
+
+
+---
+
 ## v0.1.0a2028 -- May 9 2026 -- multi-bug-fix sweep + revert auto-release workflow
 
 This release rolls up every concrete bug fix shipped during the May 8-9 audit-sweep session and reverts the experimental auto-release CI that conflicted with the documented manual release flow.
