@@ -44,20 +44,21 @@ if AI_PROVIDER == "openai" and OPENAI_API_KEY:
     API_KEY = OPENAI_API_KEY
     MODEL_ID = OPENAI_MODEL
 elif AI_PROVIDER == "anthropic" and ANTHROPIC_API_KEY:
-    # Anthropic isn't OpenAI-compat at the chat-completions level. The
-    # legacy code path won't work directly — providers.py is the real
-    # path. For now alias to Gemini as a safer default if Gemini key is
-    # also set; otherwise the legacy `client.chat.completions.create`
-    # calls will fail at the network layer (and the user can switch).
-    if GEMINI_API_KEY:
-        API_URL = GEMINI_URL
-        API_KEY = GEMINI_API_KEY
-        MODEL_ID = GEMINI_MODEL
-    else:
-        API_URL = ANTHROPIC_OPENAI_COMPAT_URL
-        API_KEY = ANTHROPIC_API_KEY
-        MODEL_ID = ANTHROPIC_MODEL
-elif AI_PROVIDER == "gemini" or GEMINI_API_KEY:
+    # Anthropic isn't OpenAI-compat at the chat-completions level --
+    # legacy `client.chat.completions.create` callers use this URL but
+    # the real path is providers.py. The previous version aliased to
+    # Gemini whenever a Gemini key happened to be set in the same env,
+    # silently overriding the user's explicit HV_AI_PROVIDER=anthropic
+    # choice. Honour the user's choice; legacy callers can fall back
+    # to providers.py themselves.
+    API_URL = ANTHROPIC_OPENAI_COMPAT_URL
+    API_KEY = ANTHROPIC_API_KEY
+    MODEL_ID = ANTHROPIC_MODEL
+elif AI_PROVIDER == "gemini" and GEMINI_API_KEY:
+    # Was `or GEMINI_API_KEY` -- which hijacked HV_AI_PROVIDER=ollama
+    # / lmstudio whenever GEMINI_API_KEY happened to be set, ignoring
+    # the user's explicit choice. `and` matches the openai + anthropic
+    # branches: the chosen provider must have its key.
     API_URL = GEMINI_URL
     API_KEY = GEMINI_API_KEY
     MODEL_ID = GEMINI_MODEL

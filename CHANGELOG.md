@@ -6,6 +6,23 @@ Versioning: `0.1.0aNN` alpha increments. Public install path: `pipx install hunt
 
 ---
 
+## v0.1.0a2041 -- May 9 2026 -- AI provider routing + daemon binary fallback
+
+### Bug fixes -- AI provider selection
+
+- **`HV_AI_PROVIDER=ollama` (or lmstudio, or anthropic) silently routed to Gemini if a Gemini key was set in env** (`config.py:46-63`). The legacy `client.chat.completions.create` config block had two bugs: (1) `AI_PROVIDER == "anthropic"` aliased to Gemini whenever GEMINI_API_KEY happened to be set, ignoring the user's explicit choice; (2) `AI_PROVIDER == "gemini" or GEMINI_API_KEY` (note the `or`) hijacked any non-key-set provider whenever GEMINI_API_KEY was present. Now: every provider branch matches the openai pattern -- chosen provider must have its own key. The user's choice always wins.
+
+### Bug fixes -- daemon
+
+- **`huntova daemon install` shipped systemd / launchd units that pointed at a bare `huntova` basename** (`huntova_daemon.py:_resolve_huntova_binary`). When `shutil.which("huntova")` returned None or a non-absolute path, the previous fallback to `sys.argv[0]` produced something like `huntova` -- which systemd/launchd reject (they require absolute paths in ExecStart / ProgramArguments), causing the daemon to silently fail to start at boot. Now walks canonical pipx install locations (~/.local/bin, ~/.local/pipx/venvs/huntova/bin, /usr/local/bin, /opt/homebrew/bin) and **raises** a clear error with a remediation pointer if none resolve. Better than shipping a broken unit file.
+
+### Tests
+
+Pytest baseline pending re-run.
+
+
+---
+
 ## v0.1.0a2040 -- May 9 2026 -- password length, agent_runner DB timeouts, Wayback size cap
 
 ### Bug fixes -- auth

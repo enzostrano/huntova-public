@@ -49,8 +49,35 @@ def _log_dir() -> Path:
 
 
 def _resolve_huntova_binary() -> str:
-    """Find the huntova CLI binary path. Returns absolute path."""
-    return shutil.which("huntova") or sys.argv[0]
+    """Find the huntova CLI binary path. Returns absolute path.
+
+    Previous version returned `sys.argv[0]` as a fallback when
+    `shutil.which("huntova")` failed -- but `sys.argv[0]` is often a
+    bare basename like `"huntova"` (when invoked via PATH). systemd /
+    launchd reject relative paths in `ExecStart` / `ProgramArguments`,
+    so the daemon would silently fail to start at boot with no useful
+    error. Walk canonical install locations first, refuse a bare
+    basename outright -- better to raise here than ship a broken
+    unit file.
+    """
+    found = shutil.which("huntova")
+    if found and os.path.isabs(found):
+        return found
+    for cand in (
+        os.path.expanduser("~/.local/bin/huntova"),
+        os.path.expanduser("~/.local/pipx/venvs/huntova/bin/huntova"),
+        "/usr/local/bin/huntova",
+        "/opt/homebrew/bin/huntova",
+    ):
+        if os.path.isfile(cand):
+            return cand
+    if sys.argv and sys.argv[0] and os.path.isabs(sys.argv[0]) and os.path.isfile(sys.argv[0]):
+        return sys.argv[0]
+    raise RuntimeError(
+        "Cannot resolve absolute path to huntova binary. Install via "
+        "`pipx install huntova` or set HUNTOVA_BIN env var to the full "
+        "path so the daemon unit/plist references a working executable."
+    )
 
 
 # ── launchd plist (macOS) ──────────────────────────────────────────
