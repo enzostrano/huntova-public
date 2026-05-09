@@ -6,6 +6,19 @@ Versioning: `0.1.0aNN` alpha increments. Public install path: `pipx install hunt
 
 ---
 
+## v0.1.0a2046 -- May 9 2026 -- Package update_runner so /api/update/run actually works
+
+### Bug fixes -- packaging
+
+- **`update_runner.py` was in the repo but missing from `pyproject.toml`'s `py-modules` list**, so it never made it into the installed wheel. The `/api/update/run` endpoint imports `update_runner` to spawn the Windows-safe self-restart, and was returning a 500 `ModuleNotFoundError` on every install. Added it to the explicit module list. In-dashboard "Update now" + the daemon's auto-update path now both work end-to-end.
+
+### Tests
+
+Pytest baseline pending re-run.
+
+
+---
+
 ## v0.1.0a2045 -- May 9 2026 -- CHANGELOG hygiene follow-up
 
 The v2044 scrub entry itself contained one residual reference to a private collaborator's first name. Removed.

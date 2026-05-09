@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "huntova"
-version = "0.1.0a2045"
+version = "0.1.0a2046"
 description = "Local-first lead-gen super-tool. Run an AI agent on your terminal, bring your own API key."
 readme = "README.md"
 requires-python = ">=3.11"
@@ -96,6 +96,7 @@ py-modules = [
     "bundled_plugins",
     "server", "app", "agent_runner", "user_context",
     "payments", "email_service",
+    "update_runner",
     # v0.1.0a2: TUI primitives + daemon installer
     "tui", "huntova_daemon",
     # v0.1.0a4: memory subcommand bundle
