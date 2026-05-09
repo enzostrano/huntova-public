@@ -6,6 +6,23 @@ Versioning: `0.1.0aNN` alpha increments. Public install path: `pipx install hunt
 
 ---
 
+## v0.1.0a2035 -- May 9 2026 -- atomic cloud-proxy quota gate + Windows VT for colored output
+
+### Bug fixes -- DB
+
+- **TOCTOU quota leak in `consume_cloud_proxy_quota`** (`db.py:2730`). Previous version did SELECT used_today, Python `if used >= quota` check, then a separate UPDATE without a guard. Two concurrent requests both passed the check and both incremented, leaking quota past the configured limit (paid quota leak in cloud proxy). Now the UPDATE itself is the gate -- `WHERE used_today < daily_quota` matches a row only when room remains; rowcount tells us whether we got a slot. Closes the race.
+
+### Bug fixes -- Windows console
+
+- **`huntova run` interactive console showed literal `[36m...[0m` instead of colored output on legacy Windows cmd.exe / older PowerShell** (`cli_terminal.py:_color_enabled`). The console wasn't running with `ENABLE_VIRTUAL_TERMINAL_PROCESSING`, so our ANSI escape codes printed as garbage. Now flips the flag once at first call via `kernel32.SetConsoleMode` (ctypes; no new dep) -- modern Windows Terminal already has VT on so it's a no-op there.
+
+### Tests
+
+Pytest baseline pending re-run.
+
+
+---
+
 ## v0.1.0a2034 -- May 9 2026 -- per-recipient SMTP cap + CSV-import robustness
 
 ### Bug fixes -- email service

@@ -34,13 +34,46 @@ import urllib.request
 
 # ── ANSI colors ────────────────────────────────────────────────────
 
+_VT_INIT_DONE = False
+
+
+def _enable_windows_vt() -> None:
+    """Flip ENABLE_VIRTUAL_TERMINAL_PROCESSING on the current console
+    so legacy cmd.exe / older PowerShell render our ANSI escapes
+    correctly instead of printing them as literal characters. No-op
+    on Modern Windows Terminal (already enabled) and non-Windows."""
+    global _VT_INIT_DONE
+    if _VT_INIT_DONE or os.name != "nt":
+        _VT_INIT_DONE = True
+        return
+    _VT_INIT_DONE = True
+    try:
+        import ctypes
+        kernel32 = ctypes.windll.kernel32
+        STD_OUTPUT_HANDLE = -11
+        ENABLE_VIRTUAL_TERMINAL_PROCESSING = 0x0004
+        h = kernel32.GetStdHandle(STD_OUTPUT_HANDLE)
+        if not h:
+            return
+        mode = ctypes.c_ulong(0)
+        if not kernel32.GetConsoleMode(h, ctypes.byref(mode)):
+            return
+        kernel32.SetConsoleMode(h, mode.value | ENABLE_VIRTUAL_TERMINAL_PROCESSING)
+    except Exception:
+        # Quietly skip — output just won't be colorized on this console.
+        pass
+
+
 def _color_enabled() -> bool:
     if os.environ.get("NO_COLOR"):
         return False
     try:
-        return sys.stdout.isatty()
+        is_tty = sys.stdout.isatty()
     except Exception:
         return False
+    if is_tty and os.name == "nt":
+        _enable_windows_vt()
+    return is_tty
 
 
 def _c(name: str, text: str) -> str:

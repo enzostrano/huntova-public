@@ -2735,20 +2735,23 @@ async def consume_cloud_proxy_quota(token: str) -> tuple[bool, int]:
     if not row:
         return False, 0
     quota = int(row.get("daily_quota") or 0)
-    used = int(row.get("used_today") or 0)
     last_reset = (row.get("last_reset_date") or "").strip()
     if last_reset != today:
-        await _aexec(
-            "UPDATE cloud_proxy_tokens SET used_today = 0, last_reset_date = %s "
-            "WHERE token = %s",
-            [today, token])
-        used = 0
-    if used >= quota:
+        sql_reset = ("UPDATE cloud_proxy_tokens SET used_today = 0, "
+                     "last_reset_date = %s WHERE token = %s")
+        await _aexec(sql_reset, [today, token])
+    # Atomic gate: UPDATE only matches when room remains. Two
+    # concurrent calls -- one wins the slot, the other gets
+    # rowcount=0 and bails. Closes the SELECT-then-UPDATE TOCTOU
+    # window that previously leaked quota past the configured limit.
+    sql_inc = ("UPDATE cloud_proxy_tokens SET used_today = used_today + 1 "
+               "WHERE token = %s AND used_today < daily_quota")
+    incremented = await _aexec_rowcount(sql_inc, [token])
+    if not incremented:
         return False, 0
-    await _aexec(
-        "UPDATE cloud_proxy_tokens SET used_today = used_today + 1 WHERE token = %s",
-        [token])
-    return True, max(0, quota - used - 1)
+    row = await get_cloud_proxy_token(token)
+    used = int(row.get("used_today") or 0) if row else quota
+    return True, max(0, quota - used)
 
 
 async def record_metric(event: str, platform: str = "", version: str = "",
