@@ -6,6 +6,20 @@ Versioning: `0.1.0aNN` alpha increments. Public install path: `pipx install hunt
 
 ---
 
+## v0.1.0a2043 -- May 9 2026 -- chat search 403 hint + wizard-intent routing
+
+### Bug fixes -- chat dispatcher
+
+- **`web_search` 403 from public SearXNG instances was an opaque "Try again later" message** (`server.py:4627`). The default SearXNG (e.g. `searx.be`) rate-limits bots aggressively, so search keeps 403/429-ing on a fresh install -- and users had no way to know what to do about it. Replaced the message with the actual fix: run a local SearXNG (`docker run -d --name=searxng -p 8888:8080 searxng/searxng`) and set `SEARXNG_URL=http://127.0.0.1:8888`. Also surfaces in the exception path so a network blip suggests the same fix.
+- **Chat brain ran `web_search` on the user's own URL when they said "scan my website" / "train my brain"** (`server.py:4047 navigate action description`). The intent is wizard-onboarding, not a web search; the wizard's `/api/wizard/scan` endpoint already does the right kind of crawl + brain training. Updated the `navigate` action's description so the brain routes those intents to `page="wizard"` instead of trying SearXNG.
+
+### Tests
+
+Pytest baseline pending re-run.
+
+
+---
+
 ## v0.1.0a2042 -- May 9 2026 -- chat brain memory + identity guard
 
 ### Bug fixes -- chat dispatcher

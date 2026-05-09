@@ -4063,7 +4063,11 @@ async def api_chat(request: Request, response: Response, user: dict = Depends(re
         '- {"action":"list_leads","filter":"country:Germany"}\n'
         '    → frontend filters the leads view.\n'
         '- {"action":"navigate","page":"settings|leads|hunts|wizard|providers"}\n'
-        '    → frontend opens that panel.\n'
+        '    → frontend opens that panel. Use page="wizard" when the '
+        'user says "scan my website", "train my brain", "set up the '
+        'agent", or anything wizard-shaped — the wizard handles its '
+        'own crawl + brain training; you should NOT try to web_search '
+        'the URL yourself.\n'
         '- {"action":"update_settings","patch":{"default_max_leads":25,"booking_url":"https://cal.com/me","from_name":"Enzo","theme":"dark","reduced_motion":false}}\n'
         '    → server applies the patch (only known keys: default_max_leads, default_countries, booking_url, from_name, theme, reduced_motion).\n'
         '- {"action":"update_icp","business_description":"...","target_clients":"..."}\n'
@@ -4624,11 +4628,43 @@ async def api_chat(request: Request, response: Response, user: dict = Depends(re
                                     params={"q": query, "format": "json"}, timeout=8)
                 )
                 if _resp.status_code != 200:
-                    return {"action": "answer", "text": f"Search engine returned {_resp.status_code}. Try again later."}
+                    # 403 / 429 are by far the most common from public
+                    # SearXNG instances (e.g. searx.be) which rate-limit
+                    # bots aggressively. Without SearXNG, hunt + chat
+                    # web_search + wizard scan all fail. Tell the user
+                    # how to fix it instead of the opaque "try again
+                    # later" we used to print.
+                    if _resp.status_code in (403, 429, 503):
+                        _is_public = (
+                            "searx.be" in _SX
+                            or "search.brave" in _SX
+                            or "duckduckgo" in _SX
+                        )
+                        _hint = (
+                            "Public SearXNG (e.g. searx.be) rate-limits "
+                            "bots, which is why search keeps 403/429-ing. "
+                            "Fix: run a local SearXNG and point huntova "
+                            "at it. Quickest setup:\n"
+                            "  docker run -d --name=searxng -p 8888:8080 "
+                            "searxng/searxng\n"
+                            "Then export `SEARXNG_URL=http://127.0.0.1:8888` "
+                            "and restart `huntova serve`. `huntova doctor` "
+                            "will report it healthy once it's running."
+                        ) if _is_public else (
+                            f"SearXNG at {_SX} returned "
+                            f"{_resp.status_code}. Check the instance is "
+                            "running and accepting JSON-format queries."
+                        )
+                        return {"action": "answer", "text": _hint}
+                    return {"action": "answer",
+                            "text": f"Search engine returned {_resp.status_code}. Try again later."}
                 results = (_resp.json().get("results") or [])[:8]
             except Exception as _se:
                 return {"action": "answer",
-                        "text": f"Search failed: {type(_se).__name__}: {str(_se)[:160]}"}
+                        "text": f"Search failed: {type(_se).__name__}: {str(_se)[:160]}. "
+                                "If this keeps happening, run a local SearXNG: "
+                                "`docker run -d --name=searxng -p 8888:8080 searxng/searxng` "
+                                "and set SEARXNG_URL=http://127.0.0.1:8888."}
             if not results:
                 return {"action": "answer",
                         "text": f"No results for '{query}'."}
