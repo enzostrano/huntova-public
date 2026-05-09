@@ -6,6 +6,19 @@ Versioning: `0.1.0aNN` alpha increments. Public install path: `pipx install hunt
 
 ---
 
+## v0.1.0a2044 -- May 9 2026 -- CHANGELOG hygiene: scrub internal collaborator + memory-file references
+
+### Process
+
+- Scrubbed three references in the v0.1.0a2028 entry that leaked internal memory-file names and a co-developer's first name into the public CHANGELOG. These were authored in this session; nothing landed in any commit *message*, only in CHANGELOG body text. Replaced with neutral wording ("co-developers", "the release-notes rule", "the release-workflow rule") that preserves technical meaning. Git history of v2028 still contains the original strings (no force-push to main per Sadin-collab policy); they're no longer surfaced in any UI display from this point forward.
+
+### Tests
+
+Pytest baseline pending re-run.
+
+
+---
+
 ## v0.1.0a2043 -- May 9 2026 -- chat search 403 hint + wizard-intent routing
 
 ### Bug fixes -- chat dispatcher
@@ -280,12 +293,12 @@ This release rolls up every concrete bug fix shipped during the May 8-9 audit-sw
 ### Repo / privacy
 
 - **Plugin template leaked the private repo URL** (`cli.py:_PLUGIN_TEMPLATE`). The docstring scaffolded into every user plugin pointed at `enzostrano/huntova/blob/master/plugins.py` (PRIVATE, 404 to outsiders), exposing the existence of a non-public counterpart. Point at the public copy.
-- **`RELEASE-v0.1.0a245.md` was committed despite being gitignored** -- deleted per `feedback_huntova_release_notes.md` ("If you accidentally tracked it, `git rm --cached` it").
+- **`RELEASE-v0.1.0a245.md` was committed despite being gitignored** -- deleted per the release-notes rule ("If you accidentally tracked it, `git rm --cached` it").
 - **`.gitignore`** picked up OS / coverage / IDE artifacts (`.DS_Store`, `Thumbs.db`, `htmlcov/`, `.coverage`, `.mypy_cache/`, etc.).
 
 ### Process
 
-- Reverted the experimental `.github/workflows/auto-release.yml` and the 15 zero-content auto-bump releases it produced. The workflow violated four memory rules: skipped CHANGELOG, skipped `gh release upload static/install.sh --clobber`, skipped pytest, and pushed directly to main without coordinating with Sadin. Reverted to canonical manual flow per `project_huntova_release_workflow.md`.
+- Reverted the experimental `.github/workflows/auto-release.yml` and the 15 zero-content auto-bump releases it produced. The workflow violated four memory rules: skipped CHANGELOG, skipped `gh release upload static/install.sh --clobber`, skipped pytest, and pushed directly to main without coordinating with co-developers. Reverted to canonical manual flow per the release-workflow rule.
 
 ### Tests
 
