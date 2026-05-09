@@ -263,6 +263,34 @@ def _check_rate_limit(ip: str) -> bool:
 app = FastAPI(title="Huntova", version=VERSION)
 
 
+# ── DNS-rebinding gate (local mode only) ──
+# In local mode the dashboard runs on 127.0.0.1:5050 and is not meant
+# to be reachable from any other host. Without a Host-header allowlist
+# a malicious site can DNS-rebind a public hostname to 127.0.0.1 and
+# then issue cross-origin GET requests against unauth-required
+# endpoints (`/api/runtime`, `/api/update-status`, `/api/update/release-
+# notes`) to fingerprint the local install. CSRF is already protected
+# via SameSite=Lax + double-submit, but this closes the read-only
+# enumeration vector.
+try:
+    from starlette.middleware.trustedhost import TrustedHostMiddleware
+    if str(getattr(CAPABILITIES, "mode", "")).lower() == "local":
+        app.add_middleware(
+            TrustedHostMiddleware,
+            allowed_hosts=[
+                "127.0.0.1", "localhost", "[::1]",
+                # Allow `host:port` shapes too (Starlette compares
+                # exact match including port).
+                "127.0.0.1:5050", "localhost:5050",
+            ],
+        )
+except Exception:
+    # Older starlette without TrustedHostMiddleware -- skip the gate
+    # rather than crash boot. The other CSRF/SameSite layers still
+    # protect mutating endpoints.
+    pass
+
+
 # ── Security headers middleware ──
 from starlette.middleware.base import BaseHTTPMiddleware
 

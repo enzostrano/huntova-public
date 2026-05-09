@@ -395,9 +395,21 @@ class AgentRunner:
                 if ADMIN_EMAILS:
                     _crash_subj = f"[Huntova] Agent crash — user {user_id}"
                     _crash_body = f"Agent crashed for user {user_id}.\n\nError: {e}\n\nTraceback:\n{tb[:2000]}"
+                    import asyncio as _asyncio_local
                     for _admin in ADMIN_EMAILS[:3]:
                         try:
-                            loop.run_until_complete(email_service.send_email(_admin, _crash_subj, f"<pre>{_crash_body}</pre>", _crash_body))
+                            # Hard 10s timeout per-admin: a stuck SMTP
+                            # connect (default 30s) x 3 admins would
+                            # otherwise hold this worker slot for 90s
+                            # and starve `_process_queue`. With this
+                            # cap the crash-email is best-effort + bounded.
+                            loop.run_until_complete(_asyncio_local.wait_for(
+                                email_service.send_email(
+                                    _admin, _crash_subj,
+                                    f"<pre>{_crash_body}</pre>",
+                                    _crash_body),
+                                timeout=10,
+                            ))
                         except Exception:
                             pass
             except Exception:

@@ -6,6 +6,23 @@ Versioning: `0.1.0aNN` alpha increments. Public install path: `pipx install hunt
 
 ---
 
+## v0.1.0a2039 -- May 9 2026 -- TrustedHost gate (local mode) + crash-email timeout
+
+### Bug fixes -- security defense in depth
+
+- **Local-mode dashboard had no Host header gate** (`server.py:263`). Without a `TrustedHostMiddleware` allowlist, a malicious site could DNS-rebind a public hostname to `127.0.0.1` and issue cross-origin GET requests against unauth-required endpoints (`/api/runtime`, `/api/update-status`, `/api/update/release-notes`) to fingerprint the local install. CSRF was already protected via SameSite=Lax + double-submit; this closes the read-only enumeration vector. Allowlist: `127.0.0.1`, `localhost`, `[::1]`, plus `:5050` shapes. Cloud mode is unchanged (intended to serve any vhost).
+
+### Bug fixes -- agent runner
+
+- **Crash-email loop could hold a worker slot for 90s** (`agent_runner.py:395`). The post-crash admin notification fires `email_service.send_email` for up to 3 admins serially; a stuck SMTP connect (default 30s) x 3 admins = 90s where `_process_queue` couldn't promote the next queued user. Wrapped each `send_email` in `asyncio.wait_for(timeout=10)` so the crash report stays best-effort + bounded.
+
+### Tests
+
+Pytest baseline pending re-run.
+
+
+---
+
 ## v0.1.0a2038 -- May 9 2026 -- webhook plugin retry/backoff
 
 ### Bug fixes -- bundled plugins
