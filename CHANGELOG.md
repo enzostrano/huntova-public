@@ -6,6 +6,51 @@ Versioning: `0.1.0aNN` alpha increments. Public install path: `pipx install hunt
 
 ---
 
+## v0.1.0a2028 -- May 9 2026 -- multi-bug-fix sweep + revert auto-release workflow
+
+This release rolls up every concrete bug fix shipped during the May 8-9 audit-sweep session and reverts the experimental auto-release CI that conflicted with the documented manual release flow.
+
+### Bug fixes -- providers / LM Studio compatibility
+
+- **LM Studio strict response_format rejected `json_object`** (`providers.py:217-235`). LM Studio's validator only accepts `text` or `json_schema`, while every json-mode call site sends the legacy OpenAI `{"type":"json_object"}` shape. Translate transparently for `lmstudio` / `ollama` / `llamafile` / `custom` so every json_object call site keeps working unchanged.
+- **Qwen "thinking" models returned empty `content` with the answer in `reasoning_content`** (`providers.py:257-263`). The chat dispatcher's JSON parse blew up with "Reply missing action field". Fall back to `reasoning_content` when `content` is empty.
+
+### Bug fixes -- `huntova update` + `_run_self_update` inside pipx venvs
+
+- **`pip install --user` is invalid inside a pipx-managed venv** (`cli.py:cmd_update`). Inside a venv `--user` is rejected with "User site-packages are not visible in this virtualenv". Drop `--user` when `sys.prefix != base_prefix`. Add `_resolve_pipx_argv()` that falls back to `<base_python> -m pipx` when `pipx.exe` itself isn't on PATH (the common case inside a pipx venv).
+- **`_run_self_update` had the same shutil.which("pipx") issue** -- applied the same resolution.
+- **PowerShell wrapped pipx's progress output as `NativeCommandError`** (`cli.py:cmd_update`). Merge subprocess stderr into stdout so PS 5.1's `$ErrorActionPreference='Stop'` callers don't abort on benign progress chatter.
+
+### Bug fixes -- Windows-safe paths / restart
+
+- **`os.execv` self-restart silently fails on Windows** (`update_runner.py:schedule_self_restart`). On Windows os.execv spawns + exits parent rather than replacing the image, leaving stdio handles + console attachment broken; the browser tab polling /api/runtime hangs forever. Spawn a detached child explicitly + os._exit on Windows; keep clean execv on Unix.
+- **`secrets_store._plain_read` mismatched encoding** (`secrets_store.py:282-294`). Reader inherited cp1252 on Windows while `_plain_write` writes UTF-8. Asymmetry silently lost every saved secret on next launch. Forced `encoding="utf-8"`.
+- **`huntova schedule print` emitted Windows paths into Unix scheduler snippets** (`cli_schedule.py`). `shutil.which("huntova")` on Windows returns `C:\Users\.../huntova.EXE` -- useless in cron/launchd/systemd. Emit Unix-shaped paths regardless of host OS, with per-emitter log path resolution: `$HOME` for cron, `%h` specifier for systemd, absolute `Path.home()` for launchd (plist strings don't expand variables). Quote `bin_path` so accounts with spaces in $HOME don't shell-split the chain.
+- **`cli_remote.os.kill(pid, 0)` raises on Windows** (`cli_remote.py:_pid_alive`). Signal 0 is Unix-only; the bare except reported every running bot as "stale PID file" and deleted the PID file, breaking `huntova remote stop`. Replaced with a kernel32.OpenProcess + GetExitCodeProcess probe on Windows. Also split the SIGTERM/SIGINT registrations so SIGTERM's ValueError on Windows doesn't silently disable Ctrl+C handling.
+
+### Bug fixes -- CLI UX
+
+- **`huntova settings` and `huntova settings show` both errored "unknown setting"** (`cli.py:cmd_settings`). Both now list every known setting with its current value. Honors `XDG_CONFIG_HOME` to match `_auto_update_enabled`'s reader. Removed unreachable code after `return 0`.
+- **Grouped `--help` printed empty rows for argparse aliases** (`cli.py:_attach_grouped_help`). `playbook` and `playbooks` (aliases of `examples`) showed as bare names with no help text. Filter aliases by parser-id deduplication so only primaries appear.
+- **`cmd_doctor` reported searxng "unreachable at 127.0.0.1:8888" when the actual hunt successfully uses `searx.be`** (`cli.py:cmd_doctor`). Mirror `cmd_status`'s APP_MODE-aware default so doctor's verdict matches what hunts actually use.
+
+### Repo / privacy
+
+- **Plugin template leaked the private repo URL** (`cli.py:_PLUGIN_TEMPLATE`). The docstring scaffolded into every user plugin pointed at `enzostrano/huntova/blob/master/plugins.py` (PRIVATE, 404 to outsiders), exposing the existence of a non-public counterpart. Point at the public copy.
+- **`RELEASE-v0.1.0a245.md` was committed despite being gitignored** -- deleted per `feedback_huntova_release_notes.md` ("If you accidentally tracked it, `git rm --cached` it").
+- **`.gitignore`** picked up OS / coverage / IDE artifacts (`.DS_Store`, `Thumbs.db`, `htmlcov/`, `.coverage`, `.mypy_cache/`, etc.).
+
+### Process
+
+- Reverted the experimental `.github/workflows/auto-release.yml` and the 15 zero-content auto-bump releases it produced. The workflow violated four memory rules: skipped CHANGELOG, skipped `gh release upload static/install.sh --clobber`, skipped pytest, and pushed directly to main without coordinating with Sadin. Reverted to canonical manual flow per `project_huntova_release_workflow.md`.
+
+### Tests
+
+Pytest baseline pending re-run (Windows host doesn't have local clone of test fixtures).
+
+
+---
+
 ## v0.1.0a2012 — May 6 2026 — LinkedIn outreach pack: peer-to-peer connection requests in the prospect's working language (HUNTER-LINKEDIN-1)
 
 ### New feature
