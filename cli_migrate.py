@@ -12,6 +12,24 @@ import hashlib
 import sys
 from datetime import datetime, timezone
 
+
+# Default field-size limit (128 KB on most platforms) is too small for
+# realistic Apollo / Clay / Hunter exports — a single `description` or
+# `html_dump` cell on a 50K-row export can exceed it and `csv` raises
+# `_csv.Error: field larger than field limit (131072)` mid-stream,
+# wedging the import after some rows have already been processed. Bump
+# to the platform max so legitimate large fields parse.
+try:
+    csv.field_size_limit(min((1 << 31) - 1, sys.maxsize))
+except (OverflowError, ValueError):
+    # `sys.maxsize` on some 32-bit hosts is too large for the C `long`
+    # csv field-size accepts. Try progressively smaller caps.
+    for _cap in (2_000_000_000, 100_000_000, 10_000_000):
+        try:
+            csv.field_size_limit(_cap); break
+        except (OverflowError, ValueError):
+            continue
+
 # ── color helpers (mirror cli_memory.py shape) ────────────────────────
 
 _TTY = sys.stdout.isatty()
@@ -184,8 +202,41 @@ def _dedup_keys(lead: dict) -> tuple:
 # ── core import driver ───────────────────────────────────────────────
 
 def _open_csv(path: str):
-    # utf-8-sig handles BOM from Excel/Sheets exports.
-    return open(path, "r", encoding="utf-8-sig", newline="")
+    """Open a CSV with encoding fallback.
+
+    Apollo and Clay routinely ship `cp1252` exports (curly quotes,
+    accented EU country names) which crash with `UnicodeDecodeError`
+    mid-stream when opened as utf-8. Try utf-8-sig first (BOM-tolerant
+    UTF-8, the modern norm), fall back to cp1252 if a sniff read
+    fails, then last-resort `errors="replace"` so the import never
+    aborts on a single bad byte.
+    """
+    # Sniff: try utf-8-sig by reading a small chunk.
+    try:
+        with open(path, "rb") as _fh:
+            _peek = _fh.read(4096)
+        _peek.decode("utf-8-sig")
+        return open(path, "r", encoding="utf-8-sig", newline="")
+    except UnicodeDecodeError:
+        pass
+    # Fallback to cp1252 (Excel-on-European-Windows default).
+    try:
+        with open(path, "rb") as _fh:
+            _peek = _fh.read(4096)
+        _peek.decode("cp1252")
+        sys.stderr.write(
+            f"[huntova migrate] {path}: encoding=cp1252 fallback "
+            "(non-UTF-8 chars detected)\n"
+        )
+        return open(path, "r", encoding="cp1252", newline="")
+    except (UnicodeDecodeError, OSError):
+        pass
+    # Last resort: utf-8 with replacement chars so import doesn't hard-stop.
+    sys.stderr.write(
+        f"[huntova migrate] {path}: undecodable bytes -- using "
+        "utf-8 with replacement (some chars may be lost)\n"
+    )
+    return open(path, "r", encoding="utf-8", errors="replace", newline="")
 
 
 def _import(user_id: int, args: argparse.Namespace,

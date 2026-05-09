@@ -27,12 +27,56 @@ _DEFAULT_MIN_INTERVAL_S = 1.0  # 1s between messages
 _SMTP_SEND_TIMES: _deque = _deque(maxlen=10000)
 _SMTP_SEND_LOCK = _threading.Lock()
 
+# Per-recipient send-times. Without this, a single bad address (a
+# spam-trap, a bounced one re-added to a list, etc.) can receive
+# unlimited sends as long as the global hourly cap above isn't hit.
+# One trap-hit is enough to torch IP reputation. Cap at 3 sends per
+# 24h per recipient by default; user can override via the
+# `smtp_per_recipient_24h_cap` setting.
+_DEFAULT_PER_RECIPIENT_24H_CAP = 3
+_PER_RECIPIENT_SEND_TIMES: dict[str, _deque] = {}
+
 
 class SMTPRateLimitedError(RuntimeError):
     """Raised when the per-hour SMTP cap or min-interval gate triggers.
     Callers (cli_sequence, cli outreach send) should persist a "rate-
     limited, retry next window" status on the lead instead of marking
     the row as `errored` (which would imply a real send failure)."""
+
+
+def _check_per_recipient_rate(to: str, settings: dict) -> None:
+    """Raise SMTPRateLimitedError when this recipient has hit the
+    24h per-address cap. The global hourly cap can't see address
+    repetition; one spam-trap that gets re-hit a few times in a row
+    is enough to torch IP reputation. Default 3 sends / 24h matches
+    the "we sent you a thing" + "Day +4 bump" + "Day +9 final"
+    sequence shape and refuses anything beyond that."""
+    addr = (to or "").strip().lower()
+    if not addr:
+        return
+    try:
+        cap = int(settings.get("smtp_per_recipient_24h_cap")
+                  or _DEFAULT_PER_RECIPIENT_24H_CAP)
+    except (TypeError, ValueError):
+        cap = _DEFAULT_PER_RECIPIENT_24H_CAP
+    if cap <= 0:
+        return
+    now = _time.monotonic()
+    with _SMTP_SEND_LOCK:
+        bucket = _PER_RECIPIENT_SEND_TIMES.get(addr)
+        if bucket is None:
+            bucket = _deque(maxlen=cap + 5)
+            _PER_RECIPIENT_SEND_TIMES[addr] = bucket
+        # Drop sends older than 24h.
+        while bucket and (now - bucket[0]) > 86400:
+            bucket.popleft()
+        if len(bucket) >= cap:
+            wait = max(0, 86400 - (now - bucket[0]))
+            raise SMTPRateLimitedError(
+                f"per-recipient cap reached for {addr} "
+                f"({cap}/24h) -- retry in ~{int(wait)}s"
+            )
+        bucket.append(now)
 
 
 def _check_smtp_rate(settings: dict) -> None:
@@ -167,6 +211,12 @@ def _send_email_sync(to: str, subject: str, html_body: str, plain_body: str = ""
     # SMTPRateLimitedError when the cap is hit; callers should
     # persist a "rate-limited" status on affected leads.
     _check_smtp_rate(s)
+    # Per-recipient cap — defends against spam-traps. The global hourly
+    # cap above doesn't notice one bad address being hit repeatedly,
+    # which is exactly what a trap is. Default 3/24h per recipient;
+    # operators with legitimate "respond to my outreach" sequences can
+    # raise via the `smtp_per_recipient_24h_cap` setting.
+    _check_per_recipient_rate(to, s)
     # a289 fix: body size cap. AI runaway / oversized HTML template
     # could produce a multi-megabyte body that the receiving MTA
     # rejects with 552 (sender reputation hit) or that we cram into

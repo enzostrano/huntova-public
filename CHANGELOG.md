@@ -6,6 +6,24 @@ Versioning: `0.1.0aNN` alpha increments. Public install path: `pipx install hunt
 
 ---
 
+## v0.1.0a2034 -- May 9 2026 -- per-recipient SMTP cap + CSV-import robustness
+
+### Bug fixes -- email service
+
+- **Per-recipient cap missing — single bad address could be hit unlimited times** (`email_service.py:_check_per_recipient_rate`). The existing global hourly cap (30/h) couldn't see address repetition; one re-added bounce or one spam-trap could be hit indefinitely as long as the global budget held, and a single trap-hit is enough to torch IP reputation. Added a per-address 24h cap (default 3, override via `smtp_per_recipient_24h_cap` setting). Matches the documented sequence shape (initial + Day +4 + Day +9) so legitimate cadences fit.
+
+### Bug fixes -- CSV migrate
+
+- **Realistic Apollo/Clay/Hunter exports tripped `csv.Error: field larger than field limit`** (`cli_migrate.py`). Default `csv.field_size_limit` is 128 KB; one `description` or `html_dump` cell on a 50K-row export can exceed it and the import wedges mid-stream. Bumped to platform max at module load with progressive fallback for 32-bit hosts.
+- **`_open_csv` was hard-pinned to `utf-8-sig`; cp1252 exports crashed mid-stream** (`cli_migrate.py:_open_csv`). Excel-on-European-Windows ships cp1252 with curly quotes and accented characters; `UnicodeDecodeError` aborted imports after some rows had already been written. Now sniffs UTF-8 first, falls back to cp1252, last-resort uses utf-8 with replacement so import never aborts on a single bad byte.
+
+### Tests
+
+Pytest baseline pending re-run.
+
+
+---
+
 ## v0.1.0a2033 -- May 9 2026 -- Stripe checkout idempotency + partial-refund classification
 
 ### Bug fixes -- payments
