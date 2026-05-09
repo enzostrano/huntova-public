@@ -4035,6 +4035,24 @@ async def api_chat(request: Request, response: Response, user: dict = Depends(re
         "`answer` action and give a substantive, helpful reply (or "
         "`web_search` if you need fresh facts). Reply with EXACTLY ONE "
         "JSON object, no markdown, no fences, no prose around it.\n\n"
+        # Identity guard: when users ask "what model are you" or "are
+        # you Claude/GPT/etc.", the brain should NOT claim a specific
+        # underlying LLM. The provider is BYOK and varies per user
+        # (Anthropic, Gemini, OpenAI, Ollama, LM Studio, etc.); claiming
+        # any one of them is a lie. Names like "anthropic" appear in
+        # the action-example metadata below as PROVIDER ROUTING HINTS
+        # for `spawn_agents` -- they are NOT a statement of which model
+        # is currently answering. If the user asks who/what you are,
+        # answer truthfully: 'Huntova's chat assistant -- the model
+        # behind me is whatever provider the user has configured (BYOK)
+        # and I don't claim to be a specific model.'\n"
+        "IDENTITY: Never claim to be a specific named LLM. The provider "
+        "is BYOK and varies. If asked 'what model are you' or 'are you "
+        "Claude/GPT', answer that you're Huntova's chat assistant and "
+        "the underlying model is whichever provider the user has "
+        "configured -- do not name a specific model unless you can "
+        "read it from LIVE STATE below. Never say you ARE Anthropic / "
+        "Claude / GPT / Gemini.\n\n"
         f"LIVE STATE: {_state}\n"
         f"{_mem_block}"
         f"{_team_block}"
@@ -4189,8 +4207,43 @@ async def api_chat(request: Request, response: Response, user: dict = Depends(re
     else:
         user_content = msg
 
-    messages = [{"role": "system", "content": SYSTEM_PROMPT},
-                {"role": "user", "content": user_content}]
+    # Load conversation history so the chat brain has memory across
+    # turns. Previous version sent only [system, current_user] -- so
+    # the model couldn't see what the user said two messages ago.
+    # That's why the LM Studio chat the user saw kept asking "what
+    # isn't working?" right after the model itself printed an error,
+    # and kept claiming to be Anthropic Claude (which the system
+    # prompt mentions multiple times in action-example metadata) with
+    # no memory of being corrected. Cap at the last 20 turns so the
+    # context window stays bounded under long sessions.
+    _history_messages: list[dict[str, str]] = []
+    if _convo_id is not None:
+        try:
+            _prior = await db.get_chat_messages(user["id"], _convo_id, limit=20)
+            for _r in (_prior or []):
+                _role = (_r.get("role") or "").strip()
+                _content = (_r.get("content") or "").strip()
+                # Skip the row we just persisted for THIS turn -- it's
+                # already in `user_content` below. add_chat_message
+                # writes the user msg before this read, so the most
+                # recent "user" row in _prior is exactly `msg`.
+                if _role == "user" and _content == msg.strip():
+                    continue
+                if _role in ("user", "assistant") and _content:
+                    # Cap each turn at 8K chars so a runaway prior
+                    # answer can't blow the context budget. Keep raw
+                    # text -- prior assistant replies were JSON-shaped
+                    # but that's still legible context for the model.
+                    _history_messages.append({
+                        "role": _role,
+                        "content": _content[:8000],
+                    })
+        except Exception as _hist_err:
+            print(f"[chat] history load failed: {_hist_err}")
+
+    messages = [{"role": "system", "content": SYSTEM_PROMPT}]
+    messages.extend(_history_messages)
+    messages.append({"role": "user", "content": user_content})
     if is_anthropic:
         messages.append({"role": "assistant", "content": "{"})
 

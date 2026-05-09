@@ -6,6 +6,20 @@ Versioning: `0.1.0aNN` alpha increments. Public install path: `pipx install hunt
 
 ---
 
+## v0.1.0a2042 -- May 9 2026 -- chat brain memory + identity guard
+
+### Bug fixes -- chat dispatcher
+
+- **`/api/chat` was sending zero conversation history to the model -- every reply was independent** (`server.py:4192`). The handler persisted the user's message to `chat_messages` via `db.add_chat_message`, but when constructing the messages list for the LLM call it built `[system, current_user]` only. No prior turns were ever loaded, so the brain had effectively zero memory across messages. User-visible symptom: ask "what isn't working?" right after the model itself printed an error, brain says "tell me what you were doing" -- because it never saw the error. The fix loads the last 20 turns from `db.get_chat_messages(user_id, conversation_id)` and injects them between the system prompt and the new user message; each turn capped at 8K chars so context budget stays bounded.
+- **Brain claimed to be 'Anthropic Claude 3.5 Sonnet' even when the user was running Qwen on local LM Studio** (`server.py:4029`). The system prompt's action-example metadata mentioned `"provider":"anthropic"` (as a routing hint for `spawn_agents`) and the prompt body itself was prose-heavy on Claude/Anthropic references; combined with model training that biases toward Claude self-identification, the brain confidently lied about its identity even after correction. Added an explicit IDENTITY guard at the top of the system prompt: never claim to be a specific named LLM, the provider is BYOK and varies, answer truthfully when asked "what model are you".
+
+### Tests
+
+Pytest baseline pending re-run.
+
+
+---
+
 ## v0.1.0a2041 -- May 9 2026 -- AI provider routing + daemon binary fallback
 
 ### Bug fixes -- AI provider selection
