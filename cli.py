@@ -3863,7 +3863,7 @@ Drop this file in ~/.config/huntova/plugins/ and run `huntova plugins`
 to verify it's discovered. Then run `huntova hunt` and watch the
 hooks fire.
 
-See https://github.com/enzostrano/huntova/blob/master/plugins.py for
+See https://github.com/enzostrano/huntova-public/blob/main/plugins.py for
 the full Protocol — every method is optional.
 """
 
