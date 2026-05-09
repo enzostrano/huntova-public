@@ -55,3 +55,19 @@ frontend/node_modules/
 frontend/dist/
 frontend/.vite/
 tests/baselines/
+
+# OS-level junk that shouldn't ride along
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Test / coverage tooling
+.coverage
+.coverage.*
+htmlcov/
+.mypy_cache/
+.ruff_cache/
+
+# IDE / editor
+*.swp
+*.swo
