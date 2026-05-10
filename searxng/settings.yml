@@ -1,0 +1,62 @@
+use_default_settings: true
+
+general:
+  instance_name: "Huntova Search"
+  debug: false
+
+server:
+  secret_key: "huntova-searxng-secret-change-me"
+  bind_address: "0.0.0.0"
+  port: 8080
+  image_proxy: false
+
+search:
+  safe_search: 0
+  autocomplete: ""
+  default_lang: "en"
+  language: "en"
+  formats:
+    - html
+    - json
+
+ui:
+  static_use_hash: true
+  default_theme: simple
+
+outgoing:
+  request_timeout: 10
+  useragent_suffix: ""
+  max_request_timeout: 15
+
+engines:
+  - name: google
+    engine: google
+    shortcut: g
+    disabled: false
+    use_mobile_ui: false
+
+  - name: bing
+    engine: bing
+    shortcut: b
+    disabled: false
+
+  - name: duckduckgo
+    engine: duckduckgo
+    shortcut: ddg
+    disabled: false
+
+  - name: brave
+    engine: brave
+    shortcut: br
+    disabled: false
+
+  - name: startpage
+    engine: startpage
+    shortcut: sp
+    disabled: false
+
+  - name: qwant
+    engine: qwant
+    shortcut: qw
+    disabled: false
+    categories: general

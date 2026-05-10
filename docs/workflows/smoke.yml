@@ -1,0 +1,38 @@
+name: Smoke test (local CLI mode)
+
+on:
+  push:
+    branches: [master, main]
+  pull_request:
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+          python -m pip install -e .
+
+      - name: Run local-mode smoke test
+        env:
+          APP_MODE: local
+          DATABASE_URL: ''
+          HV_GEMINI_KEY: fake-ci-key
+        run: python tools/smoke_test_local.py
+
+      - name: Validate Python files parse
+        run: |
+          python -c "import ast; [ast.parse(open(f).read()) for f in ['server.py','app.py','db.py','runtime.py','cli.py','providers.py','secrets_store.py','policy.py','db_driver.py','auth.py','agent_runner.py','config.py','payments.py','user_context.py','email_service.py']]; print('parse OK')"
+
+      - name: Validate install.sh
+        run: bash -n static/install.sh
